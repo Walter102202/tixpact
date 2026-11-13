@@ -273,7 +273,10 @@ export function createAgent(deps: AgentDeps): Agent {
     /** For a purchase: the currency of its event, as read now (null is NEAR). */
     eventCurrency?: string | null,
   ): Promise<Sent> {
-    const view = callView(call, contractId);
+    // Where the call goes: its own receiver when it names one, else the contract. The policy
+    // judges exactly this receiver and the signer sends exactly there.
+    const receiverId = call.receiverId ?? contractId;
+    const view = callView(call, receiverId);
     const purchase = call.methodName === 'buy_ticket';
     // Only a purchase in NEAR raises exposure, so only it reads the whole ticket list: a claim, a
     // transfer or an expiry must work even when that list cannot be read to the end, and a purchase
@@ -285,7 +288,7 @@ export function createAgent(deps: AgentDeps): Agent {
     const state = purchase
       ? { exposureYocto, ...(eventCurrency === undefined ? {} : { eventCurrency }) }
       : { exposureYocto };
-    const decision = evaluate(policy, state, { receiverId: contractId, call });
+    const decision = evaluate(policy, state, { receiverId, call });
     if (decision.outcome === 'deny') {
       return {
         kind: 'done',
@@ -299,7 +302,7 @@ export function createAgent(deps: AgentDeps): Agent {
 
     let txHash: string;
     try {
-      txHash = await signer.signAndSend(contractId, call);
+      txHash = await signer.signAndSend(receiverId, call);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       const hash = error instanceof SendError ? error.txHash : null;

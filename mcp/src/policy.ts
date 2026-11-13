@@ -51,6 +51,7 @@ export interface Intent {
 }
 
 export type DenyReason =
+  | 'receiver_mismatch'
   | 'contract_not_allowed'
   | 'method_not_allowed'
   | 'gas_above_table'
@@ -94,7 +95,8 @@ export function exposureOf(tickets: readonly TicketView[]): string {
 }
 
 /**
- * Decides whether the agent may sign `intent`. Order: the contract, the method, the gas, then the
+ * Decides whether the agent may sign `intent`. Order: the call's own receiver (when it names one)
+ * against where it would be sent, the contract, the method, the gas, then the
  * deposit (only `buy_ticket` may attach more than 1 yoctoNEAR), then for a purchase the event's
  * currency (NEAR only: the caps are in NEAR), the per-ticket cap and the exposure cap. A malformed
  * amount, or a purchase whose currency or exposure was not read, throws, so nothing is signed.
@@ -107,6 +109,13 @@ export function evaluate(policy: Policy, state: AgentState, intent: Intent): Dec
     message,
   });
 
+  // A call that names its own receiver (a token call) is signed only where it says it goes.
+  if (call.receiverId !== undefined && call.receiverId !== receiverId) {
+    return deny(
+      'receiver_mismatch',
+      `${call.methodName} is built for ${call.receiverId} but would be sent to ${receiverId}`,
+    );
+  }
   if (receiverId !== policy.contractId) {
     return deny(
       'contract_not_allowed',
