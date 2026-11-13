@@ -1,6 +1,6 @@
 # Toolchain
 
-The exact, verified commands for building and testing this repository. Everything here was run on the development machine (Windows 11 with WSL2 Ubuntu 24.04) on the date shown in each section. A judge on Linux or macOS only needs "Run everything" from the README; this file is for people working on the code.
+The exact, verified commands for building and testing this repository. Everything here was run on the development machine (Windows 11 with WSL2 Ubuntu 24.04) on the date shown in each section. A judge on Linux or macOS only needs "Try it" and "Setup" from the README; this file is for people working on the code.
 
 ## TypeScript workspace (verified 2026-11-12)
 

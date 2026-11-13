@@ -50,6 +50,11 @@ jobs:
 
       - run: bash scripts/gate.sh contract
 
+      # A NEAR account's code hash is the SHA-256 of its wasm. Printed so that anyone can compare
+      # what this runner built with a deployment (scripts/verify-deployment.mjs prints it in base58).
+      - name: Print the hash of the wasm this runner built
+        run: sha256sum target/near/ticket_escrow/ticket_escrow.wasm
+
   web:
     name: web (lint, typecheck, test, build)
     runs-on: ubuntu-latest

@@ -1,8 +1,10 @@
 # Ticket Escrow on NEAR
 
-Event tickets whose price stays reserved in a NEAR contract until a verifier agreed in advance confirms the event took place. If the event is cancelled, or the deadline passes and nobody confirmed it, whoever holds the ticket takes the money back without needing the organizer, the ticketing site or us.
+Event tickets whose price stays reserved in a NEAR contract until a verifier agreed in advance confirms the event took place; only then can the organizer collect it. If the event is cancelled, or the deadline passes and nobody confirmed it, whoever holds the ticket takes the money back without needing the organizer, the ticketing site or us. Each ticket is an NFT, so the refund right travels with it.
 
-Built at NEAR HACKATHON 2026. It runs on **testnet**, it is **not audited**, and it must not hold real money.
+Why NEAR: the verifier is an account name a buyer can read before paying, the contract's keys can be deleted so that nobody can change it afterwards, and fees are low enough for each holder to claim their own refund ([more](#what-near-does-here)).
+
+Built at NEAR HACKATHON 2026. It runs on **testnet**, it is **not audited**, and it must not hold real money. The web app carries a working name, TixPact.
 
 **Status on 2026-11-13.** The contract named below is the development deployment. It still has one access key, and the proof page and `scripts/verify-deployment.mjs` say so. The final deployment, with zero keys, replaces it before the submission. Every contract call here was signed from scripts and the command line; the web app reads this contract, and signing from a browser wallet has not been walked through yet.
 
@@ -40,14 +42,14 @@ The law does not fill the gap by itself. When a UK ticketing company went under,
 
 Each step says what to do and what you should see.
 
-1. **Open the web app.** With Node 22 and pnpm:
+1. **Open the web app.** With Node 22 and pnpm 10 (install lines in [Setup](#setup)):
 
    ```bash
    pnpm install --frozen-lockfile
    VITE_CONTRACT_ID=te-d4-escrow.testnet pnpm --filter @ticket-escrow/web dev
    ```
 
-   Open `http://localhost:5173`. You should see the events read from the contract above ("Jazz night", "Opening night", "Direct calls"). Open one: the page shows the verifier's account, the deadline and where the money is. Open `/tickets/1-1`: the history shows the purchase by Ana, the transfer to Luis and the refund to Luis. Open `/proof`: the code hash, the access keys and the balance, read from the chain.
+   Open `http://localhost:5173`. You should see the events read from the contract above: at least "Jazz night", "Opening night" and "Direct calls" (every run of step 5 adds one). Open one: the page shows the verifier's account, the deadline and how much is reserved in the contract. Open `/tickets/1-1`: where the money went, and the history with the purchase by Ana, the transfer to Luis and the refund to Luis. Open `/proof`: the code hash, the access keys and the balance, read from the chain.
 2. **Read the proof.** Open [`docs/proof.md`](docs/proof.md). Each row is one step of two stories played on testnet (an organizer who disappears; an event that is confirmed), with the transaction link and the observed result. Open any link in the explorer and compare.
 3. **Check the deployment yourself.** With Node 22 and pnpm:
 
@@ -63,7 +65,16 @@ Each step says what to do and what you should see.
    bash scripts/gate.sh
    ```
 
-   You should see the web checks, then the contract tests listed by name (`t01_purchase_reserves_exact_price ... ok`, and so on), then `== gate passed: all ==`. The contract tests start a local NEAR node, deploy the contract and move the clock past deadlines; the first run downloads the node and takes a few minutes.
+   You should see the web checks, then the contract tests listed by name (`t01_purchase_reserves_exact_price ... ok`, and so on), then `== gate passed: all ==`. The contract tests start a local NEAR node, deploy the contract and move the clock past deadlines. The first run compiles everything and downloads the node: about ten minutes.
+
+   The gate leaves the contract it built in `target/near/`. Compare it with the deployed one:
+
+   ```bash
+   node scripts/verify-deployment.mjs te-d4-escrow.testnet --allow-keys \
+     --wasm target/near/ticket_escrow/ticket_escrow.wasm
+   ```
+
+   You should see a `Local wasm` line with the hash of your build next to the `Code hash` read from the chain. If they differ, the script ends with `NOT VERIFIED`; see limit 7 for why another machine can differ.
 5. **Use the contract without our website.** With the NEAR CLI and four testnet accounts ([details](#if-the-website-is-down)):
 
    ```bash
@@ -71,7 +82,7 @@ Each step says what to do and what you should see.
      bash scripts/direct-calls.sh
    ```
 
-   You should see seven numbered steps, each with a transaction link, ending in `claim_refund = true` and `Done`.
+   You should see seven numbered steps, five of them with a transaction link. Step 5 waits for the deadline on the chain's clock, so the whole run takes about three minutes. The last lines are `ok: ticket = Refunded` and `Done: the buyer got 0.5 NEAR back with the organizer and the website out of the picture.`
 6. **Let an AI agent read the contract.** With Node 22 and pnpm:
 
    ```bash
@@ -158,7 +169,7 @@ The full list is in the [threat model](docs/threat-model.md#limits).
 
 ```text
 contract/          Rust contract (near-sdk 5.30.1): events, tickets, per-event ledger, settlement
-contract/tests/    Sandbox tests t01...t24 against a local node
+contract/tests/    Sandbox tests t01...t24 against a local node (t20 and t23 are the two scripts: direct-calls.sh, verify-deployment.mjs)
 fixtures/          Hostile test contracts: a holder that deletes itself, a ticket receiver that misbehaves in several ways
 packages/client/   TypeScript: typed views and calls, transaction tracking, the words shown to people
 web/               React app (Vite): events, tickets, transfers, claims, an organizer and verifier desk, the proof page
@@ -185,7 +196,9 @@ curl -sSfL -o cargo-near.tar.gz \
 echo "94008b827a457750257eced4b571c33736062cc3bd1ffda3e7af70e2bc9a4073  cargo-near.tar.gz" | sha256sum --check --strict
 tar -xzf cargo-near.tar.gz -C "$HOME/.cargo/bin" --strip-components=1 cargo-near-x86_64-unknown-linux-gnu/cargo-near
 
-# Node 22 and pnpm 10
+# Node 22 (22.22.2 or later is what near-api-js asks for) and pnpm 10. corepack ships with Node.
+# If "corepack enable" answers EACCES because Node is installed system-wide, give it a directory
+# of yours that is on PATH: corepack enable --install-directory "$HOME/.local/bin"
 corepack enable && pnpm install --frozen-lockfile
 
 bash scripts/gate.sh          # everything
