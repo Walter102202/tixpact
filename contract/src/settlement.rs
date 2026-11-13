@@ -32,6 +32,20 @@ pub const GAS_FOR_CALLBACK: Gas = if cfg!(feature = "fault-injection") {
     Gas::from_tgas(15)
 };
 
+/// Share of unused gas the settlement callbacks take: the default, the same as a token's
+/// `ft_transfer`. So a callback always has `GAS_FOR_CALLBACK` plus half of what the claimant adds
+/// to a token claim (all of it on a NEAR payment; what it does not burn is refunded). A token buys
+/// a longer answer only with its own gas, about 14 KB per Tgas, and copying it costs the callback
+/// about 0.054 Tgas per Tgas the token had at the published register fee: 15 + U/2 >= 2.52 +
+/// 0.054 x (20 + U/2) for any unused gas U, so no answer can run the callback out of gas
+/// (`docs/gas.md`). The `fault-injection` build keeps 0, so its callback still runs out of gas
+/// after its transfer.
+pub(crate) const CALLBACK_GAS_WEIGHT: u64 = if cfg!(feature = "fault-injection") {
+    0
+} else {
+    1
+};
+
 /// Least prepaid gas `claim_refund` and `claim_payout` accept: the callback's static gas plus five
 /// times the most the claim itself burns (3.28 Tgas measured, for a claim that expires its event
 /// first, `docs/gas.md`), rounded up to the next multiple of 10 Tgas. Below it the call fails as a
@@ -39,7 +53,8 @@ pub const GAS_FOR_CALLBACK: Gas = if cfg!(feature = "fault-injection") {
 pub const GAS_CLAIM_MIN: Gas = Gas::from_tgas(40);
 
 /// The least gas the `ft_transfer` that pays a refund or a payout of an event priced in a token
-/// gets. It also gets the default share of the claimant's unused gas, on purpose: the contract
+/// gets. It also gets the default share of the claimant's unused gas (half, beside the callback's
+/// half, `CALLBACK_GAS_WEIGHT`), on purpose: the contract
 /// cannot be upgraded, so if a token's `ft_transfer` ever needs more, attaching more gas to the
 /// claim is the only remedy. The test token's worst `ft_transfer` burns 1.73 Tgas; five times that,
 /// rounded up to 5 Tgas, is 10 Tgas, and 20 Tgas leaves room for a real token doing more work
@@ -245,7 +260,7 @@ impl Contract {
 
         let callback = Self::ext(env::current_account_id())
             .with_static_gas(GAS_FOR_CALLBACK)
-            .with_unused_gas_weight(0)
+            .with_unused_gas_weight(CALLBACK_GAS_WEIGHT)
             .on_refund_result(operation_id);
         Self::transfer_then(currency, holder, amount, callback)
     }
@@ -312,7 +327,7 @@ impl Contract {
 
         let callback = Self::ext(env::current_account_id())
             .with_static_gas(GAS_FOR_CALLBACK)
-            .with_unused_gas_weight(0)
+            .with_unused_gas_weight(CALLBACK_GAS_WEIGHT)
             .on_payout_result(operation_id);
         Self::transfer_then(currency, caller, amount, callback)
     }
