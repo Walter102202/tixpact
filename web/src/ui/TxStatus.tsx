@@ -52,6 +52,7 @@ export function TxStatus({
   failureTitle = 'The transaction did not complete.',
   failureNote,
   failureDetail,
+  failureBody,
   succeeded = (result) => result.ok,
   success,
 }: {
@@ -61,6 +62,12 @@ export function TxStatus({
   failureNote?: string;
   /** Extra sentences for a particular failure. */
   failureDetail?: (result: TxResult, signerId: string) => ReactNode;
+  /**
+   * Replaces the failed step and its message, for a transaction whose receipts the generic words
+   * would misname (a purchase in a token runs on the token first, then on this contract). When it
+   * returns `undefined`, the generic words stay.
+   */
+  failureBody?: (result: TxResult, signerId: string) => ReactNode;
   /** What counts as success; a claim also needs the contract to say money moved (`moneyMoved`). */
   succeeded?: (result: TxResult) => boolean;
   success: (result: TxResult, signerId: string) => ReactNode;
@@ -83,6 +90,7 @@ export function TxStatus({
         failureTitle={failureTitle}
         failureNote={failureNote}
         failureDetail={failureDetail}
+        failureBody={failureBody}
         succeeded={succeeded}
         success={success}
       />
@@ -97,6 +105,7 @@ function TxContent({
   failureTitle,
   failureNote,
   failureDetail,
+  failureBody,
   succeeded,
   success,
 }: {
@@ -106,6 +115,7 @@ function TxContent({
   failureTitle: string;
   failureNote: string | undefined;
   failureDetail: ((result: TxResult, signerId: string) => ReactNode) | undefined;
+  failureBody: ((result: TxResult, signerId: string) => ReactNode) | undefined;
   succeeded: (result: TxResult) => boolean;
   success: (result: TxResult, signerId: string) => ReactNode;
 }) {
@@ -152,15 +162,18 @@ function TxContent({
       const { result, signerId, reread } = view;
       if (!succeeded(result)) {
         const note = rereadNote(reread, failureNote);
+        const body = failureBody?.(result, signerId);
         return (
           <div className="tx tx-failed" role="alert">
             <strong>{failureTitle}</strong>
-            {result.failedReceipt && (
-              <>
-                <p>Failed step: {failedStepText(result.failedReceipt)}.</p>
-                <p>{result.failedReceipt.error.message}</p>
-              </>
-            )}
+            {body !== undefined
+              ? body
+              : result.failedReceipt && (
+                  <>
+                    <p>Failed step: {failedStepText(result.failedReceipt)}.</p>
+                    <p>{result.failedReceipt.error.message}</p>
+                  </>
+                )}
             {failureDetail?.(result, signerId)}
             {note && <p className="muted">{note}</p>}
             <TxLink txHash={view.txHash} />

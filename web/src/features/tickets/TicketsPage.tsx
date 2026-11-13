@@ -1,16 +1,17 @@
-import { CLAIM_LABELS, type EventView, type TicketView } from '@ticket-escrow/client';
+import { CLAIM_LABELS, type EventView, type TicketView, type Unit } from '@ticket-escrow/client';
+import { money, unitFor } from '../../lib/money';
 import { useWallet } from '../../lib/near/useWallet';
 import { readAllPages } from '../../lib/pages';
 import { Link } from '../../lib/router';
 import { useLoad } from '../../lib/useLoad';
 import { useServices } from '../../services';
 import { LoadState } from '../../ui/LoadState';
-import { near } from '../events/eventCopy';
 import { claimWord } from './ticketCopy';
 
 interface HeldTicket {
   ticket: TicketView;
   event: EventView | null;
+  unit: Unit;
 }
 
 export function TicketsPage() {
@@ -42,7 +43,13 @@ function HeldTickets({ accountId }: { accountId: string }) {
     const events = new Map(
       await Promise.all(ids.map(async (id) => [id, await reader.getEvent(id)] as const)),
     );
-    return tickets.map((ticket) => ({ ticket, event: events.get(ticket.event_id) ?? null }));
+    return Promise.all(
+      tickets.map(async (ticket) => ({
+        ticket,
+        event: events.get(ticket.event_id) ?? null,
+        unit: await unitFor(reader, ticket.currency),
+      })),
+    );
   });
 
   return (
@@ -52,7 +59,7 @@ function HeldTickets({ accountId }: { accountId: string }) {
           <p className="empty">{accountId} holds no tickets.</p>
         ) : (
           <ul aria-label="Your tickets" className="ticket-list">
-            {held.map(({ ticket, event }) => (
+            {held.map(({ ticket, event, unit }) => (
               <li key={ticket.token_id} className="ticket-row">
                 <div>
                   <h2 className="ticket-row-title">
@@ -67,7 +74,7 @@ function HeldTickets({ accountId }: { accountId: string }) {
                   </div>
                   <div>
                     <dt>Price paid</dt>
-                    <dd>{near(ticket.principal)}</dd>
+                    <dd>{money(ticket.principal, unit)}</dd>
                   </div>
                   <div>
                     <dt>State</dt>

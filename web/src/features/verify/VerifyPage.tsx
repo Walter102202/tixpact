@@ -5,8 +5,10 @@ import {
   type EventView,
   formatDateTime,
   PHASE_LABELS,
+  type Unit,
 } from '@ticket-escrow/client';
-import { type ReactNode, useEffect, useId, useState } from 'react';
+import { type ReactNode, useId, useState } from 'react';
+import { moneyExact, unitFor } from '../../lib/money';
 import { useTx } from '../../lib/near/useTx';
 import { useWallet } from '../../lib/near/useWallet';
 import { Link } from '../../lib/router';
@@ -14,14 +16,15 @@ import { tooLong } from '../../lib/text';
 import { useLoad } from '../../lib/useLoad';
 import { useServices } from '../../services';
 import { AccountLink } from '../../ui/AccountLink';
+import { CurrencyFact } from '../../ui/CurrencyFact';
 import { LoadState } from '../../ui/LoadState';
 import { TxStatus } from '../../ui/TxStatus';
-import { nearExact } from '../events/eventCopy';
 import { type VerifierAction, verifierBlockers } from './verifierActions';
 
 interface VerifyData {
   event: EventView;
   config: Config;
+  unit: Unit;
 }
 
 export function VerifyPage({ id }: { id: string }) {
@@ -31,7 +34,7 @@ export function VerifyPage({ id }: { id: string }) {
   async function read(): Promise<VerifyData | null> {
     if (eventId === null) return null;
     const [event, config] = await Promise.all([reader.getEvent(eventId), reader.getConfig()]);
-    return event ? { event, config } : null;
+    return event ? { event, config, unit: await unitFor(reader, event.currency) } : null;
   }
 
   const load = useLoad(`verify:${id}`, read);
@@ -80,7 +83,7 @@ function VerifyDetails({
   const { timeZone } = useServices();
   const { accountId, signIn } = useWallet();
   const tx = useTx();
-  const { event, config } = data;
+  const { event, config, unit } = data;
   const time = (ms: number) => formatDateTime(ms, timeZone);
   const [evidence, setEvidence] = useState('');
   const [reason, setReason] = useState('');
@@ -88,8 +91,14 @@ function VerifyDetails({
   const [pending, setPending] = useState<Pending | null>(null);
   const [sent, setSent] = useState<VerifierAction | null>(null);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a change of account closes the box.
-  useEffect(() => setPending(null), [accountId]);
+  // A change of account closes the box, so switching back does not reopen it. Adjusted during
+  // render, not in an effect: a mount effect ran after the first paint and could close a box
+  // opened by a click in between.
+  const [boxAccount, setBoxAccount] = useState(accountId);
+  if (boxAccount !== accountId) {
+    setBoxAccount(accountId);
+    setPending(null);
+  }
 
   const blockers = verifierBlockers(event, accountId, time);
   const succeeded = tx.view.kind === 'done' && tx.view.result.ok;
@@ -169,8 +178,10 @@ function VerifyDetails({
             <dt>Confirmation deadline</dt>
             <dd>{time(event.resolution_deadline_ms)}</dd>
             <dt>Price</dt>
-            {/* Exact: the verifier accepts the hash of this price, to the last yoctoNEAR. */}
-            <dd>{nearExact(event.price)}</dd>
+            {/* Exact: the verifier accepts the hash of this price, to the last smallest unit. */}
+            <dd>{moneyExact(event.price, unit)}</dd>
+            {/* The hash covers the currency too. */}
+            <CurrencyFact currency={event.currency} unit={unit} />
             <dt>Capacity</dt>
             <dd>{event.capacity} tickets</dd>
             <dt>Terms hash</dt>

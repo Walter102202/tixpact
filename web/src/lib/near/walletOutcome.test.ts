@@ -1,6 +1,41 @@
 import { actions, parseNear } from '@ticket-escrow/client';
 import { describe, expect, it } from 'vitest';
-import { toConnectorAction, txHashFromOutcome } from './walletOutcome';
+import { toConnectorAction, transactionFor, txHashFromOutcome } from './walletOutcome';
+
+describe('transactionFor', () => {
+  it('sends a call on the escrow to the escrow contract', () => {
+    const tx = transactionFor(actions.claimRefund('1-3'), 'luis.testnet', 'ticket-escrow.testnet');
+    expect(tx.signerId).toBe('luis.testnet');
+    expect(tx.receiverId).toBe('ticket-escrow.testnet');
+    expect(tx.actions).toEqual([toConnectorAction(actions.claimRefund('1-3'))]);
+  });
+
+  it('sends a purchase in a token to the token, with the escrow as the transfer receiver', () => {
+    const call = actions.buyTicketWithToken('ticket-escrow.testnet', {
+      event_id: 10,
+      price: '10000000',
+      currency: 'tusd.testnet',
+    });
+    const tx = transactionFor(call, 'luis.testnet', 'ticket-escrow.testnet');
+    expect(tx.receiverId).toBe('tusd.testnet');
+    expect(tx.actions).toEqual([
+      {
+        type: 'FunctionCall',
+        params: {
+          methodName: 'ft_transfer_call',
+          args: {
+            receiver_id: 'ticket-escrow.testnet',
+            amount: '10000000',
+            memo: null,
+            msg: '{"event_id":10}',
+          },
+          gas: '100000000000000',
+          deposit: '1',
+        },
+      },
+    ]);
+  });
+});
 
 describe('toConnectorAction', () => {
   it('turns a contract call into near-connect FunctionCall action, amounts as given', () => {

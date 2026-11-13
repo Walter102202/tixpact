@@ -10,8 +10,10 @@ import {
   type TicketView,
   TokenIdSchema,
   type TxResult,
+  type Unit,
 } from '@ticket-escrow/client';
 import { useState } from 'react';
+import { money, unitFor } from '../../lib/money';
 import { useTx } from '../../lib/near/useTx';
 import { useWallet } from '../../lib/near/useWallet';
 import { Link, navigate } from '../../lib/router';
@@ -20,9 +22,10 @@ import { useServices } from '../../services';
 import { AccountLink } from '../../ui/AccountLink';
 import { LoadState } from '../../ui/LoadState';
 import { TxStatus } from '../../ui/TxStatus';
-import { near, outcomeLine } from '../events/eventCopy';
+import { outcomeLine } from '../events/eventCopy';
 import { EntryPassOffer } from '../pass/EntryPassOffer';
 import { passPagePath } from '../pass/passFlow';
+import { refusedByToken, SettlementRefused } from '../tokens/SettlementRefused';
 import { ClaimPanel } from './ClaimPanel';
 import { TransferPanel } from './TransferPanel';
 import { claimWord, historyText } from './ticketCopy';
@@ -33,6 +36,8 @@ export interface TicketData {
   history: TicketHistory | null;
   /** The settlement in flight for this ticket, when there is one. */
   operation: OperationView | null;
+  /** The unit of the event's currency: the ticket's amounts are in it. */
+  unit: Unit;
 }
 
 export interface Reread {
@@ -48,15 +53,16 @@ export function TicketPage({ id }: { id: string }) {
     if (tokenId === null) return null;
     const ticket = await reader.getTicket(tokenId);
     if (ticket === null) return null;
-    const [event, history, operation] = await Promise.all([
+    const [event, history, operation, unit] = await Promise.all([
       reader.getEvent(ticket.event_id),
       reader.getTicketHistory(tokenId),
       ticket.pending_operation_id === null
         ? Promise.resolve(null)
         : reader.getOperation(ticket.pending_operation_id),
+      unitFor(reader, ticket.currency),
     ]);
     if (event === null) throw new Error(`event ${ticket.event_id} of ticket ${tokenId} is missing`);
-    return { ticket, event, history, operation };
+    return { ticket, event, history, operation, unit };
   }
 
   const load = useLoad(`ticket:${id}`, read);
@@ -102,7 +108,7 @@ function TicketDetails({ data, reread, apply }: { data: TicketData } & Reread) {
   const claimTx = useTx();
   const transferTx = useTx();
   const [sentTo, setSentTo] = useState<string | null>(null);
-  const { ticket, event, history } = data;
+  const { ticket, event, history, unit } = data;
   const time = (ms: number) => formatDateTime(ms, timeZone);
 
   const isHolder = accountId !== null && accountId === ticket.owner_id;
@@ -135,9 +141,9 @@ function TicketDetails({ data, reread, apply }: { data: TicketData } & Reread) {
               <AccountLink id={ticket.owner_id} />
             </dd>
             <dt>Price paid</dt>
-            <dd>{near(ticket.principal)}</dd>
+            <dd>{money(ticket.principal, unit)}</dd>
             <dt>{moneyFact(ticket)}</dt>
-            <dd>{near(ticket.principal)}</dd>
+            <dd>{money(ticket.principal, unit)}</dd>
             <dt>Confirmation deadline</dt>
             <dd>{time(event.resolution_deadline_ms)}</dd>
           </dl>
@@ -160,6 +166,7 @@ function TicketDetails({ data, reread, apply }: { data: TicketData } & Reread) {
 
           <ClaimPanel
             ticket={ticket}
+            unit={unit}
             claimable={claimable && !paid}
             isHolder={isHolder}
             signedIn={accountId !== null}
@@ -172,10 +179,25 @@ function TicketDetails({ data, reread, apply }: { data: TicketData } & Reread) {
             failureTitle="The payment did not complete."
             failureNote="The state above was read again from the contract."
             failureDetail={callbackFailure}
+            failureBody={(result, signerId) => {
+              const refused = refusedByToken(result, ticket.currency);
+              // A refusal by the token: plain words, not "Failed step: the transfer to tusd…".
+              if (refused === null) return undefined;
+              return (
+                <SettlementRefused
+                  failed={refused}
+                  payee={signerId}
+                  unit={unit}
+                  // As the contract was read again: its callback gives the right back (R7).
+                  restored={claimable ? 'The claim is back on the ticket.' : null}
+                  retry="claim"
+                />
+              );
+            }}
             succeeded={moneyMoved}
             success={(_, signerId) => (
               <p>
-                Refunded {near(ticket.principal)} to {signerId}.
+                Refunded {money(ticket.principal, unit)} to {signerId}.
               </p>
             )}
           />
@@ -233,8 +255,8 @@ function callbackFailure(result: TxResult, signerId: string) {
 }
 
 function StateText({ data, time }: { data: TicketData; time: (ms: number) => string }) {
-  const { ticket, event, history, operation } = data;
-  const amount = near(ticket.principal);
+  const { ticket, event, history, operation, unit } = data;
+  const amount = money(ticket.principal, unit);
 
   if (canClaimRefund(ticket, event)) {
     return (
@@ -264,7 +286,7 @@ function StateText({ data, time }: { data: TicketData; time: (ms: number) => str
       return <p>{amount} is reserved for this ticket.</p>;
     case 'RefundPending': {
       const recipient = operation?.recipient_id ?? ticket.owner_id;
-      const amount = near(operation?.amount ?? ticket.principal);
+      const amount = money(operation?.amount ?? ticket.principal, unit);
       return (
         <>
           <p>

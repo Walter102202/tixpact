@@ -6,7 +6,8 @@
 // It starts the built server as a child process, exactly as an MCP client does, lists the tools and
 // calls list_events and verify_contract. With AGENT_PRIVATE_KEY (plus AGENT_ACCOUNT_ID and both
 // caps) it also buys one ticket within the caps and prints the transaction link: the first event
-// on sale at or below the per-ticket cap, or SMOKE_EVENT_ID. Exits non-zero on any failure.
+// on sale at or below the per-ticket cap, or SMOKE_EVENT_ID. It then signs the entry pass of that
+// ticket and checks it against the chain as the door does. Exits non-zero on any failure.
 
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -15,7 +16,9 @@ import {
   getDefaultEnvironment,
   StdioClientTransport,
 } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { checkPass, createPassChain, createReader, createRpc } from '@ticket-escrow/client';
 
+const DEFAULT_RPC_URLS = 'https://test.rpc.fastnear.com,https://near-testnet.drpc.org';
 const EXPECTED_TOOLS = 11;
 const PASSED_ON = [
   'NEAR_NETWORK',
@@ -83,6 +86,25 @@ try {
     const bought = await tool('buy_ticket', { event_id: eventId });
     if (bought.status !== 'succeeded') throw new Error(`buy_ticket ended ${bought.status}`);
     console.log(`\nBought ticket ${bought.value}: ${bought.explorer_url}`);
+
+    // The agent shows the ticket at the door: it signs a pass (no transaction), and the pass is
+    // checked against the chain exactly as the door page and scripts/pass.mjs check it.
+    const shown = await tool('show_entry_pass', { token_id: bought.value });
+    const rpc = createRpc((env.RPC_URLS ?? DEFAULT_RPC_URLS).split(','));
+    const chain = createPassChain(createReader({ contractId: env.CONTRACT_ID, rpc }), rpc);
+    // The purchase is final, but the endpoint that answers may still be a block behind it.
+    let verdict = await checkPass(shown.pass, env.CONTRACT_ID, chain, Date.now());
+    for (let again = 0; again < 5 && !verdict.admitted; again += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      verdict = await checkPass(shown.pass, env.CONTRACT_ID, chain, Date.now());
+    }
+    const { admitted, checks } = verdict;
+    console.log('\nThe door checks that pass:');
+    for (const check of checks) {
+      console.log(`${check.ok ? 'ok' : 'NO'}  ${check.id.padEnd(9)}  ${check.detail}`);
+    }
+    console.log(admitted ? 'ADMIT' : 'DO NOT ADMIT');
+    if (!admitted) throw new Error('the pass the agent signed was not admitted');
   }
   console.log('\nSmoke passed.');
 } catch (error) {

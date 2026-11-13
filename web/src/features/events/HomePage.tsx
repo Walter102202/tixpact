@@ -1,5 +1,12 @@
-import { type EventView, formatDateTime, PHASE_LABELS, PROMISE_TEXT } from '@ticket-escrow/client';
+import {
+  type EventView,
+  formatDateTime,
+  PHASE_LABELS,
+  PROMISE_TEXT,
+  type Unit,
+} from '@ticket-escrow/client';
 import { useId } from 'react';
+import { money, unitFor } from '../../lib/money';
 import { readAllPages } from '../../lib/pages';
 import { Link } from '../../lib/router';
 import { useLoad } from '../../lib/useLoad';
@@ -9,7 +16,6 @@ import { AgentTerminal } from '../landing/AgentTerminal';
 import { Problem } from '../landing/Problem';
 import { Replay } from '../landing/Replay';
 import { Reveal, type RevealDelay } from '../landing/Reveal';
-import { near } from './eventCopy';
 
 const STEPS = [
   {
@@ -28,9 +34,12 @@ const STEPS = [
 
 export function HomePage() {
   const { reader, timeZone } = useServices();
-  const events = useLoad('events', () =>
-    readAllPages((from, limit) => reader.listEvents(from, limit)),
-  );
+  const events = useLoad('events', async () => {
+    const list = await readAllPages((from, limit) => reader.listEvents(from, limit));
+    return Promise.all(
+      list.map(async (event) => ({ event, unit: await unitFor(reader, event.currency) })),
+    );
+  });
   return (
     <>
       <section className="hero">
@@ -93,8 +102,8 @@ export function HomePage() {
               <p className="empty">No events yet.</p>
             ) : (
               <ul aria-labelledby="events-heading" className="event-list">
-                {list.map((event) => (
-                  <EventRow key={event.event_id} event={event} timeZone={timeZone} />
+                {list.map(({ event, unit }) => (
+                  <EventRow key={event.event_id} event={event} unit={unit} timeZone={timeZone} />
                 ))}
               </ul>
             )
@@ -105,7 +114,7 @@ export function HomePage() {
   );
 }
 
-function EventRow({ event, timeZone }: { event: EventView; timeZone: string }) {
+function EventRow({ event, unit, timeZone }: { event: EventView; unit: Unit; timeZone: string }) {
   return (
     <li className="event-row">
       <div className="event-row-main">
@@ -119,7 +128,7 @@ function EventRow({ event, timeZone }: { event: EventView; timeZone: string }) {
       <dl className="event-row-facts">
         <div>
           <dt>Price</dt>
-          <dd>{near(event.price)}</dd>
+          <dd>{money(event.price, unit)}</dd>
         </div>
         <div>
           <dt>Verifier</dt>

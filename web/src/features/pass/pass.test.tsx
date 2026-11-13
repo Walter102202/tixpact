@@ -7,6 +7,7 @@ import {
   encodePass,
   FIXTURE_CONTRACT_ID,
   FIXTURES,
+  FIXTURES_WITH_TOKENS,
   type FixtureData,
   nep413Hash,
   type PassChain,
@@ -72,6 +73,19 @@ const verdict = () =>
       selector: '.verdict-word',
     },
   );
+
+/**
+ * Waits, on the real clock, until the pass page's countdown has started its (fake) interval. The
+ * timer shows on the render that loads the ticket, but the effect that starts the interval runs a
+ * moment later; on a loaded machine the test reached `advanceTimersByTime` first, ticked nothing,
+ * and read "5:00" (seen with no interval registered when the timer appeared).
+ */
+async function countdownRunning() {
+  for (let attempt = 0; attempt < 200 && vi.getTimerCount() === 0; attempt += 1) {
+    await act(() => new Promise((resolve) => setTimeout(resolve, 5)));
+  }
+  expect(vi.getTimerCount()).toBeGreaterThan(0);
+}
 
 /** Live mode (not demo data), signed out: how an attendant's phone opens the door page. */
 const live = (overrides: Parameters<typeof testServices>[0] = {}) =>
@@ -196,6 +210,7 @@ describe('the pass page', () => {
     const first = demoPass();
     renderAt(`/tickets/1-3/pass#p=${encodePass(first)}`, services);
     expect((await screen.findByRole('timer')).textContent).toBe('Admits for 5:00');
+    await countdownRunning();
 
     act(() => vi.advanceTimersByTime(60_000));
     expect(screen.getByRole('timer').textContent).toBe('Admits for 4:00');
@@ -270,6 +285,40 @@ describe('the pass page', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Show entry pass' }));
     expect((await screen.findByRole('timer')).textContent).toBe('Admits for 5:00');
     expect(decodePass(window.location.hash)?.ticket).toBe('1-3');
+  });
+});
+
+describe('a ticket of an event priced in tUSD', () => {
+  // The pass names a ticket and an account; the currency plays no part in it.
+  const withTokens = () => createFixtureReader(FIXTURES_WITH_TOKENS);
+
+  it('gets its entry pass from the ticket page, as a NEAR ticket does', async () => {
+    const services = servicesAs(LUIS, { reader: withTokens() });
+    await openTicket('10-1', services);
+    fireEvent.click(screen.getByRole('button', { name: 'Show entry pass' }));
+    await screen.findByRole('heading', { level: 1, name: 'Entry pass' });
+    expect(window.location.pathname).toBe('/tickets/10-1/pass');
+    expect(decodePass(window.location.hash)).toMatchObject({ ticket: '10-1', account: LUIS });
+    expect(
+      screen.getByRole('img', { name: 'QR code of the entry pass for ticket 10-1' }),
+    ).toBeTruthy();
+    expect(screen.getByRole('timer').textContent).toBe('Admits for 5:00');
+  });
+
+  it('shows its pass at /tickets/10-1/pass, and the door admits it', async () => {
+    const pass = demoPass(LUIS, '10-1');
+    renderAt(
+      `/tickets/10-1/pass#p=${encodePass(pass)}`,
+      servicesAs(LUIS, { reader: withTokens() }),
+    );
+    expect((await screen.findByRole('timer')).textContent).toBe('Admits for 5:00');
+    expect(
+      screen.getByRole('img', { name: 'QR code of the entry pass for ticket 10-1' }),
+    ).toBeTruthy();
+    cleanup();
+    renderAt(`/door#p=${encodePass(pass)}`, live({ reader: withTokens() }));
+    expect((await verdict()).textContent).toBe('Admit');
+    expect(screen.getByText('Ticket 10-1 · luis.testnet')).toBeTruthy();
   });
 });
 

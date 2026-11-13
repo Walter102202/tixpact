@@ -1,11 +1,13 @@
-import { actions, type Config, type EventTerms } from '@ticket-escrow/client';
-import { type FormEvent, useCallback, useId, useState } from 'react';
+import { actions, type Config, type EventTerms, parseAmount, unitOf } from '@ticket-escrow/client';
+import { type FormEvent, Fragment, useCallback, useId, useState } from 'react';
 import { isNamedAccount, missingAccountMessage } from '../../lib/accounts';
+import { moneyExact, NEAR_UNIT } from '../../lib/money';
 import { type Refresh, useTx } from '../../lib/near/useTx';
 import { useWallet } from '../../lib/near/useWallet';
 import { Link } from '../../lib/router';
 import { useLoad } from '../../lib/useLoad';
 import { useServices } from '../../services';
+import { TEST_DOLLAR } from '../../ui/CurrencyFact';
 import { LoadState } from '../../ui/LoadState';
 import { TxStatus } from '../../ui/TxStatus';
 import { nearExact } from '../events/eventCopy';
@@ -83,7 +85,7 @@ const INPUTS: Record<Field, { type: string; hint?: string; inputMode?: 'decimal'
     type: 'datetime-local',
     hint: 'The verifier can confirm between the end and this moment.',
   },
-  'Price in NEAR': { type: 'text', inputMode: 'decimal' },
+  Price: { type: 'text', inputMode: 'decimal' },
   Capacity: { type: 'text', inputMode: 'numeric' },
   'Verifier account': {
     type: 'text',
@@ -104,6 +106,9 @@ function CreateEventForm({
   const tx = useTx();
   const formId = useId();
   const [values, setValues] = useState<FormValues>(EMPTY_FORM);
+  // Null is NEAR; otherwise one of the tokens the contract accepts (`config.tokens`).
+  const [currency, setCurrency] = useState<string | null>(null);
+  const unit = currency === null ? NEAR_UNIT : unitOf(config, currency);
   const [submitted, setSubmitted] = useState(false);
   const [sent, setSent] = useState<EventTerms | null>(null);
 
@@ -124,8 +129,14 @@ function CreateEventForm({
     contractId,
     nowMs: now?.() ?? Date.now(),
     timeZone,
+    currency,
+    unit,
   });
   const verifier = check.errors['Verifier account'] ? null : values['Verifier account'].trim();
+  // The price as it will be sent, in the chosen currency: a change of currency after typing "10"
+  // makes it 10 tUSD, and the button says so.
+  const typedPrice = check.errors.Price ? null : parseAmount(values.Price.trim(), unit);
+  const priced = typedPrice === null ? '' : ` at ${moneyExact(typedPrice, unit)} a ticket`;
 
   // A mistyped named verifier would lock the budget in an event nobody can accept, or hand the
   // role to whoever registers that name: check it exists before the button works.
@@ -187,39 +198,49 @@ function CreateEventForm({
             .filter(Boolean)
             .join(' ');
           return (
-            <div key={field} className="field">
-              <label htmlFor={id}>{field}</label>
-              <input
-                id={id}
-                className="input"
-                type={type}
-                {...(inputMode ? { inputMode } : {})}
-                value={values[field]}
-                disabled={tx.busy}
-                autoComplete="off"
-                spellCheck={false}
-                aria-invalid={error ? true : undefined}
-                aria-describedby={described || undefined}
-                onChange={(change) =>
-                  setValues((current) => ({ ...current, [field]: change.target.value }))
-                }
-              />
-              {hint && (
-                <p id={`${id}-hint`} className="muted field-hint">
-                  {hint}
-                </p>
+            <Fragment key={field}>
+              {field === 'Price' && config.tokens.length > 0 && (
+                <CurrencyPicker
+                  config={config}
+                  value={currency}
+                  disabled={tx.busy}
+                  onChange={setCurrency}
+                />
               )}
-              {error && (
-                <p id={`${id}-error`} className="field-error">
-                  {error}
-                </p>
-              )}
-              {field === 'Verifier account' && checkFailed && (
-                <button type="button" className="btn btn-sm btn-secondary" onClick={known.reload}>
-                  Check the account again
-                </button>
-              )}
-            </div>
+              <div className="field">
+                <label htmlFor={id}>{field === 'Price' ? `Price in ${unit.symbol}` : field}</label>
+                <input
+                  id={id}
+                  className="input"
+                  type={type}
+                  {...(inputMode ? { inputMode } : {})}
+                  value={values[field]}
+                  disabled={tx.busy}
+                  autoComplete="off"
+                  spellCheck={false}
+                  aria-invalid={error ? true : undefined}
+                  aria-describedby={described || undefined}
+                  onChange={(change) =>
+                    setValues((current) => ({ ...current, [field]: change.target.value }))
+                  }
+                />
+                {hint && (
+                  <p id={`${id}-hint`} className="muted field-hint">
+                    {hint}
+                  </p>
+                )}
+                {error && (
+                  <p id={`${id}-error`} className="field-error">
+                    {error}
+                  </p>
+                )}
+                {field === 'Verifier account' && checkFailed && (
+                  <button type="button" className="btn btn-sm btn-secondary" onClick={known.reload}>
+                    Check the account again
+                  </button>
+                )}
+              </div>
+            </Fragment>
           );
         })}
 
@@ -263,8 +284,8 @@ function CreateEventForm({
               aria-describedby={disabledBecause}
             >
               {budget === null
-                ? 'Create the event'
-                : `Create the event and pay ${nearExact(budget)} to the contract`}
+                ? `Create the event${priced}`
+                : `Create the event${priced} and pay ${nearExact(budget)} of storage`}
             </button>
             {waiting !== null && (
               <p id={`${formId}-waiting`} className="muted">
@@ -300,5 +321,50 @@ function Created({ eventId, terms }: { eventId: unknown; terms: EventTerms | nul
         this page: <span className="account-full">{verifyUrl}</span>
       </p>
     </>
+  );
+}
+
+/**
+ * The event's currency: NEAR or one of the tokens the contract accepts. Shown only when the
+ * contract accepts a token. The terms hash covers it, so it cannot change after creation.
+ */
+function CurrencyPicker({
+  config,
+  value,
+  disabled,
+  onChange,
+}: {
+  config: Config;
+  value: string | null;
+  disabled: boolean;
+  onChange: (currency: string | null) => void;
+}) {
+  const id = useId();
+  const { faucets } = useServices();
+  return (
+    <div className="field currency-field">
+      <label htmlFor={id}>Currency</label>
+      <select
+        id={id}
+        className="input"
+        value={value ?? ''}
+        disabled={disabled}
+        aria-describedby={`${id}-hint`}
+        onChange={(change) => onChange(change.target.value === '' ? null : change.target.value)}
+      >
+        <option value="">NEAR</option>
+        {config.tokens.map((token) => (
+          <option key={token.account_id} value={token.account_id}>
+            {`${token.symbol} (the token ${token.account_id}${
+              faucets.includes(token.account_id) ? `, ${TEST_DOLLAR}` : ''
+            })`}
+          </option>
+        ))}
+      </select>
+      <p id={`${id}-hint`} className="muted field-hint">
+        The price, the refunds and the payout are all in this currency. The storage budget is always
+        in NEAR.
+      </p>
+    </div>
   );
 }

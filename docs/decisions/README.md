@@ -75,6 +75,9 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | A purchase is judged by the `ticket_purchased` event of a receipt that succeeded, from the contract when its id is given | `2026-11-13-client-v2-purchase-verdict-from-logged-events.md` |
 | 2026-11-13 | `FIXTURES` stays the NEAR chain; `FIXTURES_WITH_TOKENS` adds three tUSD events, one per outcome | `2026-11-13-client-v2-fixtures-keep-near-set-and-add-a-token-set.md` |
 | 2026-11-13 | The agent buys only in NEAR (its caps are in NEAR) and reads, claims and checks every currency | `2026-11-13-agent-buys-in-near-and-reads-every-currency.md` |
+| 2026-11-13 | The web writes every amount in its event's currency, judges a token purchase from its receipts and checks token registration before money moves | `2026-11-13-web-prices-in-a-token.md` |
+| 2026-11-13 | The organizer picks a currency, a payout in a token checks registration, and the proof compares each currency on its own | `2026-11-13-web-organizer-and-proof-per-currency.md` |
+| 2026-11-13 | After a token transaction, the web says what happened to whom: a refused refund or payout in plain words, one result per account, test money named as such, the price on the create button | `2026-11-13-web-token-results-after-review.md` |
 | 2026-11-13 | The token list given to `new` is checked strictly (`ERR_LIMIT` over 4, `ERR_INVALID_TERMS` otherwise); the currency is stored once, in the event | `2026-11-13-token-list-checks-at-new.md` |
 | 2026-11-13 | The ticket's metadata is derived when read: the web's claim words, a title cut at 26 characters, escaped text, an image under 2 KB | `2026-11-13-the-ticket-draws-its-state.md` |
 | 2026-11-13 | Token payments go through the v1 reserve-first path with `ft_transfer`; `ft_on_transfer` checks its caller first; a token claim needs 60 Tgas; a listed token is trusted | `2026-11-13-token-payments-share-the-settlement-path.md` |
@@ -89,5 +92,6 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | A role of any other kind that can approve calls, `Everyone` included, makes the verifier read as a plain account | `2026-11-13-group-verifier-any-other-approver-gives-null.md` |
 | 2026-11-13 | The door page scans QR codes itself with `BarcodeDetector` where the browser has it; no new dependency; not tried on a physical phone | `2026-11-13-door-scanner-in-the-page.md` |
 | 2026-11-13 | The group verifier counts every label that can change who decides calls (`policy…`, members, upgrades, config); `needed` is the minimum; the line says "its rules now" | `2026-11-13-group-verifier-counts-every-rule-changing-label.md` |
+| 2026-11-13 | The entry pass and the prices in dollars share one demo reader; the countdown test waits for its interval | `2026-11-13-web-pass-and-prices-share-one-demo-reader.md` |
 | 2026-11-13 | The door checks every new fragment and dates every verdict; Undo works after "Check again" and says whether it removed the admission | `2026-11-13-door-checks-every-arrival-and-undo-says-so.md` |
 | 2026-11-13 | The group verifier also counts `factory_info_update` (Sputnik v3: replaces the factory, which can then replace the DAO's code) | `2026-11-13-group-verifier-counts-factory-info-update.md` |

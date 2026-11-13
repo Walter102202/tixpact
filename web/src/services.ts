@@ -4,6 +4,8 @@ import {
   createFixtureRpc,
   FIXTURE_CONTRACT_ID,
   FIXTURE_NOW_MS,
+  FIXTURE_TOKEN_ID,
+  FIXTURES_WITH_TOKENS,
   type PassChain,
   type Reader,
   type ReadUntilChangedOptions,
@@ -29,6 +31,11 @@ export interface AppServices {
   rereadOptions?: ReadUntilChangedOptions;
   /** The clock new terms are checked against; the chain's clock judges them again. */
   now?: () => number;
+  /**
+   * Tokens with a test faucet (`faucet()`): test money, which the buy panel may offer and every
+   * screen calls "a test dollar with no value".
+   */
+  faucets: readonly string[];
 }
 
 export const ServicesContext = createContext<AppServices | null>(null);
@@ -43,9 +50,13 @@ export function viewerTimeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
 
-/** Demo mode: fixture data, recorded transactions, and a wallet that signs in as luis.testnet. */
+/**
+ * Demo mode: fixture data (events in NEAR and in the test dollar token), recorded transactions,
+ * and a wallet that signs in as luis.testnet.
+ */
 export function createFixtureServices(): AppServices {
-  const reader = createFixtureReader();
+  // One reader for the pages and the door, so a tUSD ticket checks at the door as it shows.
+  const reader = createFixtureReader(FIXTURES_WITH_TOKENS);
   return {
     network: 'testnet',
     contractId: FIXTURE_CONTRACT_ID,
@@ -58,5 +69,6 @@ export function createFixtureServices(): AppServices {
     timeZone: viewerTimeZone(),
     // The fixture events are laid out around this instant.
     now: () => FIXTURE_NOW_MS,
+    faucets: [FIXTURE_TOKEN_ID],
   };
 }
