@@ -2,7 +2,7 @@
 
 Measured on 2026-11-13 in the local sandbox (`near-sandbox` 0.4.1), for contract v2 (events in NEAR or in a NEP-141 token). Two tests take the measurements, and each fails if a constant no longer matches them.
 
-- Gas: `contract/tests/gas.rs`. Print the table with `bash scripts/wsl.sh cargo test -p ticket-escrow --test gas -- --nocapture`.
+- Gas: `contract/tests/gas.rs`. Print the table with `bash scripts/wsl.sh cargo test -p ticket-escrow --test gas -- --nocapture` (`gas_of_every_method_in_its_worst_case` for NEAR, `gas_of_token_settlement_in_its_worst_case` for a token).
 - Storage: the unit test `storage_constants_are_the_measured_worst_case_plus_twenty_percent` in `contract/src/tests.rs`.
 
 Every case is the worst one the contract allows:
@@ -44,15 +44,35 @@ In the "expires the event first" row the deadline passed and nobody expired the 
 
 The "4 MiB answer" row is a hostile receiver: it answers with the longest value the protocol allows, 4,194,304 bytes. Returning it costs the receiver about 69.5 Mgas per byte, about 292 Tgas, so that transaction attaches 400 Tgas (the protocol allows 1,000 Tgas per transaction). The resolver still returns the ticket, and `t12_transfer_call_receiver_outcomes` checks the same on chain.
 
+## Events priced in a token
+
+Measured by `gas_of_token_settlement_in_its_worst_case` (lane T2) with the test token `fixtures/test-token` (a 64-character account id, 6 decimals), an event of the longest title and venue, and tickets with a full history. "Token" is the gas burnt by the token contract's receipts: `ft_transfer_call` and its resolver for a purchase, `ft_transfer` for a refund or a payout.
+
+| Case | Gas attached (Tgas) | Call (Tgas) | Token (Tgas) | Callback (Tgas) | Whole transaction (Tgas) |
+|---|---:|---:|---:|---:|---:|
+| `ft_transfer_call` buys (call: `ft_on_transfer`) | 100 | 3.75 | 3.82 | - | 8.55 |
+| `ft_transfer_call` rejected (`ERR_WRONG_DEPOSIT`; the token's resolver returns the amount) | 100 | 1.50 | 4.28 | - | 6.77 |
+| `claim_payout` + `ft_transfer` + `on_payout_result` (delivered) | 100 | 2.86 | 1.72 | 2.10 | 7.66 |
+| `claim_payout` + `ft_transfer` + `on_payout_result` (organizer not registered with the token) | 100 | 2.86 | 1.44 | 2.09 | 7.59 |
+| `claim_refund` + `ft_transfer` + `on_refund_result` (full history, delivered) | 100 | 3.36 | 1.73 | 2.52 | 8.59 |
+| `claim_refund` + `ft_transfer` + `on_refund_result` (holder not registered with the token) | 100 | 3.36 | 1.44 | 2.51 | 8.51 |
+| `claim_refund` + `ft_transfer` + `on_refund_result` (expires the event first, full history, delivered) | 100 | 3.44 | 1.73 | 2.50 | 8.64 |
+
+At exactly `GAS_TOKEN_CLAIM_MIN` (60 Tgas) a refund and a payout both deliver with the same numbers; at 59 Tgas both fail as a whole with `ERR_INSUFFICIENT_GAS` and no token moves. The rows were measured on commit `075a9a7` (C6 and the first half of C7); the two changes after it touch only the callback's reading of the token's answer and the token's share of unused gas, which a standard token does not use.
+
+**The token's answer is bounded.** The callback reads what `ft_transfer` answered (a standard token answers nothing). The token gets exactly `GAS_FT_TRANSFER` and no share of the claimant's unused gas, and answering costs about 69.5 Mgas per byte, so the longest answer it can give is about 288 KB. Copying that into the callback costs about 1.1 Tgas at the published fee, so the callback (15 Tgas, worst case 2.52 Tgas) always reads it and settles a transfer that went through (`docs/decisions/2026-11-13-a-payment-that-went-through-settles.md`). Before this bound, a hostile token given the leftover of 100 Tgas answered 1,116,987 bytes.
+
 ## Contract constants
 
 The contract has no upgrade method (R10), so its gas constants can never be raised after deployment. If protocol gas costs rise, a callback or resolver with too little static gas fails: a payment stays pending, or a ticket stays locked, for good. Every constant therefore keeps a wide margin over the worst case.
 
 | Constant | Value | Rule | Check |
 |---|---:|---|---|
-| `GAS_FOR_CALLBACK` (static gas of `on_refund_result`, `on_payout_result`) | 15 Tgas | 5 × 2.47 Tgas = 12.35 Tgas, rounded up to the next multiple of 5 Tgas | 6.1 times the worst callback |
+| `GAS_FOR_CALLBACK` (static gas of `on_refund_result`, `on_payout_result`) | 15 Tgas | 5 × 2.52 Tgas (a token refund; 2.47 for NEAR) = 12.6 Tgas, rounded up to the next multiple of 5 Tgas | about 6 times the worst callback, with room for reading a token's longest answer (1.1 Tgas) |
 | `GAS_FOR_RESOLVE_TRANSFER` (static gas of `nft_resolve_transfer`) | 40 Tgas (was 20) | 2 × (15.94 Tgas to read the longest answer + 3.15 Tgas of work) = 38.18 Tgas, rounded up to the next multiple of 5 Tgas | 12.7 times the worst resolver measured |
 | `GAS_CLAIM_MIN` (least gas for `claim_refund`, `claim_payout`) | 40 Tgas (was 60) | 15 Tgas callback + 5 × 3.28 Tgas (the claim that expires the event) = 31.4 Tgas, rounded up to the next multiple of 10 Tgas | a full-history refund, a refund that expires the event and a payout each succeed at exactly 40 Tgas |
+| `GAS_FT_TRANSFER` (gas of the `ft_transfer` that pays a token refund or payout; the token gets no more) | 20 Tgas | 5 × 1.73 Tgas (the test token's worst `ft_transfer`) = 8.65 Tgas gives 10 Tgas rounded up to 5; kept at 20 because the contract cannot be upgraded and a real token may do more work than the test token | 11.6 times the test token's worst `ft_transfer`; bounds the token's answer to about 288 KB |
+| `GAS_TOKEN_CLAIM_MIN` (least gas for `claim_refund`, `claim_payout` on an event priced in a token) | 60 Tgas | 20 Tgas `ft_transfer` + 15 Tgas callback + 5 × 3.44 Tgas (the token claim that expires the event) = 52.2 Tgas, rounded up to the next multiple of 10 Tgas | a refund and a payout each succeed at exactly 60 Tgas and fail as a whole at 59 |
 | `GAS_TRANSFER_CALL_MIN` (least gas for `nft_transfer_call`) | 70 Tgas (was 50) | 40 Tgas resolver + 5 × 4.26 Tgas = 61.3 Tgas, rounded up to the next multiple of 10 Tgas | at exactly 70 Tgas the receiver still runs and the resolver returns the ticket |
 
 Below a minimum the call fails with `ERR_INSUFFICIENT_GAS` before it writes anything. The gas test fails if any constant breaks its rule.
@@ -67,13 +87,14 @@ Below a minimum the call fails with `ERR_INSUFFICIENT_GAS` before it writes anyt
 - The gas test reads both protocol values from the sandbox. It fails when a protocol change raises them far enough to break the rule, not on every rise: today the rule leaves 1.82 Tgas (40 against 38.18), so the fee alone could rise by almost 6% and still pass.
 - `GAS_TRANSFER_CALL_MIN` does not protect the lock. The resolver's gas is reserved when `nft_transfer_call` creates the promise; if it is not there, the whole call fails. The minimum only leaves the receiver about 25 Tgas.
 
-The settlement callbacks need no such rule. `on_refund_result` and `on_payout_result` read the result of a plain NEAR transfer, and a transfer returns no value, so nobody can make that read expensive. Their static gas follows the measured worst case alone.
+The settlement callbacks need no such rule. For NEAR they read the result of a plain transfer, which returns no value. For a token they read what `ft_transfer` answered, and that answer is bounded by the token's gas: `GAS_FT_TRANSFER` with no share of unused gas, so at most about 288 KB and 1.1 Tgas to read. Their static gas follows the measured worst case (2.52 Tgas, a token refund) with that read on top.
 
 ## Client gas
 
 The client values (`packages/client/src/actions.ts`, plan section "Gas") all work in the worst case. No change is needed.
 
-- For the claims and `nft_transfer_call`, the number that binds is the contract minimum, not the gas burnt: the callback's or resolver's static gas is reserved when the call runs. The client attaches 100 against a minimum of 40, and 150 against 70.
+- For the claims and `nft_transfer_call`, the number that binds is the contract minimum, not the gas burnt: the callback's or resolver's static gas is reserved when the call runs. The client attaches 100 against a minimum of 40 (60 for a token), and 150 against 70.
+- A purchase in a token is the buyer's `ft_transfer_call` on the token (plan v2: 100 Tgas from the client); its worst whole transaction is 8.55 Tgas.
 - For the other methods it is what the whole transaction burns, and the client attaches at least 7 times that.
 
 | Method | Client (Tgas) | Contract minimum (Tgas) | Worst whole transaction (Tgas) |

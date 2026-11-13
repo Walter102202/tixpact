@@ -22,8 +22,8 @@ use crate::log;
 use crate::tickets::{HistoryKind, TicketStatus};
 use crate::{Contract, ContractExt};
 
-/// Static gas of `on_refund_result` and `on_payout_result`. Measured worst case 2.47 Tgas
-/// (`docs/gas.md`); the contract cannot be upgraded, so this keeps five times that or more,
+/// Static gas of `on_refund_result` and `on_payout_result`. Measured worst case 2.52 Tgas, a
+/// token refund (2.47 for NEAR, `docs/gas.md`); the contract cannot be upgraded, so this keeps five times that or more,
 /// rounded up to the next multiple of 5 Tgas. The `fault-injection` test build lowers it so far
 /// that the callback runs out of gas after its transfer (`t11`, `t18`).
 pub const GAS_FOR_CALLBACK: Gas = if cfg!(feature = "fault-injection") {
@@ -38,13 +38,18 @@ pub const GAS_FOR_CALLBACK: Gas = if cfg!(feature = "fault-injection") {
 /// whole (Review Focus 3).
 pub const GAS_CLAIM_MIN: Gas = Gas::from_tgas(40);
 
-/// Static gas of the `ft_transfer` that pays a refund or a payout of an event priced in a token.
-/// Re-measured in C7 (`docs/gas.md`).
+/// Gas of the `ft_transfer` that pays a refund or a payout of an event priced in a token, and all
+/// the token gets (no share of unused gas). The test token's worst `ft_transfer` burns 1.73 Tgas;
+/// five times that, rounded up to 5 Tgas, is 10 Tgas. It keeps 20 Tgas because the contract
+/// cannot be upgraded and a real token may do more work than the test token. Giving the token no
+/// more than this also bounds its answer: about 288 KB, 1.1 Tgas for the callback to read
+/// (`docs/gas.md`).
 pub const GAS_FT_TRANSFER: Gas = Gas::from_tgas(20);
 
-/// Least prepaid gas a claim on an event priced in a token accepts: besides the callback's static
-/// gas it reserves `GAS_FT_TRANSFER` for the token. Same rule as `GAS_CLAIM_MIN`; re-measured in
-/// C7.
+/// Least prepaid gas a claim on an event priced in a token accepts: `GAS_FT_TRANSFER` plus the
+/// callback's static gas plus five times the most the claim itself burns (3.44 Tgas measured, for
+/// a claim that expires its event first, `docs/gas.md`): 52.2 Tgas, rounded up to the next
+/// multiple of 10 Tgas. Below it the call fails as a whole.
 pub const GAS_TOKEN_CLAIM_MIN: Gas = Gas::from_tgas(60);
 
 /// What an operation in flight pays.
@@ -147,8 +152,8 @@ impl Contract {
 
     /// A transfer of `amount` of `currency` to `recipient_id`, then `callback` on this
     /// contract. NEAR goes by native transfer. A token goes by `ft_transfer` on the token, with the
-    /// 1 yoctoNEAR the claimant attached (the standard requires it) and `GAS_FT_TRANSFER`; a
-    /// recipient the token does not know makes it fail, and the callback restores the right.
+    /// 1 yoctoNEAR the claimant attached (the standard requires it) and exactly `GAS_FT_TRANSFER`;
+    /// a recipient the token does not know makes it fail, and the callback restores the right.
     fn transfer_then(
         currency: Option<AccountId>,
         recipient_id: AccountId,
@@ -160,6 +165,7 @@ impl Contract {
             Some(token) => ext_ft_core::ext(token)
                 .with_attached_deposit(NearToken::from_yoctonear(1))
                 .with_static_gas(GAS_FT_TRANSFER)
+                .with_unused_gas_weight(0)
                 .ft_transfer(recipient_id, U128(amount), None),
         };
         transfer.then(callback)
