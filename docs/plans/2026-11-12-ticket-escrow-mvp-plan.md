@@ -508,10 +508,10 @@ Needs Walter's go for three things: installing the Rust toolchain in his WSL, cr
 - `format.ts`: `formatNear(yocto: string, maxDecimals = 4): string` and `parseNear(text: string): string` with `bigint` only; `formatDateTime(ms, timeZone)`.
 - `fixtures.ts`: one fixture set per phase and claim state, plus `createFixtureReader()` implementing `Reader`.
 
-- [ ] Write failing tests: schemas accept the plan's JSON examples and reject a number where an amount string is expected; `formatNear('1500000000000000000000000') === '1.5'`, `parseNear('1.5')` returns the same string, `parseNear('0.1') + parseNear('0.2')` as `bigint` equals `parseNear('0.3')`; `parseContractError` on `Smart contract panicked: ERR_TICKET_LOCKED: …` returns that code; every fixture passes its schema; `trackTransaction` on a recorded status with a failed callback receipt returns `ok: false` with that receipt.
-- [ ] Run `pnpm --filter @ticket-escrow/client test`. Expected: fail.
-- [ ] Implement, verifying each `near-api-js` name against the installed declarations (`JsonRpcProvider`, `FailoverRpcProvider`, `callFunction`, `viewAccount`, `viewAccessKeyList`, `viewTransactionStatusWithReceipts`).
-- [ ] Run. Expected: pass. Commit `feat(client): typed reader, action builders and transaction tracking`, tick, push, and tell the integrator: W0 is merged first so Track M can start.
+- [x] Write failing tests: schemas accept the plan's JSON examples and reject a number where an amount string is expected; `formatNear('1500000000000000000000000') === '1.5'`, `parseNear('1.5')` returns the same string, `parseNear('0.1') + parseNear('0.2')` as `bigint` equals `parseNear('0.3')`; `parseContractError` on `Smart contract panicked: ERR_TICKET_LOCKED: …` returns that code; every fixture passes its schema; `trackTransaction` on a recorded status with a failed callback receipt returns `ok: false` with that receipt.
+- [x] Run `pnpm --filter @ticket-escrow/client test`. Expected: fail.
+- [x] Implement, verifying each `near-api-js` name against the installed declarations (`JsonRpcProvider`, `FailoverRpcProvider`, `callFunction`, `viewAccount`, `viewAccessKeyList`, `viewTransactionStatusWithReceipts`).
+- [x] Run. Expected: pass. Commit `feat(client): typed reader, action builders and transaction tracking`, tick, push, and tell the integrator: W0 is merged first so Track M can start.
 
 ### Task W1: shell, wallet, landing, event page with purchase
 
