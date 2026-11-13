@@ -1,9 +1,12 @@
-import { fireEvent, screen } from '@testing-library/react';
+import { fireEvent, screen, within } from '@testing-library/react';
 import {
   type AccountProof,
   createFixtureReader,
   explorerAccountUrl,
+  FIXTURE_TOKEN_ID,
   FIXTURES,
+  FIXTURES_WITH_TOKENS,
+  type FixtureData,
   formatNear,
   parseNear,
   type Reader,
@@ -123,5 +126,52 @@ describe('/proof', () => {
   it('is in the main navigation', () => {
     renderAt('/');
     expect(screen.getByRole('link', { name: 'Proof' }).getAttribute('href')).toBe('/proof');
+  });
+});
+
+describe('/proof with events priced in a token', () => {
+  const TUSD = FIXTURE_TOKEN_ID;
+  const tokenProof = (data: FixtureData = FIXTURES_WITH_TOKENS) =>
+    testServices({ reader: createFixtureReader(data) });
+
+  it('compares, per currency, what the contract holds with what it owes', async () => {
+    await openProof(tokenProof());
+    // The NEAR facts count only the events priced in NEAR, as before.
+    expect(fact('Reserved for ticket holders')).toBe('16 NEAR');
+    expect(fact('Waiting for organizers to collect')).toBe('4.5 NEAR');
+    expect(screen.getByText('The balance covers both.')).toBeTruthy();
+    const section = screen.getByRole('region', { name: 'In tUSD' });
+    expect(within(section).getByText(TUSD).textContent).toBe(TUSD);
+    expect(section.textContent).toContain(
+      `Events priced in tUSD keep their money at the token ${TUSD}, a test dollar with no value.`,
+    );
+    // Events 10, 11 and 12: 20 + 50 reserved, 25 to collect, 25 being refunded (already owed).
+    expect(fact('tUSD balance of the contract')).toBe('120 tUSD');
+    expect(fact('tUSD reserved for ticket holders')).toBe('70 tUSD');
+    expect(fact('tUSD waiting for organizers to collect')).toBe('25 tUSD');
+    expect(within(section).getByText('The tUSD balance covers both.')).toBeTruthy();
+    expect(fact('Events read')).toBe('11');
+  });
+
+  it('says so when the token balance is below what the contract owes in it', async () => {
+    const data = structuredClone(FIXTURES_WITH_TOKENS);
+    const ledger = data.tokens[TUSD];
+    if (ledger) ledger.balances[data.contractId] = '94999999';
+    await openProof(tokenProof(data));
+    expect(
+      screen.getByText('The tUSD balance is below what the contract holds for others.'),
+    ).toBeTruthy();
+    // The NEAR verdict does not change with a token's.
+    expect(screen.getByText('The balance covers both.')).toBeTruthy();
+  });
+
+  it('shows no numbers when a token balance cannot be read', async () => {
+    const reader: Reader = {
+      ...createFixtureReader(FIXTURES_WITH_TOKENS),
+      tokenBalance: () => Promise.reject(new Error('down')),
+    };
+    renderAt('/proof', testServices({ reader }));
+    expect(await screen.findByText('Could not read the chain.')).toBeTruthy();
+    expect(screen.queryByText(/tUSD/, { selector: 'dd' })).toBeNull();
   });
 });

@@ -5,8 +5,10 @@ import {
   moneyMoved,
   PHASE_LABELS,
   type Reader,
+  type Unit,
 } from '@ticket-escrow/client';
-import { type ReactNode, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { moneyExact, unitFor } from '../../lib/money';
 import { useTx } from '../../lib/near/useTx';
 import { readAllPages } from '../../lib/pages';
 import { Link } from '../../lib/router';
@@ -14,11 +16,15 @@ import type { Load } from '../../lib/useLoad';
 import { useServices } from '../../services';
 import { LoadState } from '../../ui/LoadState';
 import { TxStatus } from '../../ui/TxStatus';
-import { nearExact } from '../events/eventCopy';
+import { RegisterPanel } from '../tokens/RegisterPanel';
+import { refusedByToken, SettlementRefused } from '../tokens/SettlementRefused';
+import { useTokenAccount } from '../tokens/useTokenAccount';
 
 export interface OrganizedEvent {
   event: EventView;
   accounting: AccountingView | null;
+  /** The unit of the event's currency: its amounts are in it. */
+  unit: Unit;
 }
 
 /** Every event `organizer` created, with its accounting. */
@@ -29,7 +35,13 @@ export async function readOrganizedEvents(
   const all = await readAllPages((from, limit) => reader.listEvents(from, limit));
   const mine = all.filter((e) => e.organizer_id === organizer);
   return Promise.all(
-    mine.map(async (event) => ({ event, accounting: await reader.getAccounting(event.event_id) })),
+    mine.map(async (event) => {
+      const [accounting, unit] = await Promise.all([
+        reader.getAccounting(event.event_id),
+        unitFor(reader, event.currency),
+      ]);
+      return { event, accounting, unit };
+    }),
   );
 }
 
@@ -58,6 +70,7 @@ export function OrganizerEvents({
                   reread={async () => ({
                     event: (await reader.getEvent(row.event.event_id)) ?? row.event,
                     accounting: await reader.getAccounting(row.event.event_id),
+                    unit: row.unit,
                   })}
                   apply={(fresh) =>
                     load.set(
@@ -85,8 +98,9 @@ function OrganizedRow({
   reread: () => Promise<OrganizedEvent>;
   apply: (row: OrganizedEvent) => void;
 }) {
-  const { event, accounting } = row;
+  const { event, accounting, unit } = row;
   const tx = useTx();
+  const amount = (value: bigint) => moneyExact(value.toString(), unit);
   const available = BigInt(accounting?.organizer_available ?? '0');
   const pending = BigInt(accounting?.organizer_pending ?? '0');
   const settled = BigInt(accounting?.organizer_settled ?? '0');
@@ -118,15 +132,44 @@ function OrganizedRow({
   // The amount asked for, kept for the result: the re-read shows 0 once it is paid.
   const [asked, setAsked] = useState<string | null>(null);
 
+  // A payout in a token goes to the organizer's account at the token, which must know it.
+  const registerTx = useTx();
+  const toCheck = event.currency !== null && available > 0n && !paid ? organizer : null;
+  const { load: payee, refresh: payeeRefresh } = useTokenAccount(event.currency, toCheck);
+  // A payout the token refused says the organizer may not be registered: read it again, so the
+  // registration is offered when that is why.
+  const refused =
+    tx.view.kind === 'done' && refusedByToken(tx.view.result, event.currency) !== null;
+  const { reload: rereadPayee } = payee;
+  useEffect(() => {
+    if (refused) rereadPayee();
+  }, [refused, rereadPayee]);
+  const payeeAccount = payee.state.status === 'ready' ? payee.state.data : null;
+  const registration = payeeAccount && !payeeAccount.registered && (
+    <RegisterPanel
+      account={payeeAccount}
+      unit={unit}
+      signer={organizer}
+      why={
+        <p>
+          {organizer} is not registered with {unit.symbol}, so the token cannot pay it yet: a payout
+          would fail and the amount would stay available. Register first, then collect.
+        </p>
+      }
+      tx={registerTx}
+      refresh={payeeRefresh(payeeAccount)}
+    />
+  );
+
   let payout: ReactNode;
   if (pending > 0n) {
     payout = (
       <p>
-        Sending {nearExact(pending.toString())} to {organizer}.
+        Sending {amount(pending)} to {organizer}.
       </p>
     );
   } else if (available > 0n && !paid) {
-    payout = tx.busy ? null : (
+    const collect = (
       <button
         type="button"
         className="btn"
@@ -141,9 +184,33 @@ function OrganizedRow({
           });
         }}
       >
-        Collect {nearExact(available.toString())} to {organizer}
+        Collect {amount(available)} to {organizer}
       </button>
     );
+    if (tx.busy || registerTx.busy) payout = registerTx.busy ? registration : null;
+    else if (event.currency === null) payout = collect;
+    else if (payee.state.status === 'error') {
+      // An outage does not hold back a payout: one to an unregistered account fails, and the
+      // amount stays available to collect again.
+      payout = (
+        <>
+          {collect}
+          <p className="muted">
+            Could not check that {organizer} is registered with {unit.symbol}. If it is not, the
+            payout fails and the amount stays available.
+          </p>
+          <button type="button" className="btn btn-sm btn-secondary" onClick={payee.reload}>
+            Check again
+          </button>
+        </>
+      );
+    } else if (payee.state.status === 'loading' || payee.state.data === null) {
+      payout = (
+        <p className="muted" role="status">
+          Checking that {organizer} is registered with {unit.symbol}…
+        </p>
+      );
+    } else payout = payee.state.data.registered ? collect : registration;
   } else if (event.outcome === 'Refundable' || cancelled) {
     // A done cancel counts before the re-read shows it: demo data never changes.
     payout = <p className="muted">Open for refunds: the organizer receives nothing.</p>;
@@ -161,7 +228,7 @@ function OrganizedRow({
       </p>
     );
   } else if (settled > 0n) {
-    payout = <p className="muted">Collected {nearExact(settled.toString())}.</p>;
+    payout = <p className="muted">Collected {amount(settled)}.</p>;
   } else {
     payout = <p className="muted">Nothing to collect.</p>;
   }
@@ -192,10 +259,27 @@ function OrganizedRow({
               </p>
             ) : null
           }
+          failureBody={(result, signerId) => {
+            const failed = refusedByToken(result, event.currency);
+            // A refusal by the token: plain words, not "Failed step: the transfer to tusd…".
+            if (failed === null) return undefined;
+            return (
+              <SettlementRefused
+                failed={failed}
+                payee={signerId}
+                unit={unit}
+                // As the contract was read again: its callback makes the amount available (R7).
+                restored={
+                  available > 0n ? `${amount(available)} is available to collect again.` : null
+                }
+                retry="collect"
+              />
+            );
+          }}
           succeeded={moneyMoved}
           success={() => (
             <p>
-              Sent {nearExact(asked ?? available.toString())} to {organizer}.
+              Sent {moneyExact(asked ?? available.toString(), unit)} to {organizer}.
             </p>
           )}
         />

@@ -7,11 +7,13 @@ import {
   OperationViewSchema,
   TicketHistorySchema,
   TicketViewSchema,
+  TokenSpecSchema,
   YoctoSchema,
 } from './schemas.js';
 
-// The JSON examples of the plan's frozen interface. The plan elides two values ("9f2c…" for the
-// terms hash and "…" for the storage constants); they are filled in with well-formed values here.
+// The JSON examples of the plan's frozen interface, in their v2 shape (`currency`, `Config.tokens`;
+// plan 2026-11-13, "Frozen interface (v2)"). The plan elides two values ("9f2c…" for the terms hash
+// and "…" for the storage constants); they are filled in with well-formed values here.
 const eventTerms = {
   title: 'Jazz night',
   venue: 'Teatro Municipal',
@@ -21,6 +23,7 @@ const eventTerms = {
   price: '1500000000000000000000000',
   capacity: 50,
   verifier_id: 'teatro.testnet',
+  currency: null,
 };
 
 const eventView = {
@@ -45,6 +48,7 @@ const eventView = {
   created_at_ms: 1794600000000,
   phase: 'OnSale',
   now_ms: 1794650000000,
+  currency: null,
 };
 
 const ticketView = {
@@ -56,6 +60,7 @@ const ticketView = {
   status: 'Active',
   claim: 'Reserved',
   pending_operation_id: null,
+  currency: null,
 };
 
 const accountingView = {
@@ -68,6 +73,7 @@ const accountingView = {
   organizer_pending: '0',
   organizer_settled: '0',
   operating_budget: '700000000000000000000000',
+  currency: null,
 };
 
 const operationView = {
@@ -78,6 +84,7 @@ const operationView = {
   recipient_id: 'luis.testnet',
   amount: '1500000000000000000000000',
   started_at_ms: 1794900000000,
+  currency: null,
 };
 
 const ticketHistory = {
@@ -89,7 +96,7 @@ const ticketHistory = {
 };
 
 const config = {
-  version: '1.0.0',
+  version: '2.0.0',
   max_capacity: 100,
   max_page: 50,
   max_title_bytes: 120,
@@ -101,6 +108,7 @@ const config = {
   storage_per_event: '50000000000000000000000',
   storage_per_ticket: '13000000000000000000000',
   fault_injection: false,
+  tokens: [{ account_id: 'tusd.testnet', symbol: 'tUSD', decimals: 6 }],
 };
 
 describe('schemas', () => {
@@ -157,6 +165,48 @@ describe('schemas', () => {
     );
     expect(EventViewSchema.safeParse({ ...eventView, terms_hash: '9f2c…' }).success).toBe(false);
     expect(EventViewSchema.safeParse({ ...eventView, event_id: 1.5 }).success).toBe(false);
+  });
+
+  it('require the currency on every v2 view, null for NEAR or a token account', () => {
+    for (const [schema, view] of [
+      [EventViewSchema, eventView],
+      [TicketViewSchema, ticketView],
+      [AccountingViewSchema, accountingView],
+      [OperationViewSchema, operationView],
+    ] as const) {
+      const { currency: _dropped, ...v1Shape } = view;
+      expect(schema.safeParse(v1Shape).success).toBe(false);
+      expect(schema.safeParse({ ...view, currency: 'tusd.testnet' }).success).toBe(true);
+      expect(schema.safeParse({ ...view, currency: 'Not A Token' }).success).toBe(false);
+    }
+  });
+
+  it('send terms without a currency as priced in NEAR, and keep a token currency', () => {
+    const { currency: _dropped, ...withoutCurrency } = eventTerms;
+    expect(EventTermsSchema.parse(withoutCurrency)).toEqual({ ...eventTerms, currency: null });
+    expect(EventTermsSchema.parse({ ...eventTerms, currency: 'tusd.testnet' }).currency).toBe(
+      'tusd.testnet',
+    );
+    expect(EventTermsSchema.safeParse({ ...eventTerms, currency: 'USD' }).success).toBe(false);
+  });
+
+  it('read the accepted tokens of the config and refuse impossible ones', () => {
+    const token = { account_id: 'tusd.testnet', symbol: 'tUSD', decimals: 6 };
+    expect(ConfigSchema.safeParse({ ...config, tokens: [] }).success).toBe(true);
+    expect(TokenSpecSchema.parse(token)).toEqual(token);
+    for (const bad of [
+      { ...token, symbol: '' },
+      { ...token, symbol: 'THIRTEENCHARS' },
+      { ...token, symbol: 'dólar' },
+      { ...token, decimals: 25 },
+      { ...token, decimals: -1 },
+      { ...token, account_id: 'Not An Account' },
+    ]) {
+      expect(TokenSpecSchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+    expect(ConfigSchema.safeParse({ ...config, tokens: Array(5).fill(token) }).success).toBe(false);
+    const { tokens: _dropped, ...v1Config } = config;
+    expect(ConfigSchema.safeParse(v1Config).success).toBe(false);
   });
 
   it('are strict about the terms they send and tolerant of extra view fields', () => {

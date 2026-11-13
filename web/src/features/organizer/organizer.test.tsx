@@ -4,7 +4,10 @@ import {
   createFixtureReader,
   createFixtureRpc,
   type EventTerms,
+  FIXTURE_TOKEN_ID,
   FIXTURES,
+  FIXTURES_WITH_TOKENS,
+  type FixtureData,
   parseNear,
   type Reader,
   type RecordedTx,
@@ -31,7 +34,8 @@ const VALID = {
 
 type Field = keyof typeof VALID;
 
-function fill(values: Partial<Record<Field, string>>) {
+/** Fills inputs by their label: the VALID fields, or "Price in <symbol>" for another currency. */
+function fill(values: Partial<Record<Field | `Price in ${string}`, string>>) {
   for (const [label, value] of Object.entries(values)) {
     fireEvent.change(screen.getByLabelText(label), { target: { value } });
   }
@@ -86,7 +90,9 @@ describe('/organizer: create an event', () => {
       screen.getByText(/If nobody confirms by the deadline, every ticket holder can claim/),
     ).toBeTruthy();
     expect(screen.getByText(/It is not ticket money/)).toBeTruthy();
-    expect(createButton().textContent).toBe('Create the event and pay 0.7 NEAR to the contract');
+    expect(createButton().textContent).toBe(
+      'Create the event at 1.5 NEAR a ticket and pay 0.7 NEAR of storage',
+    );
   });
 
   it.each([
@@ -286,7 +292,9 @@ describe('/organizer: create an event', () => {
     await screen.findByText('Storage budget: 0.7 NEAR');
     fill({ Capacity: '10' });
     expect(await screen.findByText('Storage budget: 0.18 NEAR')).toBeTruthy();
-    expect(createButton().textContent).toBe('Create the event and pay 0.18 NEAR to the contract');
+    expect(createButton().textContent).toBe(
+      'Create the event at 1.5 NEAR a ticket and pay 0.18 NEAR of storage',
+    );
     fireEvent.click(createButton());
     await screen.findByText(DEMO_CREATED);
     expect(services.wallet.sent).toEqual([
@@ -587,5 +595,173 @@ describe('/organizer: your events and the payout', () => {
     expect(within(nav).getByRole('link', { name: 'Organize' }).getAttribute('href')).toBe(
       '/organizer',
     );
+  });
+});
+
+describe('/organizer: events priced in a token', () => {
+  const TUSD = FIXTURE_TOKEN_ID;
+  const withTokens = (data: FixtureData = FIXTURES_WITH_TOKENS) =>
+    testServices({ reader: createFixtureReader(data), wallet: createFixtureWallet(ORGANIZER) });
+
+  it('picks the currency among those the contract accepts and takes the price in it', async () => {
+    const services = await openOrganizer(withTokens());
+    const picker = screen.getByLabelText('Currency') as HTMLSelectElement;
+    expect([...picker.options].map((o) => o.textContent)).toEqual([
+      'NEAR',
+      `tUSD (the token ${TUSD}, a test dollar with no value)`,
+    ]);
+    fireEvent.change(picker, { target: { value: TUSD } });
+    const { 'Price in NEAR': _, ...rest } = VALID;
+    fill({ ...rest, 'Price in tUSD': '12.5' });
+    // The storage budget stays in NEAR whatever the currency.
+    expect(await screen.findByText('Storage budget: 0.7 NEAR')).toBeTruthy();
+    fireEvent.click(createButton());
+    await screen.findByText(DEMO_CREATED);
+    expect(services.wallet.sent).toEqual([
+      {
+        methodName: 'create_event',
+        args: { terms: { ...VALID_TERMS, price: '12500000', currency: TUSD } },
+        deposit: parseNear('0.7'),
+        gas: '30000000000000',
+      },
+    ]);
+  });
+
+  it.each([
+    ['1.00001', 'Use at most 4 decimals.'],
+    ['1.0000001', 'Use at most 4 decimals.'],
+    ['0', 'The price must be above 0 tUSD.'],
+    ['ten', 'Enter a price in tUSD, like 1.5.'],
+  ])('refuses the price %s in tUSD before anything is sent', async (price, message) => {
+    const services = await openOrganizer(withTokens());
+    fireEvent.change(screen.getByLabelText('Currency'), { target: { value: TUSD } });
+    const { 'Price in NEAR': _, ...rest } = VALID;
+    fill({ ...rest, 'Price in tUSD': price });
+    await screen.findByText('Storage budget: 0.7 NEAR');
+    fireEvent.click(createButton());
+    expect(await screen.findByText(message)).toBeTruthy();
+    expect(services.wallet.sent).toEqual([]);
+  });
+
+  it('names the price in its currency on the button, so a change of currency shows', async () => {
+    await openOrganizer(withTokens());
+    fill(VALID);
+    await screen.findByText('Storage budget: 0.7 NEAR');
+    expect(createButton().textContent).toBe(
+      'Create the event at 1.5 NEAR a ticket and pay 0.7 NEAR of storage',
+    );
+    // The same "1.5", now in tUSD.
+    fireEvent.change(screen.getByLabelText('Currency'), { target: { value: TUSD } });
+    expect(createButton().textContent).toBe(
+      'Create the event at 1.5 tUSD a ticket and pay 0.7 NEAR of storage',
+    );
+    // A price that is not valid names none.
+    fill({ 'Price in tUSD': 'ten' });
+    expect(createButton().textContent).toBe('Create the event and pay 0.7 NEAR of storage');
+  });
+
+  it('names a token without a test faucet by its symbol and account only', async () => {
+    await openOrganizer(
+      testServices({
+        reader: createFixtureReader(FIXTURES_WITH_TOKENS),
+        wallet: createFixtureWallet(ORGANIZER),
+        faucets: [],
+      }),
+    );
+    const picker = screen.getByLabelText('Currency') as HTMLSelectElement;
+    expect(picker.options[1]?.textContent).toBe(`tUSD (the token ${TUSD})`);
+  });
+
+  it('keeps NEAR as the default and sends the currency as null', async () => {
+    const services = await openOrganizer(withTokens());
+    fill(VALID);
+    await screen.findByText('Storage budget: 0.7 NEAR');
+    fireEvent.click(createButton());
+    await screen.findByText(DEMO_CREATED);
+    expect(services.wallet.sent[0]?.args).toEqual({ terms: { ...VALID_TERMS, currency: null } });
+  });
+
+  it('shows no currency picker when the contract accepts no token', async () => {
+    const data = structuredClone(FIXTURES);
+    data.config.tokens = [];
+    await openOrganizer(withTokens(data));
+    await screen.findByLabelText('Price in NEAR');
+    expect(screen.queryByLabelText('Currency')).toBeNull();
+  });
+
+  it('offers to collect a confirmed tUSD event in tUSD, to an organizer the token knows', async () => {
+    const services = await openOrganizer(withTokens());
+    const button = await screen.findByRole('button', { name: 'Collect 25 tUSD to org.testnet' });
+    expect(screen.getByRole('button', { name: 'Collect 4.5 NEAR to org.testnet' })).toBeTruthy();
+    fireEvent.click(button);
+    await screen.findByText('Sent 25 tUSD to org.testnet.');
+    expect(services.wallet.sent).toEqual([actions.claimPayout(12)]);
+  });
+
+  it('offers the registration before a payout the token could not deliver', async () => {
+    const data = structuredClone(FIXTURES_WITH_TOKENS);
+    delete data.tokens[TUSD]?.balances[ORGANIZER];
+    const services = await openOrganizer(withTokens(data));
+    expect(
+      await screen.findByText(
+        /org\.testnet is not registered with tUSD, so the token cannot pay it/,
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Collect 25 tUSD to org.testnet' })).toBeNull();
+    // The NEAR payout needs no registration.
+    expect(screen.getByRole('button', { name: 'Collect 4.5 NEAR to org.testnet' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Register with tUSD for 0.00125 NEAR' }));
+    await screen.findByText(/Demo: nothing was registered/);
+    expect(services.wallet.sent).toEqual([
+      actions.registerWithToken(TUSD, ORGANIZER, parseNear('0.00125')),
+    ]);
+  });
+
+  it('a payout the token refused says nothing was paid, why, and offers the registration', async () => {
+    // The page read org.testnet as registered; it unregistered from tUSD before collecting.
+    let unregistered = false;
+    const fixtures = createFixtureReader(FIXTURES_WITH_TOKENS);
+    const reader: Reader = {
+      ...fixtures,
+      tokenRegistration: async (token, account) => {
+        const found = await fixtures.tokenRegistration(token, account);
+        return unregistered && account === ORGANIZER ? { ...found, registered: false } : found;
+      },
+    };
+    const wallet = createFixtureWallet(ORGANIZER);
+    wallet.answer = async () => ({
+      txHash: TX_FIXTURES.tokenPayoutRefused.hash,
+      signerId: TX_FIXTURES.tokenPayoutRefused.signerId,
+    });
+    await openOrganizer(testServices({ reader, wallet }));
+    const collect = await screen.findByRole('button', { name: 'Collect 25 tUSD to org.testnet' });
+    unregistered = true;
+    fireEvent.click(collect);
+    const title = await screen.findByText('The payout did not complete.');
+    const box = title.closest('[role="alert"]') as HTMLElement;
+    expect(box.textContent).toContain(
+      'Nothing was paid and nothing was lost: tUSD could not pay org.testnet, which is not registered with it.',
+    );
+    expect(box.textContent).toContain(
+      '25 tUSD is available to collect again. Register org.testnet with tUSD, then collect again.',
+    );
+    expect(box.textContent).not.toContain('Failed step');
+    // The registration is read again: the one-step registration replaces the collect button.
+    expect(
+      await screen.findByRole('button', { name: 'Register with tUSD for 0.00125 NEAR' }),
+    ).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Collect 25 tUSD to org.testnet' })).toBeNull();
+  });
+
+  it('keeps the payout when the registration cannot be checked, and says what may happen', async () => {
+    const reader: Reader = {
+      ...createFixtureReader(FIXTURES_WITH_TOKENS),
+      tokenRegistration: () => Promise.reject(new Error('down')),
+    };
+    await openOrganizer(testServices({ reader, wallet: createFixtureWallet(ORGANIZER) }));
+    expect(
+      await screen.findByText(/Could not check that org\.testnet is registered with tUSD/),
+    ).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Collect 25 tUSD to org.testnet' })).toBeTruthy();
   });
 });

@@ -11,6 +11,7 @@ import {
   type EntryPass,
   FIXTURE_CONTRACT_ID,
   FIXTURES,
+  FIXTURES_WITH_TOKENS,
   type FixtureData,
   formatDateTime,
   nep413Hash,
@@ -491,6 +492,7 @@ describe('the exposure cap over several purchases', () => {
           status: 'Active',
           claim: 'Reserved',
           pending_operation_id: null,
+          currency: null,
         });
         const hash = `MintHash${serial}11111111111111111111111111111111111`;
         minted[hash] = okTx(hash, tokenId);
@@ -589,6 +591,7 @@ describe('the exposure cap against stale reads and lost sends', () => {
           status: 'Active',
           claim: 'Reserved',
           pending_operation_id: null,
+          currency: null,
         });
         const hash = `Mint${serial}Hash1111111111111111111111111111111111`;
         minted[hash] = okTx(hash, tokenId);
@@ -1051,6 +1054,158 @@ describe('claim_refund', () => {
     });
     expect(result.text).not.toContain('Refunded');
     expect(result.text).toContain('did not complete');
+  });
+});
+
+describe('events and tickets priced in a token (interface v2)', () => {
+  const TOKEN = 'tusd.testnet';
+  const tokenDeps = (signer: AgentSigner | null, data: FixtureData = FIXTURES_WITH_TOKENS) =>
+    deps(signer, { reader: createFixtureReader(data) });
+
+  it('list_events writes each price in its own currency and names the accepted tokens', async () => {
+    const client = await connect(tokenDeps(null));
+    const result = await call(client, 'list_events');
+    expect(result.text).toContain('Event 10, "Indie showcase": On sale, 10 tUSD per ticket');
+    expect(result.text).toContain('Event 1, "Jazz night": On sale, 1.5 NEAR per ticket');
+    expect(result.data.tokens).toEqual([{ account_id: TOKEN, symbol: 'tUSD', decimals: 6 }]);
+    expect(result.data.events).toContainEqual(
+      expect.objectContaining({ event_id: 10, currency: TOKEN }),
+    );
+  });
+
+  it('get_event shows the price and the reserved money in tUSD, and that the agent buys in NEAR only', async () => {
+    const client = await connect(tokenDeps(null));
+    const { text, data } = await call(client, 'get_event', { event_id: 10 });
+    expect(text).toContain('Price: 10 tUSD per ticket; 2 of 40 sold.');
+    expect(text).toContain('Currency: tUSD, the token tusd.testnet.');
+    expect(text).toContain('its caps are in NEAR');
+    expect(text).toContain("Reserved in the contract for this event's tickets: 20 tUSD.");
+    expect(data.tokens).toEqual([{ account_id: TOKEN, symbol: 'tUSD', decimals: 6 }]);
+  });
+
+  it('get_ticket writes the principal and the claim in the ticket currency', async () => {
+    const client = await connect(tokenDeps(null));
+    const { text } = await call(client, 'get_ticket', { token_id: '11-1' });
+    expect(text).toContain('Principal: 25 tUSD.');
+    expect(text).toContain('the holder can claim 25 tUSD back with claim_refund');
+    expect(text).not.toContain('NEAR');
+  });
+
+  it('list_my_tickets shows tUSD tickets in tUSD and keeps them out of the NEAR exposure', async () => {
+    const client = await connect(tokenDeps(null));
+    const result = await call(client, 'list_my_tickets');
+    expect(result.text).toContain('- Ticket 11-1 (event 11): 25 tUSD, Claimable');
+    expect(result.text).toContain('- Ticket 8-1 (event 8): 1.5 NEAR, Claimable');
+    expect(result.data).toMatchObject({ exposure: parseNear('8.5'), in_flight: '0' });
+    expect(result.text).toContain(
+      'Tickets priced in a token are not counted: the caps are in NEAR.',
+    );
+  });
+
+  it('buy_ticket refuses an event priced in a token with a sentence, and signs nothing', async () => {
+    const { signer, calls } = recordingSigner();
+    const client = await connect(tokenDeps(signer));
+    const result = await call(client, 'buy_ticket', { event_id: 10 });
+    expect(result.data).toMatchObject({
+      status: 'denied',
+      reason: 'currency_not_near',
+      tx_hash: null,
+    });
+    expect(result.text).toBe(
+      'Denied: Event 10 is priced in tusd.testnet, not in NEAR: this agent only buys tickets priced in NEAR, because its caps are in NEAR. Nothing was signed.',
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it('verify_contract checks NEAR against NEAR events and each token against its own events', async () => {
+    const client = await connect(tokenDeps(null));
+    const result = await call(client, 'verify_contract');
+    const nearHeld = FIXTURES_WITH_TOKENS.accounting
+      .filter((a) => a.currency === null)
+      .reduce((sum, a) => sum + BigInt(a.principal_reserved) + BigInt(a.organizer_available), 0n);
+    expect(result.data).toMatchObject({
+      held: nearHeld.toString(),
+      balance_covers_held: true,
+      events_counted: 11,
+      tokens_held: [
+        {
+          account_id: TOKEN,
+          symbol: 'tUSD',
+          decimals: 6,
+          // 20 reserved for event 10, 50 for event 11 plus its 25 refund on the way, 25 for the organizer of 12.
+          balance: '120000000',
+          held: '95000000',
+          balance_covers_held: true,
+        },
+      ],
+    });
+    expect(result.text).toContain('across 8 events priced in NEAR');
+    expect(result.text).toContain(
+      'tUSD (tusd.testnet): the contract holds 120 tUSD and owes 95 tUSD across 3 events. The balance covers it.',
+    );
+  });
+
+  it('verify_contract says when a token balance does not cover what its events owe', async () => {
+    const data = structuredClone(FIXTURES_WITH_TOKENS);
+    const ledger = data.tokens[TOKEN];
+    if (ledger) ledger.balances[FIXTURE_CONTRACT_ID] = '10000000';
+    const result = await call(await connect(tokenDeps(null, data)), 'verify_contract');
+    expect(result.data.tokens_held).toEqual([
+      expect.objectContaining({ balance: '10000000', balance_covers_held: false }),
+    ]);
+    expect(result.text).toContain('The balance does NOT cover it.');
+  });
+
+  it('says in the server instructions and the tool description that it buys in NEAR only', async () => {
+    const client = await connect(tokenDeps(recordingSigner().signer));
+    expect(client.getInstructions()).toContain('It buys only events priced in NEAR');
+    const { tools } = await client.listTools();
+    expect(tools.find((t) => t.name === 'buy_ticket')?.description).toContain(
+      'Denied without signing when the event is priced in a token (the caps are in NEAR)',
+    );
+  });
+
+  it('buy_ticket still buys an event priced in NEAR on the same deployment', async () => {
+    const { signer, calls } = recordingSigner();
+    const client = await connect(tokenDeps(signer));
+    const result = await call(client, 'buy_ticket', { event_id: 1 });
+    expect(calls).toEqual([
+      { receiverId: FIXTURE_CONTRACT_ID, call: actions.buyTicket(1, parseNear('1.5')) },
+    ]);
+    expect(result.data).toMatchObject({ status: 'succeeded' });
+  });
+
+  it('claim_refund claims a tUSD ticket the agent holds as for NEAR, and says the amount in tUSD', async () => {
+    const { signer, calls } = recordingSigner();
+    const client = await connect(tokenDeps(signer));
+    const result = await call(client, 'claim_refund', { token_id: '11-1' });
+    expect(calls).toEqual([{ receiverId: FIXTURE_CONTRACT_ID, call: actions.claimRefund('11-1') }]);
+    expect(result.data).toMatchObject({ status: 'succeeded', value: true });
+    expect(result.text).toContain('Refunded 25 tUSD to luis.testnet.');
+  });
+
+  it('claim_refund is not sent when the agent is not registered with the token', async () => {
+    const data = structuredClone(FIXTURES_WITH_TOKENS);
+    delete data.tokens[TOKEN]?.balances[AGENT];
+    const { signer, calls } = recordingSigner();
+    const client = await connect(tokenDeps(signer, data));
+    const result = await call(client, 'claim_refund', { token_id: '11-1' });
+    expect(result.data).toMatchObject({ status: 'not_sent', reason: 'not_registered' });
+    expect(result.text).toContain('is not registered with tusd.testnet');
+    expect(calls).toEqual([]);
+  });
+
+  it('transfer_ticket gives a tUSD ticket away and names the right in tUSD', async () => {
+    const { signer, calls } = recordingSigner();
+    const client = await connect(tokenDeps(signer));
+    const result = await call(client, 'transfer_ticket', {
+      token_id: '10-1',
+      receiver_id: 'ana.testnet',
+    });
+    expect(calls).toEqual([
+      { receiverId: FIXTURE_CONTRACT_ID, call: actions.transferTicket('10-1', 'ana.testnet') },
+    ]);
+    expect(result.text).toContain('the right to its 10 tUSD refund');
   });
 });
 

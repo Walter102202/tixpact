@@ -6,6 +6,7 @@ import {
   TicketHistorySchema,
   TicketViewSchema,
   TokenIdSchema,
+  TokenSpecSchema,
   YoctoSchema,
 } from '@ticket-escrow/client';
 import { z } from 'zod';
@@ -76,6 +77,13 @@ export const INPUT = {
   show_entry_pass: z.strictObject({ token_id: tokenId }),
 } as const satisfies Record<ToolName, z.ZodType>;
 
+/** The units of every amount in a result: `currency` null is NEAR, otherwise one of these tokens. */
+const TokensSchema = z
+  .array(TokenSpecSchema)
+  .describe(
+    'The tokens the contract accepts besides NEAR, with their symbol and decimals. An amount whose currency is null is yoctoNEAR; otherwise it is in the smallest unit of that token.',
+  );
+
 const CallSchema = z.strictObject({
   contract_id: z.string(),
   method_name: z.string(),
@@ -125,15 +133,18 @@ export const OUTPUT = {
     events: z.array(EventViewSchema),
     /** Pass as `from_index` to read the next page; null when this page is the last one. */
     next_from_index: z.int().min(0).nullable(),
+    tokens: TokensSchema,
   }),
   get_event: z.strictObject({
     event: EventViewSchema,
     accounting: AccountingViewSchema.nullable(),
+    tokens: TokensSchema,
   }),
   get_ticket: z.strictObject({
     ticket: TicketViewSchema,
     event: EventViewSchema.nullable(),
     history: TicketHistorySchema.nullable(),
+    tokens: TokensSchema,
   }),
   list_my_tickets: z.strictObject({
     account_id: z.string(),
@@ -145,6 +156,7 @@ export const OUTPUT = {
     exposure: YoctoSchema,
     /** The part of `exposure` from purchases signed but not in the list yet. */
     in_flight: YoctoSchema,
+    tokens: TokensSchema,
   }),
   get_wallet: z.strictObject({
     account_id: z.string(),
@@ -170,6 +182,20 @@ export const OUTPUT = {
     reserved_principal: YoctoSchema,
     balance_covers_held: z.boolean(),
     events_counted: z.int().min(0),
+    /** The events priced in NEAR, the only ones `held` and `balance` are about. */
+    near_events: z.int().min(0),
+    /** Per accepted token: its balance held by the contract against what its own events are owed. */
+    tokens_held: z.array(
+      z.strictObject({
+        account_id: z.string(),
+        symbol: z.string(),
+        decimals: z.int().min(0),
+        balance: YoctoSchema,
+        held: YoctoSchema,
+        balance_covers_held: z.boolean(),
+        events: z.int().min(0),
+      }),
+    ),
     block_height: z.int().min(0),
   }),
   buy_ticket: WriteResultSchema,

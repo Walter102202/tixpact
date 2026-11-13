@@ -134,6 +134,15 @@ Each version of the contract goes to a new account, because the stored state of 
 
 The release went to a clean account on 2026-11-13: `ticket-escrow.testnet`, with the same wasm file as `te-d4-escrow.testnet` (same SHA-256 and code hash; deployment transaction `A4uTuaVZ86egbpKbL9NAPsENKJPih7yfMurGTq5V2tGS`). It was paid by `te-d1-luis.testnet` because the faucet answered 429. The scenario, the direct calls and the agent's runs were played again on it. Why: `docs/decisions/2026-11-13-the-release-goes-to-a-clean-account.md`.
 
+Version 2 of the contract (prices in a token, a ticket that draws its state) went to its own account on 2026-11-13, because the stored state of version 1 cannot be read by version 2: `ticket-escrow-v2.testnet`, built by the gate from commit `dd99222` (contract closed at `479ef78`), wasm SHA-256 `b17e6c47a884601dd9e98610237ca75d49c02b2bcb980995613f05332ba45a22`, code hash `CwryMXK37NQ5KUR22Ca23bubTJZXrKiis1qph3QE5VXP`. The deployment and `new` went in one transaction signed by the account itself (`CgZoVB5G8YMdcfvnd6SPsAesszbva9dxECWkPUSzLWfr`): `new` is private, so nobody can initialize the contract in between. Its only accepted token is `tusd.ticket-escrow-v2.testnet`, which is `fixtures/test-token` deployed as `tUSD` with 6 decimals: a test dollar anyone can mint, worth nothing. The contract was then registered with the token (`storage_deposit`, transaction `GXU94xaGLh1biTFcZ51PAdFGpFtqcNY4TNkBaMb5UYTh`) so that it can receive payments. `ticket-escrow.testnet` keeps version 1 with its own proofs, and `te-d5-escrow.testnet` was the rehearsal of version 2.
+
+```bash
+# deploy and initialize in one transaction, signed by the contract account
+near contract deploy <contract>.testnet use-file <wasm> with-init-call new json-args '{"tokens":[{"account_id":"<token>.testnet","symbol":"tUSD","decimals":6}]}' prepaid-gas '30 Tgas' attached-deposit '0 NEAR' network-config testnet sign-with-legacy-keychain send
+# read it back: code hash against the local file, keys, and what it holds in NEAR and in the token
+node scripts/verify-deployment.mjs <contract>.testnet --wasm <wasm> --allow-keys --tokens <token>.testnet
+```
+
 When the faucet answers 429, a new account is paid by one of the development accounts instead: `near account create-account fund-myself <new>.testnet '6 NEAR' use-manually-provided-public-key <public key> sign-as <funder>.testnet network-config testnet sign-with-legacy-keychain send` (run for `te-d4-escrow.testnet` on 2026-11-13).
 
 The scripts that need those keys run inside WSL, where Node 22.22.0 is installed (`/usr/bin/node`): `node scripts/demo-scenario.mjs` reads the keychain itself. Deleting the final contract's keys (Task I3) is done with Walter present and is written down then.

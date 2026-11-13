@@ -1,4 +1,5 @@
-import { parseNear } from './format.js';
+import { ticketDisplayFor } from './display.js';
+import { parseNear, unitOf } from './format.js';
 import { type AccountProof, groupVerifierOf, type Reader } from './reader.js';
 import {
   type AccountingView,
@@ -32,6 +33,14 @@ const ANA = 'ana.testnet';
 const LUIS = 'luis.testnet';
 /** A contract Ana sends ticket 1-4 to with `nft_transfer_call`; its answer is still pending. */
 const RECEIVER = 'resale-desk.testnet';
+/** Holds a tUSD ticket that Luis gave her, but is not registered with tUSD (interface v2). */
+const SOFIA = 'sofia.testnet';
+
+/** The test dollar token the fixture deployment accepts: symbol tUSD, 6 decimals. */
+export const FIXTURE_TOKEN_ID = 'tusd.testnet';
+const TUSD = FIXTURE_TOKEN_ID;
+/** A tUSD amount in its smallest unit, from whole dollars and cents: `usd(12.5)` is 12_500_000. */
+const usd = (dollars: number) => (BigInt(Math.round(dollars * 100)) * 10_000n).toString();
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -39,7 +48,7 @@ const DAY = 24 * HOUR;
 const NOW = FIXTURE_NOW_MS;
 
 const config: Config = {
-  version: '1.0.0',
+  version: '2.0.0',
   max_capacity: 100,
   max_page: 50,
   max_title_bytes: 120,
@@ -51,6 +60,7 @@ const config: Config = {
   storage_per_event: parseNear('0.05'),
   storage_per_ticket: parseNear('0.013'),
   fault_injection: false,
+  tokens: [{ account_id: TUSD, symbol: 'tUSD', decimals: 6 }],
 };
 
 /** Fixture budget: one event plus `capacity` tickets of storage. The live quote comes from the contract. */
@@ -90,6 +100,7 @@ function event(spec: EventSpec): EventView {
     resolved_by: null,
     evidence_ref: null,
     now_ms: NOW,
+    currency: null,
     ...spec,
   };
 }
@@ -209,6 +220,59 @@ const events: EventView[] = [
     resolved_by: ORGANIZER,
     phase: 'Refundable',
   }),
+  // Interface v2: events priced in tUSD, one per outcome, so tUSD tickets exist in every claim
+  // state. Id 9 is left free: the recorded create_event transaction returns 9.
+  event({
+    event_id: 10,
+    title: 'Indie showcase',
+    venue: 'Sala Metro',
+    starts_at_ms: NOW + 2 * DAY,
+    ends_at_ms: NOW + 2 * DAY + 3 * HOUR,
+    resolution_deadline_ms: NOW + 4 * DAY + 3 * HOUR,
+    price: usd(10),
+    capacity: 40,
+    sold: 2,
+    created_at_ms: NOW - DAY,
+    phase: 'OnSale',
+    currency: TUSD,
+  }),
+  event({
+    event_id: 11,
+    title: 'Harbor lights',
+    venue: 'Muelle Prat',
+    starts_at_ms: NOW + DAY,
+    ends_at_ms: NOW + DAY + 4 * HOUR,
+    resolution_deadline_ms: NOW + 3 * DAY + 4 * HOUR,
+    price: usd(25),
+    capacity: 30,
+    sold: 4,
+    created_at_ms: NOW - 4 * DAY,
+    outcome: 'Refundable',
+    outcome_reason: 'Cancelled',
+    resolved_at_ms: NOW - 3 * HOUR,
+    resolved_by: VERIFIER,
+    evidence_ref: 'https://teatro.example/notices/harbor-lights',
+    phase: 'Refundable',
+    currency: TUSD,
+  }),
+  event({
+    event_id: 12,
+    title: 'Rooftop jazz',
+    venue: 'Terraza Bellavista',
+    starts_at_ms: NOW - 2 * DAY,
+    ends_at_ms: NOW - 2 * DAY + 2 * HOUR,
+    resolution_deadline_ms: NOW + DAY,
+    price: usd(12.5),
+    capacity: 20,
+    sold: 2,
+    created_at_ms: NOW - 6 * DAY,
+    outcome: 'Completed',
+    outcome_reason: 'Attested',
+    resolved_at_ms: NOW - 2 * DAY + 3 * HOUR,
+    resolved_by: VERIFIER,
+    phase: 'Completed',
+    currency: TUSD,
+  }),
 ];
 
 const ZERO = '0';
@@ -228,6 +292,7 @@ function accountingRow(
     organizer_pending: ZERO,
     organizer_settled: ZERO,
     operating_budget: quote(capacity),
+    currency: null,
     ...amounts,
   };
 }
@@ -258,6 +323,23 @@ const accounting: AccountingView[] = [
     refund_pending: parseNear('1.5'),
     refunds_settled: parseNear('1.5'),
   }),
+  accountingRow(10, 40, {
+    principal_received: usd(20),
+    principal_reserved: usd(20),
+    currency: TUSD,
+  }),
+  accountingRow(11, 30, {
+    principal_received: usd(100),
+    principal_reserved: usd(50),
+    refund_pending: usd(25),
+    refunds_settled: usd(25),
+    currency: TUSD,
+  }),
+  accountingRow(12, 20, {
+    principal_received: usd(25),
+    organizer_available: usd(25),
+    currency: TUSD,
+  }),
 ];
 
 function ticket(
@@ -268,21 +350,24 @@ function ticket(
   status: TicketView['status'] = 'Active',
   pendingOperationId: number | null = null,
 ): TicketView {
-  const price = events.find((e) => e.event_id === eventId)?.price;
-  if (price === undefined) throw new Error(`fixture event ${eventId} is missing`);
+  const event = events.find((e) => e.event_id === eventId);
+  if (event === undefined) throw new Error(`fixture event ${eventId} is missing`);
   return {
     token_id: `${eventId}-${serial}`,
     event_id: eventId,
     serial,
     owner_id: owner,
-    principal: price,
+    principal: event.price,
     status,
     claim,
     pending_operation_id: pendingOperationId,
+    currency: event.currency,
   };
 }
 
 const REFUND_OPERATION_ID = 7;
+/** The tUSD refund of ticket 11-2, still in flight. */
+const TOKEN_REFUND_OPERATION_ID = 12;
 
 const tickets: TicketView[] = [
   ticket(1, 1, ANA, 'Reserved'),
@@ -301,6 +386,14 @@ const tickets: TicketView[] = [
   ticket(8, 2, LUIS, 'RefundPending', 'RefundPending', REFUND_OPERATION_ID),
   ticket(8, 3, LUIS, 'Refunded', 'Refunded'),
   ticket(8, 4, ANA, 'Refundable'),
+  ticket(10, 1, LUIS, 'Reserved'),
+  ticket(10, 2, ANA, 'Reserved'),
+  ticket(11, 1, LUIS, 'Refundable'),
+  ticket(11, 2, LUIS, 'RefundPending', 'RefundPending', TOKEN_REFUND_OPERATION_ID),
+  ticket(11, 3, LUIS, 'Refunded', 'Refunded'),
+  ticket(11, 4, SOFIA, 'Refundable'),
+  ticket(12, 1, LUIS, 'ReleasedToOrganizer'),
+  ticket(12, 2, ANA, 'ReleasedToOrganizer'),
 ];
 
 const entry = (kind: HistoryEntry['kind'], accountId: string, atMs: number): HistoryEntry => ({
@@ -351,6 +444,23 @@ histories['8-3'] = {
   ],
 };
 
+histories['11-2'] = {
+  dropped: 0,
+  entries: [entry('Purchased', LUIS, NOW - 3 * DAY), entry('RefundRequested', LUIS, NOW - HOUR)],
+};
+histories['11-3'] = {
+  dropped: 0,
+  entries: [
+    entry('Purchased', LUIS, NOW - 3 * DAY),
+    entry('RefundRequested', LUIS, NOW - 2 * HOUR),
+    entry('RefundSettled', LUIS, NOW - 2 * HOUR + 2_000),
+  ],
+};
+histories['11-4'] = {
+  dropped: 0,
+  entries: [entry('Purchased', LUIS, NOW - 3 * DAY), entry('Transferred', SOFIA, NOW - 2 * DAY)],
+};
+
 const operations: OperationView[] = [
   {
     operation_id: REFUND_OPERATION_ID,
@@ -360,27 +470,26 @@ const operations: OperationView[] = [
     recipient_id: LUIS,
     amount: parseNear('1.5'),
     started_at_ms: NOW - HOUR,
+    currency: null,
+  },
+  {
+    operation_id: TOKEN_REFUND_OPERATION_ID,
+    kind: 'Refund',
+    event_id: 11,
+    token_id: '11-2',
+    recipient_id: LUIS,
+    amount: usd(25),
+    started_at_ms: NOW - HOUR,
+    currency: TUSD,
   },
 ];
 
-const held = accounting.reduce(
-  (total, a) =>
-    total +
-    BigInt(a.principal_reserved) +
-    BigInt(a.organizer_available) +
-    BigInt(a.refund_pending) +
-    BigInt(a.organizer_pending) +
-    BigInt(a.operating_budget),
-  0n,
-);
-
-const accountProof: AccountProof = {
-  // What the contract holds plus the balance it was deployed with.
-  balance: (held + BigInt(parseNear('1.25'))).toString(),
-  codeHash: 'E8jZ1giWcVrps8PcV75ATauu6gFRkcwjNtKp7NKmipZG',
-  accessKeys: 0,
-  blockHeight: 190_000_000,
-};
+/** What the contract owes in an event's own currency: everything not yet paid out. */
+const owed = (a: AccountingView) =>
+  BigInt(a.principal_reserved) +
+  BigInt(a.organizer_available) +
+  BigInt(a.refund_pending) +
+  BigInt(a.organizer_pending);
 
 export interface FixtureData {
   contractId: string;
@@ -392,21 +501,92 @@ export interface FixtureData {
   histories: Record<string, TicketHistory>;
   operations: OperationView[];
   accountProof: AccountProof;
+  /**
+   * Per NEP-141 token: its minimum registration deposit (yoctoNEAR) and the balance of every
+   * registered account (smallest units). An account without an entry is not registered.
+   */
+  tokens: Record<string, { minDeposit: string; balances: Record<string, string> }>;
   /** What `get_policy` answers per account (Sputnik DAO verifiers); every other account has none. */
   policies?: Record<string, unknown>;
 }
 
-export const FIXTURES: FixtureData = {
-  contractId: FIXTURE_CONTRACT_ID,
-  nowMs: NOW,
-  config,
+/** One coherent chain: the contract's balances follow from the events it holds. */
+function fixtureData(
+  chosen: Pick<FixtureData, 'events' | 'accounting' | 'tickets' | 'operations'>,
+): FixtureData {
+  const { accounting: rows, tickets: held } = chosen;
+  /** NEAR the contract holds: what NEAR events owe, plus every event's budget (always NEAR). */
+  const near = rows.reduce(
+    (total, a) => total + (a.currency === null ? owed(a) : 0n) + BigInt(a.operating_budget),
+    0n,
+  );
+  /** What the contract owes in a token, which its balance of that token covers exactly. */
+  const owedIn = (token: string) =>
+    rows
+      .filter((a) => a.currency === token)
+      .reduce((total, a) => total + owed(a), 0n)
+      .toString();
+  return {
+    contractId: FIXTURE_CONTRACT_ID,
+    nowMs: NOW,
+    config,
+    ...chosen,
+    histories: Object.fromEntries(
+      held.flatMap((t) => {
+        const history = histories[t.token_id];
+        return history === undefined ? [] : [[t.token_id, history]];
+      }),
+    ),
+    accountProof: {
+      // What the contract holds plus the balance it was deployed with.
+      balance: (near + BigInt(parseNear('1.25'))).toString(),
+      codeHash: 'E8jZ1giWcVrps8PcV75ATauu6gFRkcwjNtKp7NKmipZG',
+      accessKeys: 0,
+      blockHeight: 190_000_000,
+    },
+    // An account is registered with a token exactly when it has a balance entry. Ana has less than
+    // a ticket to event 10 costs (the faucet case); Sofia holds ticket 11-4 but is not registered,
+    // so its refund cannot reach her until she registers.
+    tokens: {
+      [TUSD]: {
+        // NEP-145 minimum of a near-contract-standards token: 125 bytes at 10^19 yoctoNEAR a byte.
+        minDeposit: parseNear('0.00125'),
+        balances: {
+          [FIXTURE_CONTRACT_ID]: owedIn(TUSD),
+          [LUIS]: usd(40),
+          [ANA]: usd(4),
+          [ORGANIZER]: '0',
+        },
+      },
+    },
+  };
+}
+
+const inNear = <T extends { currency: string | null }>(rows: readonly T[]) =>
+  rows.filter((row) => row.currency === null);
+
+/**
+ * The default fixture chain: the events priced in NEAR, in the shapes of interface v2. The
+ * deployment accepts tUSD and the token ledger exists, but no event is priced in it.
+ */
+export const FIXTURES: FixtureData = fixtureData({
+  events: inNear(events),
+  accounting: inNear(accounting),
+  tickets: inNear(tickets),
+  operations: inNear(operations),
+});
+
+/**
+ * `FIXTURES` plus three events priced in tUSD (ids 10, 11 and 12: on sale, refunds open, completed),
+ * with tUSD tickets in every claim state, a tUSD refund in flight, and a holder who is not
+ * registered with the token.
+ */
+export const FIXTURES_WITH_TOKENS: FixtureData = fixtureData({
   events,
   accounting,
   tickets,
-  histories,
   operations,
-  accountProof,
-};
+});
 
 /** A `Reader` over fixture data. Every result is a fresh copy parsed by the live schemas. */
 export function createFixtureReader(data: FixtureData = FIXTURES): Reader {
@@ -451,8 +631,42 @@ export function createFixtureReader(data: FixtureData = FIXTURES): Reader {
     getAccountProof: async () => structuredClone(data.accountProof),
     // The accounts the fixture data names exist; any other does not.
     accountExists: async (accountId) => fixtureAccounts(data).has(accountId),
+    // A standard token reports 0 for an account it does not know.
+    tokenBalance: async (token, accountId) =>
+      parsed(YoctoSchema, tokenLedger(data, token).balances[accountId] ?? '0'),
+    tokenRegistration: async (token, accountId) => {
+      const ledger = tokenLedger(data, token);
+      return {
+        registered: Object.hasOwn(ledger.balances, accountId),
+        minDeposit: parsed(YoctoSchema, ledger.minDeposit),
+      };
+    },
     readGroupVerifier: async (accountId) => groupVerifierOf(data.policies?.[accountId]),
+    // Drawn from the fixture data as the contract draws it from its own (`display.ts`).
+    ticketDisplay: async (tokenId) => {
+      const ticket = orNull(
+        TicketViewSchema,
+        data.tickets.find((t) => t.token_id === tokenId),
+      );
+      if (ticket === null) return null;
+      const event = parsed(
+        EventViewSchema,
+        data.events.find((e) => e.event_id === ticket.event_id),
+      );
+      return ticketDisplayFor(
+        event,
+        ticket,
+        unitOf(parsed(ConfigSchema, data.config), ticket.currency),
+      );
+    },
   };
+}
+
+/** The ledger of a fixture token; any other account answers like a missing contract. */
+function tokenLedger(data: FixtureData, token: string): FixtureData['tokens'][string] {
+  const ledger = data.tokens[token];
+  if (ledger === undefined) throw new Error(`Account ${token} has no token contract.`);
+  return ledger;
 }
 
 function fixtureAccounts(data: FixtureData): Set<string> {
@@ -507,6 +721,7 @@ function recordedStatus(
   action: { method: string; argsBase64: string; deposit: string; gasTgas: number },
   finalStatus: unknown,
   receipts: ReturnType<typeof outcome>[],
+  receiverId: string = FIXTURE_CONTRACT_ID,
 ): Record<string, unknown> {
   const first = receipts[0]?.id ?? '';
   return {
@@ -516,7 +731,7 @@ function recordedStatus(
       signer_id: signerId,
       public_key: 'ed25519:9rE2JTbwQx8zfpNPuBL6faJkMthYwJkrFqio7RxmvZSf',
       nonce: 190_000_000_001,
-      receiver_id: FIXTURE_CONTRACT_ID,
+      receiver_id: receiverId,
       actions: [
         {
           FunctionCall: {
@@ -537,7 +752,7 @@ function recordedStatus(
 }
 
 const eventJson = (event: string, data: Record<string, unknown>) =>
-  `EVENT_JSON:${JSON.stringify({ standard: 'ticket_escrow', version: '1.0.0', event, data: [data] })}`;
+  `EVENT_JSON:${JSON.stringify({ standard: 'ticket_escrow', version: '2.0.0', event, data: [data] })}`;
 
 const OUT_OF_GAS = {
   Failure: {
@@ -592,7 +807,11 @@ function recordedCall(spec: {
   gasTgas: number;
   /** The call's return value; omitted for a method that returns nothing. */
   value?: unknown;
+  /** The account called: the escrow contract unless given (a token, in interface v2). */
+  receiverId?: string;
+  logs?: string[];
 }): RecordedTx {
+  const receiverId = spec.receiverId ?? FIXTURE_CONTRACT_ID;
   const returned = { SuccessValue: spec.value === undefined ? '' : base64Json(spec.value) };
   return {
     hash: spec.hash,
@@ -609,9 +828,10 @@ function recordedCall(spec: {
       },
       returned,
       [
-        outcome(spec.receiptId, FIXTURE_CONTRACT_ID, returned, [spec.refundId]),
+        outcome(spec.receiptId, receiverId, returned, [spec.refundId], spec.logs),
         outcome(spec.refundId, spec.signerId, GAS_REFUND),
       ],
+      receiverId,
     ),
   };
 }
@@ -1004,7 +1224,315 @@ export const TX_FIXTURES = {
       ],
     ),
   },
+
+  /**
+   * Sofia registers with tUSD (`storage_deposit`, registration only, exactly the minimum), so a
+   * refund can reach her. The token returns her storage balance.
+   */
+  tokenRegistered: recordedCall({
+    hash: 'v5tmsYbVCWb8u41W7jqtxdqfyAqeJFzGXAXWFemWgUx2',
+    receiptId: 'ekAYRWGUfwBjXSwKMvqZYZqU5waivhjo8Wie5jTiv65h',
+    refundId: '4hkPKqzvHhV2gbk2wiev5fGLbFHL2gtSPGYFS5caCzWb',
+    signerId: SOFIA,
+    receiverId: TUSD,
+    method: 'storage_deposit',
+    args: { account_id: SOFIA, registration_only: true },
+    deposit: parseNear('0.00125'),
+    gasTgas: 30,
+    value: { total: parseNear('0.00125'), available: '0' },
+  }),
+
+  /** Ana asks the test token for its faucet: 100 tUSD minted to her, returned as the amount. */
+  faucetMinted: recordedCall({
+    hash: 'tFpFJ46EVTE5UBdJWycCkax4wohE2QK6mL6ZFAVga7qi',
+    receiptId: 'VmDvR8L6idM5KJoVpXC5hLhq1PFQGS4rUPwTqtftdyds',
+    refundId: 'MvVQvpwznoXKhpgAZjMB5mQzaTYsqssXq9movcfXpKyp',
+    signerId: ANA,
+    receiverId: TUSD,
+    method: 'faucet',
+    args: {},
+    deposit: '0',
+    gasTgas: 30,
+    value: usd(100),
+    logs: [
+      `EVENT_JSON:${JSON.stringify({ standard: 'nep141', version: '1.0.0', event: 'ft_mint', data: [{ owner_id: ANA, amount: usd(100), memo: 'faucet' }] })}`,
+    ],
+  }),
+
+  /** Luis buys ticket 10-3 with 10 tUSD (`ft_transfer_call`): the contract keeps it all. */
+  tokenBuySucceeded: tokenPurchase({
+    hash: 'Vjhz21xfQF6x7xBNzbqLEuA1YJJf18sGrMP6UN6XgFXs',
+    ids: [
+      'woSkAgKPmqr6CnqPdP2nyW9nPryQ1qkXwhKryetXJvqG',
+      '3sPshYEfbRM9XpvMiQhgmAaQ7sWUjRzWoT5GRxPRhfPY',
+      's39zi94MBVzRMgPXqVykVmNfYoMaS8zUXRx4NCLPFtXW',
+      'ZLmwxwJw6yRA4i8gpwt4o1BciecEH5qc5nGgF1nSDuSi',
+    ],
+    buyer: LUIS,
+    eventId: 10,
+    amount: usd(10),
+    onTransfer: {
+      status: { SuccessValue: base64Json('0') },
+      logs: [
+        `EVENT_JSON:${JSON.stringify({ standard: 'nep171', version: '1.2.0', event: 'nft_mint', data: [{ owner_id: LUIS, token_ids: ['10-3'] }] })}`,
+        // The fields contract v2 logs (contract/src/log.rs on track/c2, 8d3e4eb).
+        eventJson('ticket_purchased', {
+          event_id: 10,
+          token_id: '10-3',
+          owner_id: LUIS,
+          price: usd(10),
+          currency: TUSD,
+        }),
+      ],
+    },
+  }),
+
+  /**
+   * Luis, who holds 40 tUSD, tries to buy a ticket to event 12 after it started: `ft_on_transfer`
+   * panics, the token gives the 12.5 tUSD back in its resolver, and the transaction itself succeeds.
+   */
+  tokenBuyRejected: tokenPurchase({
+    hash: 'Ezf6RTqKhHuVm438VrJNvboHeg9n6EDsYaAHU9gL4NbC',
+    ids: [
+      '8jbEBE4mgmjYYHsEQufVspcKzpJuHeEBFeHSGwbMhqG9',
+      'UZucNeWXANKL6b5BkcvD42AS6aU1xLqJLBQsTu4LUckG',
+      '3NwTP5f4Rjtz1NMTs81gXCjAdoCFqA7XRKyx87HpSabu',
+      '1VdouCCNStLcoAW4Zwp92GDw1B1HdjY1VELyXbvCDeVB',
+    ],
+    buyer: LUIS,
+    eventId: 12,
+    amount: usd(12.5),
+    onTransfer: {
+      status: panicked('ERR_TOO_LATE: tickets to event 12 were sold until it started'),
+      logs: [],
+    },
+  }),
+
+  /**
+   * Sofia tries to buy a ticket to event 10 without being registered with tUSD: the token itself
+   * rejects the call, so nothing reaches the contract and no money moves.
+   */
+  tokenBuyUnfunded: {
+    hash: 'xQFx73ztTGc1khciMGb3GwhNZoKrN9d1ShGmbEG7Ntcz',
+    signerId: SOFIA,
+    failedReceiptId: 'vVZCSKyRiGkza9iaCrUhn4pGCR2GKvNPSJvpkbfb43ay',
+    status: recordedStatus(
+      'xQFx73ztTGc1khciMGb3GwhNZoKrN9d1ShGmbEG7Ntcz',
+      SOFIA,
+      tokenPurchaseAction(10, usd(10)),
+      panicked(`The account ${SOFIA} is not registered`),
+      [
+        outcome(
+          'vVZCSKyRiGkza9iaCrUhn4pGCR2GKvNPSJvpkbfb43ay',
+          TUSD,
+          panicked(`The account ${SOFIA} is not registered`),
+          ['yc2NUzHpRGToTUJF2TXKquxNzqKhWcJ3Fh1GXYc5BAD5'],
+        ),
+        outcome('yc2NUzHpRGToTUJF2TXKquxNzqKhWcJ3Fh1GXYc5BAD5', SOFIA, GAS_REFUND),
+      ],
+      TUSD,
+    ),
+  },
+
+  /**
+   * Sofia claims ticket 11-4 (25 tUSD) without being registered with tUSD: the contract reserves the
+   * refund and sends `ft_transfer`, the token refuses it, and the callback restores the right and
+   * returns `false`. The transaction itself succeeds; no money moved.
+   */
+  tokenClaimRefused: tokenSettlementRefused({
+    hash: 'r6oiWxRwYeeppasLRMkgKCkkBJGWo4ud36FY6QXqDD3Q',
+    ids: [
+      'qn3k4sAzLUxBuRHAVdGKL1PxHPpoJCsTvHBP6a1dGyL5',
+      'NzTRctyhAxR9zcwvUqvkzfD1XqYnaTdby2bC37t3tnyA',
+      'yoctshwTA6kYo7EgUDJMvA4Vn28XhAmKyHZ3vm9T4tuv',
+      '6Q36Cm9EJQbsBY7UMkn2EqW5usk5Kpyjq1oYqfA8CXYg',
+      '4H459RGx2VP3WBL2t8oVXoS5RKX23LM4ibPWbNZrk8Hu',
+    ],
+    signerId: SOFIA,
+    method: 'claim_refund',
+    args: { token_id: '11-4' },
+    operation: {
+      operation_id: 13,
+      kind: 'Refund',
+      event_id: 11,
+      token_id: '11-4',
+      recipient_id: SOFIA,
+      amount: usd(25),
+    },
+  }),
+
+  /**
+   * org.testnet collects the 25 tUSD of event 12 after it unregistered from tUSD (the view fixtures
+   * keep it registered; this is the case where it is not): the token refuses the `ft_transfer`, the
+   * callback makes the 25 tUSD available again and returns `false`.
+   */
+  tokenPayoutRefused: tokenSettlementRefused({
+    hash: 'ERqzLzVbRf7jQXTCzU8UEqJCN3rc4vdJatx5VxTmHncA',
+    ids: [
+      'JdVu35Nzg1DVAGoxyEYdeQE4fh7KGfVVdBsC2WfxeixU',
+      'kQ7ZWLqFVfrNMcKoedhT5vsi5DPCBeuTqZw743Z8ugkh',
+      'pJmwwigTna5M73mdd4qAonvjKPShFxzmo4FEZpqGyyi1',
+      'J6tMccZVNDQ5UwPT8WtGratsqLAChrAHHoyQ9Ve8fi3Y',
+      'VKVyHm8jBSfU3effRRS2LF72ZHBfzoaSZ8XwMFQ2C1JA',
+    ],
+    signerId: ORGANIZER,
+    method: 'claim_payout',
+    args: { event_id: 12 },
+    operation: {
+      operation_id: 14,
+      kind: 'Payout',
+      event_id: 12,
+      token_id: null,
+      recipient_id: ORGANIZER,
+      amount: usd(25),
+    },
+  }),
 } satisfies Record<string, RecordedTx>;
+
+/**
+ * A refund or payout of a token event that the token refused, as contract v2 runs it: the escrow
+ * reserves first and calls `ft_transfer` on the token with 1 yoctoNEAR; the token panics because the
+ * recipient is not registered (and returns the yoctoNEAR to the escrow); the escrow's callback
+ * restores the right and returns `false`, which is the transaction's value.
+ */
+function tokenSettlementRefused(spec: {
+  hash: string;
+  /** Receipt ids: the escrow's call, `ft_transfer`, the callback, the yoctoNEAR back, the gas refund. */
+  ids: [string, string, string, string, string];
+  signerId: string;
+  method: 'claim_refund' | 'claim_payout';
+  args: Record<string, unknown>;
+  operation: {
+    operation_id: number;
+    kind: 'Refund' | 'Payout';
+    event_id: number;
+    token_id: string | null;
+    recipient_id: string;
+    amount: string;
+  };
+}): RecordedTx {
+  const [callId, transferId, callbackId, depositBackId, refundId] = spec.ids;
+  const prefix = spec.operation.kind === 'Refund' ? 'refund' : 'payout';
+  const logged = (event: string) => eventJson(event, { ...spec.operation, currency: TUSD });
+  const refusal = panicked(`The account ${spec.operation.recipient_id} is not registered`);
+  const notMoved = { SuccessValue: base64Json(false) };
+  return {
+    hash: spec.hash,
+    signerId: spec.signerId,
+    failedReceiptId: transferId,
+    status: recordedStatus(
+      spec.hash,
+      spec.signerId,
+      { method: spec.method, argsBase64: base64Json(spec.args), deposit: '1', gasTgas: 100 },
+      notMoved,
+      [
+        outcome(
+          callId,
+          FIXTURE_CONTRACT_ID,
+          { SuccessReceiptId: callbackId },
+          [transferId, callbackId],
+          [logged(`${prefix}_requested`)],
+        ),
+        outcome(transferId, TUSD, refusal, [depositBackId]),
+        outcome(
+          callbackId,
+          FIXTURE_CONTRACT_ID,
+          notMoved,
+          [refundId],
+          [logged(`${prefix}_failed`)],
+        ),
+        // The failed call's 1 yoctoNEAR comes back to the escrow in a later receipt.
+        outcome(depositBackId, FIXTURE_CONTRACT_ID, GAS_REFUND),
+        outcome(refundId, spec.signerId, GAS_REFUND),
+      ],
+    ),
+  };
+}
+
+/** A receipt status for a contract panic with this message. */
+function panicked(message: string) {
+  return {
+    Failure: {
+      ActionError: {
+        index: 0,
+        kind: { FunctionCallError: { ExecutionError: `Smart contract panicked: ${message}` } },
+      },
+    },
+  };
+}
+
+/** The `ft_transfer_call` action of a token purchase, as `actions.buyTicketWithToken` builds it. */
+function tokenPurchaseAction(eventId: number, amount: string) {
+  return {
+    method: 'ft_transfer_call',
+    argsBase64: base64Json({
+      receiver_id: FIXTURE_CONTRACT_ID,
+      amount,
+      memo: null,
+      msg: JSON.stringify({ event_id: eventId }),
+    }),
+    deposit: '1',
+    gasTgas: 100,
+  };
+}
+
+/**
+ * A purchase in tUSD as a near-contract-standards token runs it: `ft_transfer_call` on the token
+ * moves the amount to the contract and calls `ft_on_transfer` there, then `ft_resolve_transfer`
+ * on the token returns whatever the contract did not keep. The transaction's value is the
+ * resolver's: the amount kept, `"0"` when the contract rejected the purchase.
+ */
+function tokenPurchase(spec: {
+  hash: string;
+  /** Receipt ids: transfer call, `ft_on_transfer`, resolver, gas refund. */
+  ids: [string, string, string, string];
+  buyer: string;
+  eventId: number;
+  amount: string;
+  onTransfer: { status: unknown; logs: string[] };
+}): RecordedTx {
+  const [callId, onTransferId, resolveId, refundId] = spec.ids;
+  const kept = 'SuccessValue' in (spec.onTransfer.status as object);
+  const moved = (from: string, to: string, memo?: string) =>
+    `EVENT_JSON:${JSON.stringify({ standard: 'nep141', version: '1.0.0', event: 'ft_transfer', data: [{ old_owner_id: from, new_owner_id: to, amount: spec.amount, ...(memo === undefined ? {} : { memo }) }] })}`;
+  const resolved = { SuccessValue: base64Json(kept ? spec.amount : '0') };
+  return {
+    hash: spec.hash,
+    signerId: spec.buyer,
+    failedReceiptId: kept ? null : onTransferId,
+    status: recordedStatus(
+      spec.hash,
+      spec.buyer,
+      tokenPurchaseAction(spec.eventId, spec.amount),
+      resolved,
+      [
+        outcome(
+          callId,
+          TUSD,
+          { SuccessReceiptId: resolveId },
+          [onTransferId, resolveId],
+          [moved(spec.buyer, FIXTURE_CONTRACT_ID)],
+        ),
+        outcome(
+          onTransferId,
+          FIXTURE_CONTRACT_ID,
+          spec.onTransfer.status,
+          [],
+          spec.onTransfer.logs,
+        ),
+        outcome(
+          resolveId,
+          TUSD,
+          resolved,
+          [refundId],
+          kept ? [] : [moved(FIXTURE_CONTRACT_ID, spec.buyer, 'refund')],
+        ),
+        outcome(refundId, spec.buyer, GAS_REFUND),
+      ],
+      TUSD,
+    ),
+  };
+}
 
 /** A `TxStatusRpc` that answers from recorded statuses, whatever stage is asked for. */
 export function createFixtureRpc(recorded: Record<string, RecordedTx> = TX_FIXTURES): TxStatusRpc {

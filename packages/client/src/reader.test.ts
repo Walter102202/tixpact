@@ -1,7 +1,7 @@
 import { FailoverRpcError, FailoverRpcProvider } from 'near-api-js';
 import { AccountDoesNotExistError } from 'near-api-js/rpc-errors';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createFixtureReader, FIXTURES } from './fixtures.js';
+import { createFixtureReader, FIXTURES, FIXTURES_WITH_TOKENS } from './fixtures.js';
 import { createReader, createRpc, groupVerifierOf, type ReaderRpc } from './reader.js';
 import type { TxStatusRpc } from './tx.js';
 
@@ -177,6 +177,97 @@ describe('accountExists', () => {
       expect(await reader.accountExists?.(id), id).toBe(true);
     }
     expect(await reader.accountExists?.('teatro-typo.testnet')).toBe(false);
+  });
+});
+
+describe('token reads (interface v2)', () => {
+  const TOKEN = 'tusd.testnet';
+
+  /** A fake RPC whose views answer per contract and method, recording every request. */
+  function tokenRpc(answers: Record<string, unknown>) {
+    const calls: Array<Record<string, unknown>> = [];
+    const { rpc } = fakeRpc({});
+    const reader = createReader({
+      contractId: CONTRACT,
+      rpc: {
+        ...rpc,
+        async callFunction(params) {
+          calls.push(params);
+          const key = `${params.contractId} ${params.method}`;
+          if (!(key in answers)) throw new Error(`no fake for ${key}`);
+          return answers[key];
+        },
+      },
+    });
+    return { reader, calls };
+  }
+
+  it('reads a balance with ft_balance_of on the token, at final finality', async () => {
+    const { reader, calls } = tokenRpc({ 'tusd.testnet ft_balance_of': '40000000' });
+    expect(await reader.tokenBalance(TOKEN, 'luis.testnet')).toBe('40000000');
+    expect(calls).toEqual([
+      {
+        contractId: TOKEN,
+        method: 'ft_balance_of',
+        args: { account_id: 'luis.testnet' },
+        blockQuery: FINAL,
+      },
+    ]);
+  });
+
+  it('reads the registration and the minimum deposit from the storage views', async () => {
+    const bounds = { min: '1250000000000000000000', max: '1250000000000000000000' };
+    const registered = tokenRpc({
+      'tusd.testnet storage_balance_of': { total: '1250000000000000000000', available: '0' },
+      'tusd.testnet storage_balance_bounds': bounds,
+    });
+    expect(await registered.reader.tokenRegistration(TOKEN, 'luis.testnet')).toEqual({
+      registered: true,
+      minDeposit: '1250000000000000000000',
+    });
+    expect(registered.calls.map((c) => [c.contractId, c.method, c.args, c.blockQuery])).toEqual([
+      [TOKEN, 'storage_balance_of', { account_id: 'luis.testnet' }, FINAL],
+      [TOKEN, 'storage_balance_bounds', {}, FINAL],
+    ]);
+
+    const unregistered = tokenRpc({
+      'tusd.testnet storage_balance_of': null,
+      'tusd.testnet storage_balance_bounds': { ...bounds, max: null },
+    });
+    expect(await unregistered.reader.tokenRegistration(TOKEN, 'sofia.testnet')).toEqual({
+      registered: false,
+      minDeposit: '1250000000000000000000',
+    });
+  });
+
+  it('refuses a token answer that does not match, naming the method and the token', async () => {
+    const { reader } = tokenRpc({
+      'tusd.testnet ft_balance_of': 40,
+      'tusd.testnet storage_balance_of': null,
+      'tusd.testnet storage_balance_bounds': { min: 1 },
+    });
+    await expect(reader.tokenBalance(TOKEN, 'luis.testnet')).rejects.toThrow(
+      /ft_balance_of on tusd.testnet/,
+    );
+    await expect(reader.tokenRegistration(TOKEN, 'luis.testnet')).rejects.toThrow(
+      /storage_balance_bounds on tusd.testnet/,
+    );
+  });
+
+  it('answers from the fixture ledgers in fixture mode', async () => {
+    const reader = createFixtureReader(FIXTURES_WITH_TOKENS);
+    expect(await reader.tokenBalance(TOKEN, 'luis.testnet')).toBe('40000000');
+    expect(await reader.tokenBalance(TOKEN, 'nobody.testnet')).toBe('0');
+    expect(await reader.tokenRegistration(TOKEN, 'luis.testnet')).toEqual({
+      registered: true,
+      minDeposit: '1250000000000000000000',
+    });
+    expect(await reader.tokenRegistration(TOKEN, 'sofia.testnet')).toMatchObject({
+      registered: false,
+    });
+    await expect(reader.tokenBalance('not-a-token.testnet', 'luis.testnet')).rejects.toThrow(
+      /not-a-token.testnet/,
+    );
   });
 });
 

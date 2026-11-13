@@ -58,14 +58,14 @@ const TOOL_META: Record<ToolName, ToolMeta> = {
   verify_contract: {
     title: 'Verify contract',
     description:
-      'Check the ticket contract itself: its code hash, how many access keys it has (zero means nobody can change it), and whether its balance covers what it owes ticket holders and organizers.',
+      'Check the ticket contract itself: its code hash, how many access keys it has (zero means nobody can change it), and whether its balances cover what it owes ticket holders and organizers, in NEAR and in each token it accepts.',
     readOnly: true,
     destructive: false,
   },
   buy_ticket: {
     title: 'Buy ticket',
     description:
-      "Buy one ticket for an event that is on sale, paying exactly its price from the agent's own account. Denied without signing when the price is above the per-ticket cap or the purchase would take the exposure above its cap.",
+      "Buy one ticket for an event priced in NEAR that is on sale, paying exactly its price from the agent's own account. Denied without signing when the event is priced in a token (the caps are in NEAR), when the price is above the per-ticket cap, or when the purchase would take the exposure above its cap.",
     readOnly: false,
     destructive: false,
   },

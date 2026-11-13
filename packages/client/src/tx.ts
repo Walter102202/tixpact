@@ -1,6 +1,7 @@
 import { base64Decode, bytesToString } from 'near-api-js';
 import { z } from 'zod';
 import { type ContractError, parseContractError } from './errors.js';
+import { TokenIdSchema } from './schemas.js';
 
 // After the wallet returns, the transaction is judged by the chain, not by the wallet: its status
 // is re-read by hash with every receipt, and any failed receipt makes the result a failure, even
@@ -37,13 +38,34 @@ export interface FailedReceipt {
   error: ContractError;
 }
 
+/** A NEP-297 event (`EVENT_JSON:` log) written by a receipt that succeeded. */
+export interface ContractEvent {
+  /** The account whose receipt wrote the log. */
+  executorId: string;
+  receiptId: string;
+  standard: string;
+  version: string;
+  event: string;
+  data: unknown;
+}
+
 export interface TxResult {
   ok: boolean;
   /** The first failed receipt, in the order the node lists them. */
   failedReceipt?: FailedReceipt;
   /** The decoded return value of the transaction, when it has one. */
   value?: unknown;
+  /**
+   * The NEP-297 events of every receipt that succeeded, in the node's order. Always set by
+   * `summarizeTransaction` and `trackTransaction`; a log of a failed receipt is never here.
+   */
+  events?: ContractEvent[];
 }
+
+/** How a purchase ended: the ticket bought, or nothing bought and the contract's code when it gave one. */
+export type PurchaseResult =
+  | { bought: true; tokenId: string }
+  | { bought: false; code: string | null };
 
 export interface TrackOptions {
   /** Requests per stage before giving up. Default 20. */
@@ -225,7 +247,42 @@ export function summarizeTransaction(status: TxStatus): TxResult {
     ok,
     ...(failedReceipt === undefined ? {} : { failedReceipt }),
     ...(value === undefined ? {} : { value }),
+    events: outcomes.filter((o) => succeeded(o.outcome.status)).flatMap(eventsOf),
   };
+}
+
+const EVENT_PREFIX = 'EVENT_JSON:';
+const EventLogSchema = z.object({
+  standard: z.string(),
+  version: z.string(),
+  event: z.string(),
+  data: z.unknown(),
+});
+
+/** The NEP-297 events in one outcome's logs; a malformed `EVENT_JSON:` log is skipped. */
+function eventsOf({ id, outcome }: z.infer<typeof OutcomeWithIdSchema>): ContractEvent[] {
+  return outcome.logs.flatMap((log) => {
+    if (!log.startsWith(EVENT_PREFIX)) return [];
+    let json: unknown;
+    try {
+      json = JSON.parse(log.slice(EVENT_PREFIX.length));
+    } catch {
+      return [];
+    }
+    const parsed = EventLogSchema.safeParse(json);
+    return parsed.success
+      ? [{ executorId: outcome.executor_id, receiptId: id, ...parsed.data, data: parsed.data.data }]
+      : [];
+  });
+}
+
+const PurchasedSchema = z.looseObject({ token_id: TokenIdSchema });
+
+/** The ticket id of a `ticket_purchased` event, whose data is one record or a list of one. */
+function purchasedTicket(data: unknown): string | null {
+  const record = Array.isArray(data) ? data[0] : data;
+  const parsed = PurchasedSchema.safeParse(record);
+  return parsed.success ? parsed.data.token_id : null;
 }
 
 /**
@@ -234,6 +291,29 @@ export function summarizeTransaction(status: TxStatus): TxResult {
  */
 export function moneyMoved(result: TxResult): boolean {
   return result.ok && result.value === true;
+}
+
+/**
+ * Whether a purchase bought a ticket, for `buy_ticket` (NEAR) and for `ft_transfer_call` on a token
+ * alike. A token purchase succeeds as a transaction even when the contract rejected it, because the
+ * token refunds the buyer in its resolver: so the verdict comes from the receipts.
+ *
+ * Bought only when a receipt run by `contractId` (the escrow) succeeded and logged
+ * `ticket_purchased` of standard `ticket_escrow`; its `token_id` is the ticket, the first such event
+ * counts. A look-alike log from any other account (a token's own receipt) is never a purchase, and a
+ * result without events is never one. Otherwise not bought, with the `ERR_` code of the failed
+ * receipt when the escrow ran it, else null (the token refused before the escrow ran).
+ */
+export function purchaseResult(outcome: TxResult, contractId: string): PurchaseResult {
+  for (const event of outcome.events ?? []) {
+    if (event.executorId !== contractId) continue;
+    if (event.standard !== 'ticket_escrow' || event.event !== 'ticket_purchased') continue;
+    const tokenId = purchasedTicket(event.data);
+    if (tokenId !== null) return { bought: true, tokenId };
+  }
+  const failed = outcome.failedReceipt;
+  const code = failed?.executorId === contractId ? failed.error.code : 'UNKNOWN';
+  return { bought: false, code: code === 'UNKNOWN' ? null : code };
 }
 
 export interface ReadUntilChangedOptions {

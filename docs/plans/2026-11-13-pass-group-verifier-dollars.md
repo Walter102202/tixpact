@@ -50,9 +50,9 @@ pub fn ft_on_transfer(&mut self, sender_id: AccountId, amount: U128, msg: String
 ```
 
 - The buyer calls `ft_transfer_call({ receiver_id: <escrow>, amount: <price>, msg: "{\"event_id\":7}" })` on the token with 1 yocto. `sender_id` becomes the first holder.
-- `ft_on_transfer` applies rule R4 and three more checks: the caller (`predecessor`) is the event's `currency`; `amount == price`; `msg` parses. On any failure it **panics** with the code, so the token returns the whole amount to the buyer. New codes: `ERR_WRONG_CURRENCY`, `ERR_BAD_MESSAGE`. A wrong amount is `ERR_WRONG_DEPOSIT`.
+- `ft_on_transfer` applies rule R4 and three more checks: the caller (`predecessor`) is the event's `currency`; `amount == price`; `msg` parses. On any failure it **panics** with the code, so the token returns the whole amount to the buyer. New codes: `ERR_WRONG_CURRENCY`, `ERR_BAD_MESSAGE`. A wrong amount is `ERR_WRONG_DEPOSIT`. A `msg` longer than 1,024 bytes is rejected before it is parsed, with `ERR_LIMIT`.
 - `buy_ticket` on a token-priced event fails with `ERR_WRONG_CURRENCY`. `price` and `principal` are in the smallest unit of the event's currency.
-- Refunds and payouts of a token-priced event call `ft_transfer({ receiver_id, amount, memo: null })` on the token, forwarding the caller's 1 yocto, with static gas `GAS_FT_TRANSFER` (start at 20 Tgas, measure in C7), followed by the same private callback as v1. Rule R7 is unchanged: a recipient who is not registered with the token, or a token that fails, gives the right back, once.
+- Refunds and payouts of a token-priced event call `ft_transfer({ receiver_id, amount, memo: null })` on the token, forwarding the caller's 1 yocto, with static gas `GAS_FT_TRANSFER` (start at 20 Tgas, measure in C7), followed by the same private callback as v1. Rule R7 is unchanged: a recipient who is not registered with the token, or a token that fails, gives the right back, once. The callback reads only the status of the token's receipt (integrator's ruling, 2026-11-13): a receipt that succeeded settles the payment whatever it answered, and is never read as a failure. The token's call keeps the default share of unused gas (second ruling, 2026-11-13, after T2 measured that a 3.97 MB answer at 300 Tgas still settles for 2.33 Tgas): `GAS_FT_TRANSFER` is a floor, and a claimant can attach more if a token ever needs it, which a contract without upgrades could not fix otherwise. The two settlement callbacks also take the default share (third ruling, 2026-11-13 15:45): in v1 they got exactly `GAS_FOR_CALLBACK`, which was safe only while a token's answer stayed cheap to receive; now the callback has 15 Tgas plus half of the unused gas and the token 20 Tgas plus the other half, and 15 + U/2 >= 2.52 + 0.054 x (20 + U/2) holds for every amount U of unused gas. Static gas and every minimum are unchanged.
 - The liquidity check of v1 covers NEAR events only (`total_held` sums NEAR events). For a token the contract cannot read its balance in the same call; a shortfall fails the transfer and R7 restores.
 - The operating budget stays in NEAR for every event. One event's ledger is in one currency; the accounting identity holds per event.
 - `terms_hash` covers `currency`: the Borsh tuple gains it as its last element.
@@ -93,10 +93,10 @@ tokenBalance(token, accountId): Promise<string>
 tokenRegistration(token, accountId): Promise<{ registered: boolean; minDeposit: string }>
 
 // tx.ts
-purchaseResult(outcome): { bought: true; tokenId: string } | { bought: false; code: string | null }
+purchaseResult(outcome, contractId): { bought: true; tokenId: string } | { bought: false; code: string | null }
 ```
 
-`ft_transfer_call` **succeeds as a transaction even when the purchase was rejected** (the token refunds in its resolver). `purchaseResult` decides from the receipts: bought when a `ticket_purchased` event of standard `ticket_escrow` was logged (its `token_id` is the ticket); otherwise not bought, with the `ERR_` code of the failed `ft_on_transfer` receipt. It also covers the v1 `buy_ticket` outcome.
+`ft_transfer_call` **succeeds as a transaction even when the purchase was rejected** (the token refunds in its resolver). `purchaseResult` decides from the receipts: bought when a receipt executed by the escrow (`contractId`) succeeded and logged a `ticket_purchased` event of standard `ticket_escrow` (its `token_id` is the ticket); otherwise not bought, with the `ERR_` code of the escrow's failed receipt. It also covers the `buy_ticket` outcome. The contract id is required (changed on 2026-11-13 after review): without it a look-alike log written by another contract would read as a purchase.
 
 ### Entry pass (lane P; no contract change)
 
@@ -143,7 +143,7 @@ signature  ed25519:ZQFWWD6ZAFSE1TJ5oSKoHpSWMihvSRaXVrK71ctXj99uQwv4VFFrWw9o4RSab
 
 Files: `packages/client/src/pass.ts`, `pass.test.ts`, export from `index.ts`; `scripts/pass.mjs`; `mcp/src/tools.ts` and its tests; `docs/threat-model.md` (section "Entry pass").
 
-- [x] Tests first: the known-answer vector verifies; changing any of message, nonce, recipient, account or signature fails `signature`; each of the other four checks fails alone with its sentence (transferred ticket, function-call key, deleted key, refunded ticket, pass six minutes old, pass two minutes ahead); `decodePass` reads a bare pass and a URL and returns `null` on garbage.
+- [x] Tests first: the known-answer vector verifies; changing any of message, nonce, recipient or signature fails `signature`; changing the account fails `key`, not `signature` (NEP-413 does not sign the account: the signing key must be a full-access key of the account named); each of the other four checks fails alone with its sentence (transferred ticket, function-call key, deleted key, refunded ticket, pass six minutes old, pass two minutes ahead); `decodePass` reads a bare pass and a URL and returns `null` on garbage.
 - [x] Implement `pass.ts` with the crypto already in the workspace (near-api-js and its dependencies); add no dependency for it.
 - [x] `node scripts/pass.mjs verify <pass or URL>` (env `CONTRACT_ID`, RPC as the other scripts): prints the five checks, one per line, `ok` or `NO` with the sentence, then `ADMIT` or `DO NOT ADMIT`; exit 0 or 1. `node scripts/pass.mjs encode` reads the JSON the NEAR CLI prints on stdin plus `--ticket`, `--issued`, `--nonce` and prints the pass, so a pass can be made with the CLI alone.
 - [x] MCP tool `show_entry_pass { token_id }`: refuses when the agent does not hold the ticket; otherwise signs with the agent's key and returns the pass and, when `SITE_URL` is set, the door link. It signs no transaction. Tool count and every place that prints it change from 10 to 11 (the integrator updates the README).

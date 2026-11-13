@@ -37,6 +37,11 @@ export interface AgentState {
    * it, and a purchase without it is never allowed.
    */
   exposureYocto: string | null;
+  /**
+   * The currency of the event a `buy_ticket` is for, as read now: null is NEAR, otherwise a token
+   * account. Only `buy_ticket` needs it; a purchase without it is never allowed.
+   */
+  eventCurrency?: string | null;
 }
 
 /** The exact function call the agent is about to sign. */
@@ -46,10 +51,12 @@ export interface Intent {
 }
 
 export type DenyReason =
+  | 'receiver_mismatch'
   | 'contract_not_allowed'
   | 'method_not_allowed'
   | 'gas_above_table'
   | 'deposit_not_allowed'
+  | 'currency_not_near'
   | 'price_above_cap'
   | 'exposure_above_cap';
 
@@ -69,27 +76,30 @@ const near = (yocto: bigint | string) => `${formatNear(yocto.toString(), 24)} NE
 /** Exact Tgas: formatNear divides by 10^24, so gas units scaled by 10^12 come out in Tgas. */
 const tgas = (gas: bigint) => formatNear((gas * TGAS).toString(), 24);
 
-/**
- * The principal of the tickets whose money is still held by the contract: reserved, claimable, or
- * on its way back. Refunded tickets returned their money; released ones paid for an event that took
- * place. Returns yoctoNEAR.
- */
 /** Whether a ticket in this claim state still has its price inside the contract for its holder. */
 export function isExposedClaim(claim: Claim): boolean {
   return EXPOSED.has(claim);
 }
 
+/**
+ * The principal of the NEAR tickets whose money is still held by the contract: reserved, claimable,
+ * or on its way back. Refunded tickets returned their money; released ones paid for an event that
+ * took place. Tickets priced in a token are not counted: the caps are in NEAR, and the agent never
+ * buys in a token. Returns yoctoNEAR.
+ */
 export function exposureOf(tickets: readonly TicketView[]): string {
   return tickets
-    .filter((ticket) => isExposedClaim(ticket.claim))
+    .filter((ticket) => ticket.currency === null && isExposedClaim(ticket.claim))
     .reduce((sum, ticket) => sum + BigInt(ticket.principal), 0n)
     .toString();
 }
 
 /**
- * Decides whether the agent may sign `intent`. Order: the contract, the method, the gas, then the
- * deposit (only `buy_ticket` may attach more than 1 yoctoNEAR), then for a purchase the per-ticket
- * cap and the exposure cap. A malformed amount throws, so nothing is signed.
+ * Decides whether the agent may sign `intent`. Order: the call's own receiver (when it names one)
+ * against where it would be sent, the contract, the method, the gas, then the
+ * deposit (only `buy_ticket` may attach more than 1 yoctoNEAR), then for a purchase the event's
+ * currency (NEAR only: the caps are in NEAR), the per-ticket cap and the exposure cap. A malformed
+ * amount, or a purchase whose currency or exposure was not read, throws, so nothing is signed.
  */
 export function evaluate(policy: Policy, state: AgentState, intent: Intent): Decision {
   const { receiverId, call } = intent;
@@ -99,6 +109,13 @@ export function evaluate(policy: Policy, state: AgentState, intent: Intent): Dec
     message,
   });
 
+  // A call that names its own receiver (a token call) is signed only where it says it goes.
+  if (call.receiverId !== undefined && call.receiverId !== receiverId) {
+    return deny(
+      'receiver_mismatch',
+      `${call.methodName} is built for ${call.receiverId} but would be sent to ${receiverId}`,
+    );
+  }
   if (receiverId !== policy.contractId) {
     return deny(
       'contract_not_allowed',
@@ -132,6 +149,15 @@ export function evaluate(policy: Policy, state: AgentState, intent: Intent): Dec
     return { outcome: 'allow' };
   }
 
+  if (state.eventCurrency === undefined) {
+    throw new Error('The event currency was not read, so the purchase was not signed.');
+  }
+  if (state.eventCurrency !== null) {
+    return deny(
+      'currency_not_near',
+      `Event ${String(call.args.event_id)} is priced in ${state.eventCurrency}, not in NEAR: this agent only buys tickets priced in NEAR, because its caps are in NEAR`,
+    );
+  }
   const maxPrice = BigInt(policy.maxPriceYocto);
   if (deposit > maxPrice) {
     return deny(

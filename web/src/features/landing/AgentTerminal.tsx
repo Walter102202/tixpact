@@ -3,7 +3,7 @@ import { Link } from '../../lib/router';
 import { prefersReducedMotion, useInView } from './Reveal';
 
 // The agent's real output on NEAR testnet, from docs/mcp.md, section "Verification" (2026-11-13):
-// contract ticket-escrow.testnet, agent te-d1-agent.testnet, caps 2 NEAR per ticket and 5 NEAR of
+// contract ticket-escrow-v2.testnet, agent te-d1-agent.testnet, caps 2 NEAR per ticket and 5 NEAR of
 // exposure. Lines starting with "#" say which run follows; every other line is as printed.
 
 type Line =
@@ -28,11 +28,11 @@ const RUNS: Run[] = [
       { kind: 'out', text: 'Per-ticket cap: 2 NEAR' },
       { kind: 'out', text: 'Exposure cap: 5 NEAR' },
       { kind: 'out', text: 'Exposure now: 0 NEAR, leaving 5 NEAR under the cap.' },
-      { kind: 'call', text: 'buy_ticket {"event_id":4}' },
+      { kind: 'call', text: 'buy_ticket {"event_id":5}' },
       {
         kind: 'out',
-        text: 'Bought ticket 4-1 for 0.5 NEAR. Its price stays reserved in the contract until the event is confirmed or switched to refunds. Transaction:',
-        href: tx('xipcWZ6r5E6rYCthHvqbKbEBHs7kYgrjMR7XYWtjdK6'),
+        text: 'Bought ticket 5-1 for 0.5 NEAR. Its price stays reserved in the contract until the event is confirmed or switched to refunds. Transaction:',
+        href: tx('aA7RAeRKomXtq5DKZWuTsfRBbw6Cj5oA3Y7FuPAP2kW'),
       },
     ],
   },
@@ -42,9 +42,9 @@ const RUNS: Run[] = [
     lines: [
       {
         kind: 'note',
-        text: '# The same run with an exposure cap of 0.5 NEAR, holding ticket 4-1.',
+        text: '# The same run with an exposure cap of 0.5 NEAR, holding ticket 5-1.',
       },
-      { kind: 'call', text: 'buy_ticket {"event_id":4}' },
+      { kind: 'call', text: 'buy_ticket {"event_id":5}' },
       {
         kind: 'denied',
         text: 'Denied: Exposure would be 1 NEAR (0.5 NEAR in tickets held plus 0.5 NEAR for this one), above the cap of 0.5 NEAR. Nothing was signed.',
@@ -57,25 +57,25 @@ const RUNS: Run[] = [
     lines: [
       {
         kind: 'note',
-        text: '# The refund watcher. Event 4 had a deadline of 13:37:59 UTC and no confirmation.',
+        text: '# The refund watcher. Event 5 had a deadline of 19:51:33 UTC and no confirmation.',
       },
       {
         kind: 'out',
-        text: '2026-11-13T13:33:22.801Z Watching te-d1-agent.testnet: a plain loop that checks every 30 s. Stop it with Ctrl+C.',
+        text: '2026-11-13T19:47:18.871Z Watching te-d1-agent.testnet: a plain loop that checks every 30 s. Stop it with Ctrl+C.',
       },
       {
         kind: 'out',
-        text: '2026-11-13T13:37:30.157Z Nothing to claim: 1 ticket held, none claimable now.',
+        text: '2026-11-13T19:51:26.882Z Nothing to claim: 2 tickets held, none claimable now.',
       },
       {
         kind: 'out',
-        text: '2026-11-13T13:38:35.999Z expire_event 4: succeeded, tx 3MgSi5t77JZ7PH2nXPq9z1FPxaPeASAn5Fiv5Hrzpti7',
-        href: tx('3MgSi5t77JZ7PH2nXPq9z1FPxaPeASAn5Fiv5Hrzpti7'),
+        text: '2026-11-13T19:52:01.839Z expire_event 5: succeeded, tx FYyCD9NahNzCQNs26R5uY1FydjZD5f5H1QAEguQ8NTbi',
+        href: tx('FYyCD9NahNzCQNs26R5uY1FydjZD5f5H1QAEguQ8NTbi'),
       },
       {
         kind: 'out',
-        text: '2026-11-13T13:38:41.946Z claim_refund 4-1: succeeded, tx 5ZQummRVUDyv44cg8zK8nTqvWuGjoU85oZcuJaZaRzUS',
-        href: tx('5ZQummRVUDyv44cg8zK8nTqvWuGjoU85oZcuJaZaRzUS'),
+        text: '2026-11-13T19:52:07.879Z claim_refund 5-1: succeeded, tx B6qvAFgvnd2NTkGhumfT4WjhpZwHgP59d6QAzVznsJwE',
+        href: tx('B6qvAFgvnd2NTkGhumfT4WjhpZwHgP59d6QAzVznsJwE'),
       },
     ],
   },

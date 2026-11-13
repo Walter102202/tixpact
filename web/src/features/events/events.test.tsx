@@ -58,6 +58,8 @@ describe('shell', () => {
       'ana.testnet',
       'org.testnet',
       'teatro.testnet',
+      // Holds a tUSD ticket without being registered with tUSD (interface v2).
+      'sofia.testnet',
     ]);
     fireEvent.change(picker, { target: { value: 'org.testnet' } });
     expect(within(screen.getByRole('banner')).getByText('org.testnet')).toBeTruthy();
@@ -86,6 +88,18 @@ describe('/ lists the events', () => {
     expect(within(list).getByRole('link', { name: 'Jazz night' }).getAttribute('href')).toBe(
       '/events/1',
     );
+  });
+
+  it('newest first, so an event still on sale is not below the settled ones', async () => {
+    renderAt('/');
+    const list = await screen.findByRole('list', { name: 'Events' });
+    const titles = within(list)
+      .getAllByRole('listitem')
+      .map((li) => within(li).getAllByRole('link')[0]?.textContent);
+    const expected = [...FIXTURES.events]
+      .sort((a, b) => b.event_id - a.event_id)
+      .map((event) => event.title);
+    expect(titles).toEqual(expected);
   });
 
   it('shows the error state when the chain cannot be read', async () => {

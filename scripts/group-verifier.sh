@@ -133,7 +133,7 @@ budget="$(view "$CONTRACT_ID" quote_event_budget '{"capacity":1}' | tr -d '" \n'
 starts=$((($(date +%s) + STARTS_IN_SECONDS) * 1000))
 ends=$((starts + LENGTH_SECONDS * 1000))
 deadline=$((ends + CONFIRM_SECONDS * 1000))
-terms="{\"terms\":{\"title\":\"Jury night\",\"venue\":\"Teatro Municipal\",\"starts_at_ms\":$starts,\"ends_at_ms\":$ends,\"resolution_deadline_ms\":$deadline,\"price\":\"$price\",\"capacity\":1,\"verifier_id\":\"$DAO_ID\"}}"
+terms="{\"terms\":{\"title\":\"Jury night\",\"venue\":\"Teatro Municipal\",\"starts_at_ms\":$starts,\"ends_at_ms\":$ends,\"resolution_deadline_ms\":$deadline,\"price\":\"$price\",\"capacity\":1,\"verifier_id\":\"$DAO_ID\",\"currency\":null}}"
 event_id="$(call "$CONTRACT_ID" "$ORGANIZER_ID" create_event "$terms" '30 Tgas' "$budget yoctoNEAR")"
 tx
 case "$event_id" in

@@ -477,6 +477,20 @@ section,
 .claim-panel {
   margin-top: 16px;
 }
+.ticket-picture {
+  /* Not the page gutter every other section gets: it sits inside the ticket's column. */
+  padding: 32px 0 0;
+}
+.ticket-picture h2 {
+  font-size: 22px;
+}
+.ticket-picture-image {
+  display: block;
+  width: 100%;
+  max-width: 360px;
+  height: auto;
+  margin-bottom: 12px;
+}
 .history {
   padding: 32px 0 0;
 }
@@ -667,6 +681,21 @@ section,
   flex-wrap: wrap;
   align-items: center;
   gap: 12px 24px;
+}
+
+/* Prices in a token (interface v2): new states in the same design, no new look. */
+.balance {
+  color: var(--foreground);
+  font-weight: 500;
+}
+.register-panel,
+.faucet {
+  margin-top: 16px;
+}
+.proof-token {
+  margin-top: 24px;
+  padding: 24px 0 0;
+  border-top: 1px solid var(--border-soft);
 }
 
 @media (max-width: 760px) {

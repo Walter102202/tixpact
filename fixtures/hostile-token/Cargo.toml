@@ -1,0 +1,18 @@
+[package]
+name = "hostile-token"
+description = "Test fixture: a NEP-141 token that can fail every transfer, answer garbage, or forge a purchase."
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = { workspace = true }
+near-contract-standards = { workspace = true }
+
+[lints]
+workspace = true

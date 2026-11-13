@@ -6,7 +6,7 @@ import {
   type SignedMessage,
   type WalletPort,
 } from './wallet';
-import { toConnectorAction, txHashFromOutcome } from './walletOutcome';
+import { transactionFor, txHashFromOutcome } from './walletOutcome';
 
 // The live wallet: NEAR Connect 0.12.0 without the function-call-key plugin (plan, Track W).
 // Every payable call goes through the wallet's own approval.
@@ -103,11 +103,9 @@ export function createNearConnectWallet({ contractId, rpcUrls }: ConnectorOption
       const signerId = accountId;
       if (signerId === null) throw new Error('Sign in first.');
       const wallet = await connector.wallet();
-      const outcome: unknown = await wallet.signAndSendTransaction({
-        signerId,
-        receiverId: contractId,
-        actions: [toConnectorAction(call)],
-      });
+      const outcome: unknown = await wallet.signAndSendTransaction(
+        transactionFor(call, signerId, contractId),
+      );
       // The wallet's outcome is not proof of anything; only its hash is used, to re-read the chain.
       return { txHash: txHashFromOutcome(outcome), signerId };
     },

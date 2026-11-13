@@ -8,13 +8,14 @@ import {
   PHASE_LABELS,
   type Reader,
   type TicketView,
+  type TokenSpec,
   type TrackOptions,
   type TxResult,
   type TxStatusRpc,
   trackTransaction,
 } from '@ticket-escrow/client';
 import { type AgentConfig, ConfigError } from './config.js';
-import { near, when } from './format.js';
+import { money, when } from './format.js';
 import { showEntryPass } from './pass.js';
 import { evaluate, exposureOf, isExposedClaim, type Policy } from './policy.js';
 import {
@@ -164,6 +165,23 @@ export function createAgent(deps: AgentDeps): Agent {
     return next;
   }
 
+  // The tokens the contract accepts are fixed when it is deployed, so one successful read serves
+  // every later call; a failed read is forgotten and tried again next time.
+  let tokensRead: Promise<TokenSpec[]> | null = null;
+  function acceptedTokens(): Promise<TokenSpec[]> {
+    if (tokensRead === null) {
+      const read = reader.getConfig().then((c) => c.tokens);
+      tokensRead = read;
+      read.catch(() => {
+        if (tokensRead === read) tokensRead = null;
+      });
+    }
+    return tokensRead;
+  }
+  /** The tokens needed to write an amount in `currency`; NEAR needs none and reads nothing. */
+  const tokensFor = (currency: string | null) =>
+    currency === null ? Promise.resolve<TokenSpec[]>([]) : acceptedTokens();
+
   const allTickets = (accountId: string) =>
     readAllPages(
       (from) => reader.listTicketsForOwner(accountId, from, MAX_PAGE),
@@ -255,15 +273,25 @@ export function createAgent(deps: AgentDeps): Agent {
     call: ContractCall,
     signer: AgentSigner,
     policy: Policy,
+    /** For a purchase: the currency of its event, as read now (null is NEAR). */
+    eventCurrency?: string | null,
   ): Promise<Sent> {
-    const view = callView(call, contractId);
-    // Only a purchase raises exposure, so only a purchase reads the whole ticket list: a claim, a
-    // transfer or an expiry must work even when that list cannot be read to the end.
+    // Where the call goes: its own receiver when it names one, else the contract. The policy
+    // judges exactly this receiver and the signer sends exactly there.
+    const receiverId = call.receiverId ?? contractId;
+    const view = callView(call, receiverId);
+    const purchase = call.methodName === 'buy_ticket';
+    // Only a purchase in NEAR raises exposure, so only it reads the whole ticket list: a claim, a
+    // transfer or an expiry must work even when that list cannot be read to the end, and a purchase
+    // in a token is denied on its currency first.
     const exposureYocto =
-      call.methodName === 'buy_ticket'
+      purchase && eventCurrency === null
         ? (await exposureNow(signer.accountId)).total.toString()
         : null;
-    const decision = evaluate(policy, { exposureYocto }, { receiverId: contractId, call });
+    const state = purchase
+      ? { exposureYocto, ...(eventCurrency === undefined ? {} : { eventCurrency }) }
+      : { exposureYocto };
+    const decision = evaluate(policy, state, { receiverId, call });
     if (decision.outcome === 'deny') {
       return {
         kind: 'done',
@@ -277,7 +305,7 @@ export function createAgent(deps: AgentDeps): Agent {
 
     let txHash: string;
     try {
-      txHash = await signer.signAndSend(contractId, call);
+      txHash = await signer.signAndSend(receiverId, call);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       const hash = error instanceof SendError ? error.txHash : null;
@@ -393,30 +421,36 @@ export function createAgent(deps: AgentDeps): Agent {
     accountId: config.agentAccountId,
 
     async listEvents({ from_index, limit }) {
-      const events = await reader.listEvents(from_index, limit);
+      const [events, tokens] = await Promise.all([
+        reader.listEvents(from_index, limit),
+        acceptedTokens(),
+      ]);
       return {
         events,
         next_from_index: events.length === limit ? from_index + events.length : null,
+        tokens,
       };
     },
 
     async getEvent({ event_id }) {
-      const [event, accounting] = await Promise.all([
+      const [event, accounting, tokens] = await Promise.all([
         reader.getEvent(event_id),
         reader.getAccounting(event_id),
+        acceptedTokens(),
       ]);
       if (event === null) throw new Error(`Event ${event_id} does not exist.`);
-      return { event, accounting };
+      return { event, accounting, tokens };
     },
 
     async getTicket({ token_id }) {
       const ticket = await reader.getTicket(token_id);
       if (ticket === null) throw new Error(`Ticket ${token_id} does not exist.`);
-      const [event, history] = await Promise.all([
+      const [event, history, tokens] = await Promise.all([
         reader.getEvent(ticket.event_id),
         reader.getTicketHistory(token_id),
+        acceptedTokens(),
       ]);
-      return { ticket, event, history };
+      return { ticket, event, history, tokens };
     },
 
     async myTicketsPage(fromIndex, limit) {
@@ -426,12 +460,16 @@ export function createAgent(deps: AgentDeps): Agent {
     async listMyTickets() {
       const accountId = requireAgent();
       // The same count the cap uses, so the agent never sees less exposure than the policy does.
-      const { tickets, inFlight, total } = await serialized(() => exposureNow(accountId));
+      const [{ tickets, inFlight, total }, tokens] = await Promise.all([
+        serialized(() => exposureNow(accountId)),
+        acceptedTokens(),
+      ]);
       return {
         account_id: accountId,
         tickets,
         exposure: total.toString(),
         in_flight: inFlight.toString(),
+        tokens,
       };
     },
 
@@ -466,31 +504,54 @@ export function createAgent(deps: AgentDeps): Agent {
     },
 
     async verifyContract() {
-      const [proof, events] = await Promise.all([
+      const [proof, events, tokens] = await Promise.all([
         reader.getAccountProof(contractId),
         readAllPages((from) => reader.listEvents(from, MAX_PAGE), 'The event list'),
+        acceptedTokens(),
       ]);
-      let reserved = 0n;
-      let held = 0n;
+      // What the contract owes, per currency (null is NEAR), as the contract's `total_held`
+      // counts it: reserved principal plus organizer payouts not yet sent.
+      const owed = new Map<string | null, { held: bigint; reserved: bigint; events: number }>();
       for (let start = 0; start < events.length; start += READ_BATCH) {
         const rows = await Promise.all(
           events.slice(start, start + READ_BATCH).map((e) => reader.getAccounting(e.event_id)),
         );
         for (const row of rows) {
           if (row === null) continue;
-          reserved += BigInt(row.principal_reserved);
-          held += BigInt(row.principal_reserved) + BigInt(row.organizer_available);
+          const sum = owed.get(row.currency) ?? { held: 0n, reserved: 0n, events: 0 };
+          sum.reserved += BigInt(row.principal_reserved);
+          sum.held += BigInt(row.principal_reserved) + BigInt(row.organizer_available);
+          sum.events += 1;
+          owed.set(row.currency, sum);
         }
       }
+      const inNear = owed.get(null) ?? { held: 0n, reserved: 0n, events: 0 };
+      // Each token's balance is read from the token itself and set against its own events only.
+      const balances = await Promise.all(
+        tokens.map((t) => reader.tokenBalance(t.account_id, contractId)),
+      );
+      const tokensHeld = tokens.map((token, i) => {
+        const balance = balances[i] ?? '0';
+        const sum = owed.get(token.account_id) ?? { held: 0n, reserved: 0n, events: 0 };
+        return {
+          ...token,
+          balance,
+          held: sum.held.toString(),
+          balance_covers_held: BigInt(balance) >= sum.held,
+          events: sum.events,
+        };
+      });
       return {
         contract_id: contractId,
         code_hash: proof.codeHash,
         access_keys: proof.accessKeys,
         balance: proof.balance,
-        held: held.toString(),
-        reserved_principal: reserved.toString(),
-        balance_covers_held: BigInt(proof.balance) >= held,
+        held: inNear.held.toString(),
+        reserved_principal: inNear.reserved.toString(),
+        balance_covers_held: BigInt(proof.balance) >= inNear.held,
         events_counted: events.length,
+        near_events: inNear.events,
+        tokens_held: tokensHeld,
         block_height: proof.blockHeight,
       };
     },
@@ -508,7 +569,7 @@ export function createAgent(deps: AgentDeps): Agent {
           );
         }
         const call = actions.buyTicket(event_id, event.price);
-        const sent = await sendChecked(call, gate.signer, gate.policy);
+        const sent = await sendChecked(call, gate.signer, gate.policy, event.currency);
         const deposit = BigInt(call.deposit);
         if (sent.kind === 'unconfirmed') {
           unknownSends += 1;
@@ -529,7 +590,7 @@ export function createAgent(deps: AgentDeps): Agent {
           call,
           sent.txHash,
           sent.tx,
-          `Bought ticket ${tokenId ?? '(id not returned)'} for ${near(event.price)}. Its price stays reserved in the contract until the event is confirmed or switched to refunds.`,
+          `Bought ticket ${tokenId ?? '(id not returned)'} for ${money(event.price, null, [])}. Its price stays reserved in the contract until the event is confirmed or switched to refunds.`,
           'The purchase did not complete',
         );
       });
@@ -563,6 +624,8 @@ export function createAgent(deps: AgentDeps): Agent {
         if (event.now_ms >= event.starts_at_ms) {
           return blocked(`event ${event.event_id} started at ${when(event.starts_at_ms)}`);
         }
+        // Read before signing: nothing may fail between the send and its verdict.
+        const tokens = await tokensFor(ticket.currency);
         const call = actions.transferTicket(token_id, receiver_id, memo ?? null);
         const sent = await sendChecked(call, gate.signer, gate.policy);
         if (sent.kind !== 'tracked') return sent.result;
@@ -570,7 +633,7 @@ export function createAgent(deps: AgentDeps): Agent {
           call,
           sent.txHash,
           sent.tx,
-          `Gave ticket ${token_id} to ${receiver_id}, and with it the right to its ${near(ticket.principal)} refund.`,
+          `Gave ticket ${token_id} to ${receiver_id}, and with it the right to its ${money(ticket.principal, ticket.currency, tokens)} refund.`,
           'The transfer did not complete',
         );
       });
@@ -622,6 +685,18 @@ export function createAgent(deps: AgentDeps): Agent {
         }
         const why = unclaimable(ticket, await eventOf(ticket));
         if (why !== null) return notSent('not_claimable', why);
+        const tokens = await tokensFor(ticket.currency);
+        if (ticket.currency !== null) {
+          // A token sends nothing to an account it does not know; the agent cannot register itself
+          // (storage_deposit is not on its allow list), so it says so instead of wasting a claim.
+          const { registered } = await reader.tokenRegistration(ticket.currency, agent);
+          if (!registered) {
+            return notSent(
+              'not_registered',
+              `Ticket ${token_id} is priced in ${ticket.currency}, and ${agent} is not registered with ${ticket.currency}: the token would refuse the refund and the right would come back. Register ${agent} with that token (storage_deposit, outside this agent), then claim again`,
+            );
+          }
+        }
         const call = actions.claimRefund(token_id);
         const sent = await sendChecked(call, gate.signer, gate.policy);
         if (sent.kind !== 'tracked') return sent.result;
@@ -629,7 +704,9 @@ export function createAgent(deps: AgentDeps): Agent {
           call,
           sent.txHash,
           sent.tx,
-          moneyMoved(sent.tx) ? `Refunded ${near(ticket.principal)} to ${agent}.` : null,
+          moneyMoved(sent.tx)
+            ? `Refunded ${money(ticket.principal, ticket.currency, tokens)} to ${agent}.`
+            : null,
           'The refund did not complete',
         );
       });

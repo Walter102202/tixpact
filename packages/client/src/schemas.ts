@@ -74,7 +74,25 @@ export const HistoryKindSchema = z.enum([
   'RefundFailed',
 ]);
 
-/** Input of `create_event`. */
+/**
+ * The currency of an event and of every amount in its ledger (interface v2): `null` is NEAR (amounts
+ * in yoctoNEAR), otherwise the account of one of the NEP-141 tokens in `Config.tokens` (amounts in
+ * that token's smallest unit). The operating budget is in NEAR whatever the currency.
+ */
+export const CurrencySchema = AccountIdSchema.nullable();
+
+/** A NEP-141 token a deployment accepts, fixed at `new` (interface v2). */
+export const TokenSpecSchema = z.object({
+  account_id: AccountIdSchema,
+  /** 1 to 12 printable ASCII bytes (the contract checks 1 to 12 ASCII bytes). */
+  symbol: z.string().regex(/^[ -~]{1,12}$/, 'Expected a token symbol of 1 to 12 ASCII bytes'),
+  decimals: z.int().min(0).max(24),
+});
+
+/**
+ * Input of `create_event`. `currency` may be left out and is then sent as `null` (NEAR), so the
+ * call always names its currency.
+ */
 export const EventTermsSchema = z.strictObject({
   title: z.string(),
   venue: z.string(),
@@ -84,6 +102,7 @@ export const EventTermsSchema = z.strictObject({
   price: YoctoSchema,
   capacity: z.uint32(),
   verifier_id: AccountIdSchema,
+  currency: CurrencySchema.default(null),
 });
 
 export const EventViewSchema = z.object({
@@ -108,6 +127,7 @@ export const EventViewSchema = z.object({
   created_at_ms: TimestampMsSchema,
   phase: PhaseSchema,
   now_ms: TimestampMsSchema,
+  currency: CurrencySchema,
 });
 
 export const TicketViewSchema = z.object({
@@ -119,6 +139,7 @@ export const TicketViewSchema = z.object({
   status: TicketStatusSchema,
   claim: ClaimSchema,
   pending_operation_id: z.int().min(0).nullable(),
+  currency: CurrencySchema,
 });
 
 export const AccountingViewSchema = z.object({
@@ -130,7 +151,10 @@ export const AccountingViewSchema = z.object({
   organizer_available: YoctoSchema,
   organizer_pending: YoctoSchema,
   organizer_settled: YoctoSchema,
+  /** Always yoctoNEAR: the operating budget is in NEAR for every event. */
   operating_budget: YoctoSchema,
+  /** The currency of every other amount in this row. */
+  currency: CurrencySchema,
 });
 
 /** A settlement in flight. Exists only while pending; `token_id` is null for a payout. */
@@ -142,6 +166,7 @@ export const OperationViewSchema = z.object({
   recipient_id: AccountIdSchema,
   amount: YoctoSchema,
   started_at_ms: TimestampMsSchema,
+  currency: CurrencySchema,
 });
 
 export const HistoryEntrySchema = z.object({
@@ -169,9 +194,13 @@ export const ConfigSchema = z.object({
   storage_per_event: YoctoSchema,
   storage_per_ticket: YoctoSchema,
   fault_injection: z.boolean(),
+  /** The tokens events may be priced in, besides NEAR. At most 4, fixed at deployment. */
+  tokens: z.array(TokenSpecSchema).max(4),
 });
 
 export type Yocto = z.infer<typeof YoctoSchema>;
+export type Currency = z.infer<typeof CurrencySchema>;
+export type TokenSpec = z.infer<typeof TokenSpecSchema>;
 export type AccountId = z.infer<typeof AccountIdSchema>;
 export type TokenId = z.infer<typeof TokenIdSchema>;
 export type Outcome = z.infer<typeof OutcomeSchema>;
@@ -181,7 +210,8 @@ export type TicketStatus = z.infer<typeof TicketStatusSchema>;
 export type Claim = z.infer<typeof ClaimSchema>;
 export type OperationKind = z.infer<typeof OperationKindSchema>;
 export type HistoryKind = z.infer<typeof HistoryKindSchema>;
-export type EventTerms = z.infer<typeof EventTermsSchema>;
+/** What `createEvent` accepts: `currency` may be left out (NEAR). */
+export type EventTerms = z.input<typeof EventTermsSchema>;
 export type EventView = z.infer<typeof EventViewSchema>;
 export type TicketView = z.infer<typeof TicketViewSchema>;
 export type AccountingView = z.infer<typeof AccountingViewSchema>;

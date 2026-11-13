@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { createFixtureReader, FIXTURES, TX_FIXTURES } from './fixtures.js';
+import {
+  createFixtureReader,
+  FIXTURE_TOKEN_ID,
+  FIXTURES,
+  FIXTURES_WITH_TOKENS,
+  TX_FIXTURES,
+} from './fixtures.js';
+import { unitOf } from './format.js';
 import {
   AccountingViewSchema,
   ClaimSchema,
@@ -104,6 +111,131 @@ describe('fixtures', () => {
     );
     expect(BigInt(FIXTURES.accountProof.balance) >= held).toBe(true);
     expect(FIXTURES.accountProof.accessKeys).toBe(0);
+  });
+});
+
+describe('fixtures with tokens (interface v2)', () => {
+  const data = FIXTURES_WITH_TOKENS;
+  const token = FIXTURE_TOKEN_ID;
+  const inToken = <T extends { currency: string | null }>(rows: T[]) =>
+    rows.filter((r) => r.currency === token);
+
+  it('pass their schemas, and keep the NEAR set free of token events', () => {
+    for (const event of data.events) expect(EventViewSchema.parse(event)).toEqual(event);
+    for (const row of data.accounting) expect(AccountingViewSchema.parse(row)).toEqual(row);
+    for (const ticket of data.tickets) expect(TicketViewSchema.parse(ticket)).toEqual(ticket);
+    for (const op of data.operations) expect(OperationViewSchema.parse(op)).toEqual(op);
+    expect(FIXTURES.events.every((e) => e.currency === null)).toBe(true);
+    expect(data.events.filter((e) => e.currency === null)).toEqual(FIXTURES.events);
+    expect(data.config.tokens).toEqual([{ account_id: token, symbol: 'tUSD', decimals: 6 }]);
+    expect(data.events.map((e) => e.event_id)).not.toContain(9);
+  });
+
+  it('price events in tUSD with tickets in every claim state and an on-sale event', () => {
+    const events = inToken(data.events);
+    expect(events.map((e) => e.phase)).toEqual(['OnSale', 'Refundable', 'Completed']);
+    expect(new Set(inToken(data.tickets).map((t) => t.claim))).toEqual(
+      new Set(ClaimSchema.options),
+    );
+    for (const event of events) expect(unitOf(data.config, event.currency).symbol).toBe('tUSD');
+  });
+
+  it('give every ticket, row and operation the currency of its event', () => {
+    for (const ticket of data.tickets) {
+      const event = data.events.find((e) => e.event_id === ticket.event_id);
+      expect(ticket.currency, ticket.token_id).toBe(event?.currency);
+      expect(ticket.principal, ticket.token_id).toBe(event?.price);
+    }
+    for (const row of data.accounting) {
+      expect(row.currency).toBe(data.events.find((e) => e.event_id === row.event_id)?.currency);
+    }
+    for (const op of data.operations) {
+      const ticket = data.tickets.find((t) => t.token_id === op.token_id);
+      expect(op.currency).toBe(ticket?.currency);
+      expect(op.amount).toBe(ticket?.principal);
+      expect(ticket?.pending_operation_id).toBe(op.operation_id);
+    }
+  });
+
+  it('keep the accounting identity per event, in the event currency', () => {
+    for (const event of data.events) {
+      const row = data.accounting.find((a) => a.event_id === event.event_id);
+      const tickets = data.tickets.filter((t) => t.event_id === event.event_id);
+      expect(tickets).toHaveLength(event.sold);
+      expect(BigInt(row?.principal_received ?? -1)).toBe(sum(tickets.map((t) => t.principal)));
+      expect(BigInt(row?.principal_received ?? -1)).toBe(
+        sum(
+          row
+            ? [
+                row.principal_reserved,
+                row.organizer_available,
+                row.refund_pending,
+                row.organizer_pending,
+                row.refunds_settled,
+                row.organizer_settled,
+              ]
+            : [],
+        ),
+      );
+    }
+  });
+
+  it('hold in tUSD exactly what tUSD events owe, and in NEAR what NEAR events owe and every budget', () => {
+    const owed = (rows: typeof data.accounting) =>
+      sum(
+        rows.flatMap((a) => [
+          a.principal_reserved,
+          a.organizer_available,
+          a.refund_pending,
+          a.organizer_pending,
+        ]),
+      );
+    expect(BigInt(data.tokens[token]?.balances[data.contractId] ?? -1)).toBe(
+      owed(inToken(data.accounting)),
+    );
+    const nearHeld =
+      owed(data.accounting.filter((a) => a.currency === null)) +
+      sum(data.accounting.map((a) => a.operating_budget));
+    expect(BigInt(data.accountProof.balance) >= nearHeld).toBe(true);
+    expect(FIXTURES.tokens[token]?.balances[FIXTURES.contractId]).toBe('0');
+  });
+
+  it('name a holder of a claimable tUSD ticket who is not registered with tUSD', async () => {
+    const reader = createFixtureReader(data);
+    const sofia = await reader.listTicketsForOwner('sofia.testnet', 0, 50);
+    expect(sofia.map((t) => [t.token_id, t.claim])).toEqual([['11-4', 'Refundable']]);
+    expect((await reader.tokenRegistration(token, 'sofia.testnet')).registered).toBe(false);
+    expect(await reader.accountExists?.('sofia.testnet')).toBe(true);
+    // Ana cannot pay a ticket to event 10 from her balance: the faucet case.
+    const price = BigInt((await reader.getEvent(10))?.price ?? 0);
+    expect(BigInt(await reader.tokenBalance(token, 'ana.testnet')) < price).toBe(true);
+  });
+
+  it('record token purchases a real token would let reach the contract, and one it would refuse', () => {
+    const ledger = data.tokens[token]?.balances ?? {};
+    const sent = (tx: { status: Record<string, unknown> }) => {
+      const t = tx.status.transaction as {
+        signer_id: string;
+        actions: Array<{ FunctionCall: { args: string } }>;
+      };
+      const args = JSON.parse(atob(t.actions[0]?.FunctionCall.args ?? '')) as { amount: string };
+      return { signer: t.signer_id, amount: BigInt(args.amount) };
+    };
+    for (const tx of [TX_FIXTURES.tokenBuySucceeded, TX_FIXTURES.tokenBuyRejected]) {
+      const { signer, amount } = sent(tx);
+      expect(BigInt(ledger[signer] ?? -1) >= amount, `${signer} can pay ${amount}`).toBe(true);
+    }
+    expect(Object.hasOwn(ledger, sent(TX_FIXTURES.tokenBuyUnfunded).signer)).toBe(false);
+  });
+
+  it('read the tUSD refund in flight and the ticket history of the gift to Sofia', async () => {
+    const reader = createFixtureReader(data);
+    expect(await reader.getOperation(12)).toMatchObject({ token_id: '11-2', currency: token });
+    expect((await reader.getTicketHistory('11-4'))?.entries.map((e) => e.kind)).toEqual([
+      'Purchased',
+      'Transferred',
+    ]);
+    expect(await createFixtureReader().getTicketHistory('11-4')).toBeNull();
   });
 });
 

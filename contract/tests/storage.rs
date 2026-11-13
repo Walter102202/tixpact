@@ -3,7 +3,10 @@
 
 mod common;
 
-use common::{Escrow, ONE_YOCTO, PRICE, STORAGE_BYTE_COST, TestChain, amount, long_id, terms};
+use common::{
+    Escrow, ONE_YOCTO, PRICE, STORAGE_BYTE_COST, TestChain, USD, amount, assert_purchase_accepted,
+    long_id, priced_terms, purchase_msg, terms,
+};
 use near_api::{Account, AccountId, Contract};
 use near_sdk::serde_json::{Value, json};
 use testresult::TestResult;
@@ -264,5 +267,238 @@ async fn history_keeps_first_and_latest() -> TestResult {
         escrow.ticket(&token_id).await?["owner_id"],
         holder.0.as_str()
     );
+    Ok(())
+}
+
+/// Bytes the escrow stores now.
+async fn usage(escrow: &Escrow<'_>) -> TestResult<i64> {
+    Ok(i64::try_from(
+        escrow.chain.storage_usage(&escrow.id()).await?,
+    )?)
+}
+
+/// `buyer` buys a ticket of `event_id` in NEAR, or in `token` when it is given.
+async fn buy_in(
+    escrow: &Escrow<'_>,
+    token: Option<&common::Token<'_>>,
+    buyer: &Account,
+    event_id: u32,
+) -> TestResult<()> {
+    match token {
+        None => {
+            escrow.buy(buyer, event_id, PRICE).await?;
+        }
+        Some(token) => {
+            let result = token
+                .transfer_call(buyer, &escrow.id(), USD, &purchase_msg(event_id))
+                .await?;
+            assert_purchase_accepted(&result, USD);
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn storage_of_a_token_event_and_ticket() -> TestResult {
+    // Plan v2, Task T3: what an event priced in a token with a 64-character id, and one of its
+    // tickets, store in the worst case, next to the same event and ticket in NEAR. The
+    // fault-injection build keeps every refund and payout pending, so their records stay.
+    // `cargo test --test storage storage_of_a_token -- --nocapture` prints the table.
+    let chain = TestChain::start().await?;
+    let currency = long_id("tusd");
+    let tokens = json!([{ "account_id": currency, "symbol": "tUSD", "decimals": 6 }]);
+    let contract = chain
+        .deploy_escrow_listing("faulty.sandbox", true, tokens)
+        .await?;
+    let escrow = Escrow {
+        chain: &chain,
+        contract,
+    };
+    let tusd = chain.test_token(&currency, "tUSD", 6).await?;
+    let names: Vec<String> = [
+        "organizer",
+        "verifier",
+        "near-buyer",
+        "near-bouncer-a",
+        "near-bouncer-b",
+        "near-holder",
+        "near-payer",
+        "tusd-buyer",
+        "tusd-bouncer-a",
+        "tusd-bouncer-b",
+        "tusd-holder",
+        "tusd-payer",
+    ]
+    .iter()
+    .map(|name| long_id(name))
+    .collect();
+    let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    let people = chain.accounts(&refs, 30).await?;
+    let [organizer, verifier, rest @ ..] = people.as_slice() else {
+        return Err("twelve accounts".into());
+    };
+    let (near_side, tusd_side) = rest.split_at(5);
+    tusd.register(organizer, &escrow.id()).await?;
+    for person in [&tusd_side[0], &tusd_side[4]] {
+        tusd.register(person, &person.0).await?;
+        tusd.faucet(person).await?;
+    }
+    let price = |currency: Option<&str>| if currency.is_some() { USD } else { PRICE };
+    let largest = |times: [u64; 3], currency: Option<&str>| {
+        let mut terms = priced_terms(verifier, times, 1, currency, price(currency));
+        terms["title"] = json!("t".repeat(120));
+        terms["venue"] = json!("v".repeat(120));
+        terms
+    };
+    let times = chain.times_from_now([900, 910, 3_000]).await?;
+    let mut rows: Vec<(&str, i64, i64)> = Vec::new();
+    let mut refund_events = [0; 2];
+    let mut paid_events = [0; 2];
+    let mut tickets = [String::new(), String::new()];
+    let mut deltas = [[0i64; 7]; 2];
+    let sides = [(None, near_side), (Some(currency.as_str()), tusd_side)];
+    for (side, (currency, people)) in sides.into_iter().enumerate() {
+        let [buyer, bouncer_a, bouncer_b, holder, payer] = people else {
+            return Err("five accounts a side".into());
+        };
+        let token = currency.map(|_| &tusd);
+        let before = usage(&escrow).await?;
+        let created = escrow
+            .create_event(organizer, largest(times, currency))
+            .await?;
+        deltas[side][0] = usage(&escrow).await? - before;
+        refund_events[side] = created;
+        escrow.accept(verifier, created).await?;
+        let paid = escrow
+            .create_event(organizer, largest(times, currency))
+            .await?;
+        escrow.accept(verifier, paid).await?;
+        paid_events[side] = paid;
+
+        // Every ticket of the contract is a node of one token tree, and each node but the root
+        // adds an 8-byte link to its parent. The payer's ticket goes first, so that the measured
+        // purchase is never the root on either side.
+        buy_in(&escrow, token, payer, paid).await?;
+        let before = usage(&escrow).await?;
+        buy_in(&escrow, token, buyer, created).await?;
+        deltas[side][1] = usage(&escrow).await? - before;
+
+        // Twenty moves with the longest memo, then a holder of its own.
+        let token_id = format!("{created}-1");
+        let before = usage(&escrow).await?;
+        let mut from = buyer;
+        for round in 0..20 {
+            let to = if round % 2 == 0 { bouncer_a } else { bouncer_b };
+            let args = json!({
+                "receiver_id": to.0, "token_id": token_id, "approval_id": null,
+                "memo": "m".repeat(256),
+            });
+            escrow
+                .call(from, "nft_transfer", args, ONE_YOCTO, 100)
+                .await?
+                .assert_success();
+            from = to;
+        }
+        escrow
+            .transfer(from, &holder.0, &token_id)
+            .await?
+            .assert_success();
+        deltas[side][2] = usage(&escrow).await? - before;
+        tickets[side] = token_id;
+    }
+
+    // Outcomes with the longest texts, then every refund and payout left pending.
+    for side in 0..2 {
+        let reason = json!({ "event_id": refund_events[side], "reason_ref": "r".repeat(256) });
+        let before = usage(&escrow).await?;
+        escrow
+            .call(organizer, "cancel_event", reason, ONE_YOCTO, 100)
+            .await?
+            .assert_success();
+        deltas[side][3] = usage(&escrow).await? - before;
+        let holder = if side == 0 {
+            &near_side[3]
+        } else {
+            &tusd_side[3]
+        };
+        let before = usage(&escrow).await?;
+        let _ = escrow.claim_refund(holder, &tickets[side], 100).await?;
+        deltas[side][4] = usage(&escrow).await? - before;
+        assert_eq!(
+            escrow.ticket(&tickets[side]).await?["status"],
+            "RefundPending"
+        );
+    }
+    chain.advance_to(times[1]).await?;
+    for side in 0..2 {
+        let evidence = json!({ "event_id": paid_events[side], "evidence_ref": "e".repeat(256) });
+        let before = usage(&escrow).await?;
+        escrow
+            .call(verifier, "attest_completed", evidence, ONE_YOCTO, 100)
+            .await?
+            .assert_success();
+        deltas[side][5] = usage(&escrow).await? - before;
+        let before = usage(&escrow).await?;
+        let _ = escrow.claim_payout(organizer, paid_events[side]).await?;
+        deltas[side][6] = usage(&escrow).await? - before;
+        let accounting = escrow.accounting(paid_events[side]).await?;
+        assert!(
+            amount(&accounting, "organizer_pending") > 0,
+            "the payout stays pending"
+        );
+    }
+
+    let steps = [
+        "create_event (capacity 1, longest title and venue)",
+        "buy (a holder of its own)",
+        "twenty transfers, then a holder of its own (full history)",
+        "cancel_event (longest reason)",
+        "claim_refund left pending",
+        "attest_completed (longest evidence)",
+        "claim_payout left pending",
+    ];
+    for (index, step) in steps.iter().enumerate() {
+        rows.push((step, deltas[0][index], deltas[1][index]));
+    }
+    // An event's worst case: its record, its outcome and a payout in flight. A ticket's: its
+    // purchase, a full history and a refund in flight. The ticket id here is `N-1`; the longest
+    // (`4294967295-100`) is 11 bytes longer and is stored six times
+    // (`docs/decisions/2026-11-13-measured-storage-and-gas-constants.md`).
+    let event_bytes = |d: &[i64; 7]| d[0] + d[3].max(d[5]) + d[6];
+    let ticket_bytes = |d: &[i64; 7]| d[1] + d[2] + d[4] + 6 * 11;
+    eprintln!("| Step | NEAR event (bytes) | tUSD event, 64-character id (bytes) | Difference |");
+    eprintln!("|---|---:|---:|---:|");
+    for (step, near, token) in &rows {
+        eprintln!("| {step} | {near} | {token} | {} |", token - near);
+    }
+    let (near_event, token_event) = (event_bytes(&deltas[0]), event_bytes(&deltas[1]));
+    let (near_ticket, token_ticket) = (ticket_bytes(&deltas[0]), ticket_bytes(&deltas[1]));
+    eprintln!(
+        "| Worst event | {near_event} | {token_event} | {} |",
+        token_event - near_event
+    );
+    eprintln!(
+        "| Worst ticket, longest id | {near_ticket} | {token_ticket} | {} |",
+        token_ticket - near_ticket
+    );
+    eprintln!(
+        "constants: STORAGE_BYTES_PER_EVENT {} STORAGE_BYTES_PER_TICKET {}",
+        ticket_escrow::STORAGE_BYTES_PER_EVENT,
+        ticket_escrow::STORAGE_BYTES_PER_TICKET
+    );
+
+    // The currency is stored once, in the event record: its Borsh `Option<String>` is 68 bytes
+    // longer for a 64-character id than `None`. Nothing else differs.
+    assert_eq!(
+        deltas[1][0] - deltas[0][0],
+        68,
+        "the currency in the event record"
+    );
+    for index in 1..7 {
+        assert_eq!(deltas[1][index], deltas[0][index], "{}", steps[index]);
+    }
+    // And the prepaid budget covers both worst cases.
+    assert!(i128::from(token_event) <= i128::try_from(ticket_escrow::STORAGE_BYTES_PER_EVENT)?);
+    assert!(i128::from(token_ticket) <= i128::try_from(ticket_escrow::STORAGE_BYTES_PER_TICKET)?);
     Ok(())
 }

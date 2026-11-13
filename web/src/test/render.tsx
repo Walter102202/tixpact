@@ -4,6 +4,7 @@ import {
   createFixtureReader,
   createFixtureRpc,
   FIXTURE_NOW_MS,
+  FIXTURE_TOKEN_ID,
 } from '@ticket-escrow/client';
 import { App } from '../App';
 import { createFixtureWallet, type FixtureWallet } from '../lib/near/wallet';
@@ -30,6 +31,7 @@ export function testServices(overrides: Partial<AppServices> = {}): AppServices 
     trackOptions: { sleep: noSleep },
     rereadOptions: { sleep: noSleep },
     now: () => FIXTURE_NOW_MS,
+    faucets: [FIXTURE_TOKEN_ID],
     ...overrides,
     wallet,
   };

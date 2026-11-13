@@ -58,6 +58,7 @@ function ticketView(overrides: Partial<TicketView> = {}): TicketView {
     status: 'Active',
     claim: 'Reserved',
     pending_operation_id: null,
+    currency: null,
     ...overrides,
   };
 }
