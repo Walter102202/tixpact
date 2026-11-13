@@ -38,12 +38,12 @@ pub const GAS_FOR_CALLBACK: Gas = if cfg!(feature = "fault-injection") {
 /// whole (Review Focus 3).
 pub const GAS_CLAIM_MIN: Gas = Gas::from_tgas(40);
 
-/// Gas of the `ft_transfer` that pays a refund or a payout of an event priced in a token, and all
-/// the token gets (no share of unused gas). The test token's worst `ft_transfer` burns 1.73 Tgas;
-/// five times that, rounded up to 5 Tgas, is 10 Tgas. It keeps 20 Tgas because the contract
-/// cannot be upgraded and a real token may do more work than the test token. Giving the token no
-/// more than this also bounds its answer: about 288 KB, 1.1 Tgas for the callback to read
-/// (`docs/gas.md`).
+/// The least gas the `ft_transfer` that pays a refund or a payout of an event priced in a token
+/// gets. It also gets the default share of the claimant's unused gas, on purpose: the contract
+/// cannot be upgraded, so if a token's `ft_transfer` ever needs more, attaching more gas to the
+/// claim is the only remedy. The test token's worst `ft_transfer` burns 1.73 Tgas; five times that,
+/// rounded up to 5 Tgas, is 10 Tgas, and 20 Tgas leaves room for a real token doing more work
+/// (`docs/gas.md`, `docs/decisions/2026-11-13-the-token-gets-at-least-its-static-gas.md`).
 pub const GAS_FT_TRANSFER: Gas = Gas::from_tgas(20);
 
 /// Least prepaid gas a claim on an event priced in a token accepts: `GAS_FT_TRANSFER` plus the
@@ -152,8 +152,9 @@ impl Contract {
 
     /// A transfer of `amount` of `currency` to `recipient_id`, then `callback` on this
     /// contract. NEAR goes by native transfer. A token goes by `ft_transfer` on the token, with the
-    /// 1 yoctoNEAR the claimant attached (the standard requires it) and exactly `GAS_FT_TRANSFER`;
-    /// a recipient the token does not know makes it fail, and the callback restores the right.
+    /// 1 yoctoNEAR the claimant attached (the standard requires it), at least `GAS_FT_TRANSFER` and
+    /// the default share of unused gas; a recipient the token does not know makes it fail, and the
+    /// callback restores the right.
     fn transfer_then(
         currency: Option<AccountId>,
         recipient_id: AccountId,
@@ -165,7 +166,6 @@ impl Contract {
             Some(token) => ext_ft_core::ext(token)
                 .with_attached_deposit(NearToken::from_yoctonear(1))
                 .with_static_gas(GAS_FT_TRANSFER)
-                .with_unused_gas_weight(0)
                 .ft_transfer(recipient_id, U128(amount), None),
         };
         transfer.then(callback)

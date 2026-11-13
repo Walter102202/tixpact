@@ -1,6 +1,6 @@
 # A payment whose receipt succeeded settles, whatever the token answers
 
-Date: 2026-11-13. Author: lane C2. Status: accepted. Replaces the last bullet ("A listed token is trusted", second half) of `2026-11-13-token-payments-share-the-settlement-path.md`.
+Date: 2026-11-13. Author: lane C2. Status: accepted. Replaces the last bullet ("A listed token is trusted", second half) of `2026-11-13-token-payments-share-the-settlement-path.md`. Consequences corrected the same day with lane T2's measurement: the first version put the limit at about 4 MB and 300 Tgas, against the published fee only.
 
 ## Context
 
@@ -21,4 +21,9 @@ The obvious alternative fix, a byte limit on the answer, is dangerous on its own
 
 ## Consequences
 
-The one way left for a token to leave an operation pending is an answer so long that copying it costs more than the callback's 15 Tgas (about 4 MB, which itself costs the token about 290 Tgas, so the claimant would have to attach more than 300 Tgas): the callback runs out of gas, and the operation stays pending like a v1 callback out of gas (threat model, Limits 2). It still never pays twice.
+The callback never deserializes the answer, but the host still copies it into a register before the length check (`near-sdk` 5.30.1 `env::promise_result_checked`). How much that costs:
+
+- Measured in the sandbox (protocol 88), almost nothing: a hostile token given a 300 Tgas claim answered 3,974,130 bytes, and `on_refund_result` settled it for 2.33 Tgas in all (lane T2, `a_token_answer_settles_at_the_most_gas_a_claim_can_attach`). The resolver showed the same thing with a 4 MiB answer (`docs/gas.md`).
+- At the protocol's published fee (3,801,564 gas per byte, `write_register_byte`), the callback's 15 Tgas covers its worst work (2.52 Tgas) plus an answer of about 3.28 MB. A token needs about 230 Tgas to answer that much, so only a claim that attaches about 250 Tgas or more, against a hostile listed token, can go past it. The client attaches 100 Tgas, which buys at most 1,116,987 bytes (4.25 Tgas to copy).
+
+Past that bound the callback runs out of gas, and that one operation stays pending like a v1 callback out of gas (threat model, Limits 2). It still never pays twice.

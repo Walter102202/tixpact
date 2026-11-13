@@ -112,7 +112,12 @@ pub struct Contract {
 impl Contract {
     /// Initializes the contract with the tokens events may be priced in, besides NEAR: at most 4,
     /// each listed once. The list can never change, and nobody is put in charge.
+    ///
+    /// Only the contract account itself can call it (`#[private]`): the list is the trust root
+    /// of token payments, so nobody may slip in between the deployment and the init. Deploy and
+    /// init go in one transaction signed by the contract account (`contract/tests/init.rs`).
     #[init]
+    #[private]
     pub fn new(tokens: Vec<TokenSpec>) -> Self {
         currency::validate_tokens(&tokens);
         Self {

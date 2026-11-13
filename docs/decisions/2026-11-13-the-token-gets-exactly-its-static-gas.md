@@ -1,6 +1,6 @@
 # The token's `ft_transfer` gets exactly 20 Tgas, and a token claim needs 60 Tgas
 
-Date: 2026-11-13. Author: lane C2. Status: accepted.
+Date: 2026-11-13. Author: lane C2. Status: replaced by `2026-11-13-the-token-gets-at-least-its-static-gas.md` (applied in commit `f64aa42`, removed by the integrator's ruling in the next commit).
 
 ## Context
 
