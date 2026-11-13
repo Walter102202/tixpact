@@ -1215,10 +1215,11 @@ export const TX_FIXTURES = {
       status: { SuccessValue: base64Json('0') },
       logs: [
         `EVENT_JSON:${JSON.stringify({ standard: 'nep171', version: '1.2.0', event: 'nft_mint', data: [{ owner_id: LUIS, token_ids: ['10-3'] }] })}`,
+        // The fields contract v2 logs (contract/src/log.rs on track/c2, 8d3e4eb).
         eventJson('ticket_purchased', {
           event_id: 10,
           token_id: '10-3',
-          buyer_id: LUIS,
+          owner_id: LUIS,
           price: usd(10),
           currency: TUSD,
         }),

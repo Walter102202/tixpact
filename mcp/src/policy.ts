@@ -37,6 +37,11 @@ export interface AgentState {
    * it, and a purchase without it is never allowed.
    */
   exposureYocto: string | null;
+  /**
+   * The currency of the event a `buy_ticket` is for, as read now: null is NEAR, otherwise a token
+   * account. Only `buy_ticket` needs it; a purchase without it is never allowed.
+   */
+  eventCurrency?: string | null;
 }
 
 /** The exact function call the agent is about to sign. */
@@ -50,6 +55,7 @@ export type DenyReason =
   | 'method_not_allowed'
   | 'gas_above_table'
   | 'deposit_not_allowed'
+  | 'currency_not_near'
   | 'price_above_cap'
   | 'exposure_above_cap';
 
@@ -89,8 +95,9 @@ export function exposureOf(tickets: readonly TicketView[]): string {
 
 /**
  * Decides whether the agent may sign `intent`. Order: the contract, the method, the gas, then the
- * deposit (only `buy_ticket` may attach more than 1 yoctoNEAR), then for a purchase the per-ticket
- * cap and the exposure cap. A malformed amount throws, so nothing is signed.
+ * deposit (only `buy_ticket` may attach more than 1 yoctoNEAR), then for a purchase the event's
+ * currency (NEAR only: the caps are in NEAR), the per-ticket cap and the exposure cap. A malformed
+ * amount, or a purchase whose currency or exposure was not read, throws, so nothing is signed.
  */
 export function evaluate(policy: Policy, state: AgentState, intent: Intent): Decision {
   const { receiverId, call } = intent;
@@ -133,6 +140,15 @@ export function evaluate(policy: Policy, state: AgentState, intent: Intent): Dec
     return { outcome: 'allow' };
   }
 
+  if (state.eventCurrency === undefined) {
+    throw new Error('The event currency was not read, so the purchase was not signed.');
+  }
+  if (state.eventCurrency !== null) {
+    return deny(
+      'currency_not_near',
+      `Event ${String(call.args.event_id)} is priced in ${state.eventCurrency}, not in NEAR: this agent only buys tickets priced in NEAR, because its caps are in NEAR`,
+    );
+  }
   const maxPrice = BigInt(policy.maxPriceYocto);
   if (deposit > maxPrice) {
     return deny(
