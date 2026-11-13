@@ -44,3 +44,6 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-12 | A cancellation's reason is stored in `evidence_ref` | `2026-11-12-cancel-reason-shares-evidence-ref.md` |
 | 2026-11-12 | Times are shown in the viewer's time zone, with the offset written out | `2026-11-12-times-shown-in-the-viewers-zone.md` |
 | 2026-11-12 | The web offers the refund claim as soon as the deadline has passed | `2026-11-12-claim-shown-when-event-is-expirable.md` |
+| 2026-11-12 | The agent's exposure counts money still in the contract plus purchases not yet visible; writes run one at a time | `2026-11-12-agent-exposure-and-one-write-at-a-time.md` |
+| 2026-11-12 | Agent writes return one of five statuses; the chain is checked before the policy | `2026-11-12-agent-write-results-and-checks.md` |
+| 2026-11-12 | The agent's configuration fails closed, and the policy also bounds gas and deposits | `2026-11-12-agent-config-fails-closed.md` |

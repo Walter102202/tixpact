@@ -6,6 +6,7 @@
   "description": "Local MCP server: an agent with its own capped testnet account that buys, transfers and claims tickets.",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

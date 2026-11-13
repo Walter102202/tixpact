@@ -571,8 +571,8 @@ Starts when W0 is on `main`. Enters the `agents` track of the hackathon only if 
 
 **Files:** `mcp/src/{server,tools,policy,format,config}.ts`, tests beside them.
 
-- [ ] Failing tests: `evaluate` allows a purchase within both caps; denies with "Price 2 NEAR is above the per-ticket cap of 1.5 NEAR" (Review Focus 5); denies when exposure plus price exceeds the cap; denies a contract or method outside the allowlist. Through the SDK's in-memory transport pair with a fixture reader and a recording signer: `listTools` returns exactly the ten names; `get_event` text names the verifier and the deadline; `buy_ticket` above the cap returns `denied` and the signer recorded nothing; `buy_ticket` within the caps records one call equal to `actions.buyTicket(...)`; with no key every write tool is denied.
-- [ ] Implement. Run. Expected: green. Commit `feat(mcp): capped agent tools over the ticket contract`, tick, push.
+- [x] Failing tests: `evaluate` allows a purchase within both caps; denies with "Price 2 NEAR is above the per-ticket cap of 1.5 NEAR" (Review Focus 5); denies when exposure plus price exceeds the cap; denies a contract or method outside the allowlist. Through the SDK's in-memory transport pair with a fixture reader and a recording signer: `listTools` returns exactly the ten names; `get_event` text names the verifier and the deadline; `buy_ticket` above the cap returns `denied` and the signer recorded nothing; `buy_ticket` within the caps records one call equal to `actions.buyTicket(...)`; with no key every write tool is denied.
+- [x] Implement. Run. Expected: green. Commit `feat(mcp): capped agent tools over the ticket contract`, tick, push.
 
 ### Task M2: signer, watcher, guide
 
