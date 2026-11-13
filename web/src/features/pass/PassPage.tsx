@@ -23,10 +23,11 @@ interface PassTicket {
   event: EventView | null;
 }
 
-/** The time now, read again every second. */
+/** The time now, read again every second (and once when the timer starts, however late that is). */
 function useNow(): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
+    setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);

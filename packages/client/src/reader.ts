@@ -2,6 +2,7 @@ import { FailoverRpcError, FailoverRpcProvider, JsonRpcProvider } from 'near-api
 import { AccountDoesNotExistError } from 'near-api-js/rpc-errors';
 import { z } from 'zod';
 import {
+  AccountIdSchema,
   type AccountingView,
   AccountingViewSchema,
   type Config,
@@ -32,6 +33,8 @@ const READ_TIMEOUT_MS = 8_000;
 /** Transaction status requests wait on the node by design (`waitUntil`), so they get longer. */
 const TX_TIMEOUT_MS = 30_000;
 const MAX_KEY_PAGES = 100;
+/** The code hash of an account without a contract: 32 zero bytes, in base58. */
+const NO_CODE_HASH = '1'.repeat(32);
 
 type FinalQuery = typeof FINAL;
 
@@ -83,6 +86,17 @@ export interface Reader {
    * never reads as "missing". Optional, so readers written before it stay valid.
    */
   accountExists?(accountId: string): Promise<boolean>;
+  /**
+   * The group behind a verifier account that is a Sputnik DAO (`get_policy`), or null for a plain
+   * account, any other policy, or a failed view. Optional, so readers written before it stay valid.
+   */
+  readGroupVerifier?(accountId: string): Promise<GroupVerifier | null>;
+}
+
+/** A verifier that is a group: `needed` of `members` must approve before the DAO acts. */
+export interface GroupVerifier {
+  members: string[];
+  needed: number;
 }
 
 export type ReaderOptions =
@@ -245,5 +259,90 @@ export function createReader(options: ReaderOptions): Reader {
         throw error;
       }
     },
+
+    async readGroupVerifier(accountId) {
+      let policy: unknown;
+      try {
+        // Most verifiers are plain accounts. Asking one for a policy fails, and near-api-js logs
+        // each failed endpoint to the console; an account without code is answered here instead.
+        const account = AccountStateSchema.safeParse(
+          await rpc.viewAccount({ accountId, blockQuery: FINAL }),
+        );
+        if (!account.success || account.data.code_hash === NO_CODE_HASH) return null;
+        policy = await rpc.callFunction({
+          contractId: accountId,
+          method: 'get_policy',
+          args: {},
+          blockQuery: FINAL,
+        });
+      } catch {
+        // Not a DAO, or no endpoint answered: the page shows the account as it is.
+        return null;
+      }
+      return groupVerifierOf(policy);
+    },
   };
+}
+
+// Sputnik DAO v2 policies (`get_policy`), as near-daos/sputnik-dao-contract
+// sputnikdao2/src/policy.rs serializes them. Read on 2026-11-13; shape checked on testnet.
+
+const DECIMAL = /^(0|[1-9][0-9]*)$/;
+
+const VotePolicySchema = z.object({
+  weight_kind: z.string(),
+  quorum: z.string().regex(DECIMAL),
+  // `WeightOrRatio` is untagged: a weight is a U128 string, a ratio is `[num, denom]`, denom > 0.
+  threshold: z.union([z.string().regex(DECIMAL), z.tuple([z.int().min(0), z.int().min(1)])]),
+});
+
+const PolicySchema = z.object({
+  roles: z.array(
+    z.object({
+      kind: z.unknown(),
+      permissions: z.array(z.string()),
+      vote_policy: z.record(z.string(), z.unknown()),
+    }),
+  ),
+  default_vote_policy: z.unknown(),
+});
+
+/** Permissions that let a role vote to approve a function call (the label of `FunctionCall` is "call"). */
+const APPROVES_CALLS = new Set(['*:*', 'call:*', '*:VoteApprove', 'call:VoteApprove']);
+
+const GroupKindSchema = z.object({ Group: z.array(AccountIdSchema).min(1) });
+
+/**
+ * The group that decides a DAO's function calls, or null. It answers only when exactly one role
+ * that counts in the contract's tally (every kind but `Everyone`, which the tally skips) may approve
+ * function calls, that role is a `Group`, and its vote policy for calls (its own `call` entry, else
+ * the default) weighs by role. `needed` is what the contract computes:
+ * `max(quorum, min(n, floor(n * num / den) + 1))` for a ratio, `max(quorum, min(n, weight))` for a
+ * weight. A policy that can never reach its threshold is null.
+ */
+export function groupVerifierOf(policy: unknown): GroupVerifier | null {
+  const parsed = PolicySchema.safeParse(policy);
+  if (!parsed.success) return null;
+  const approvers = parsed.data.roles.filter(
+    (role) => role.kind !== 'Everyone' && role.permissions.some((p) => APPROVES_CALLS.has(p)),
+  );
+  const [role] = approvers;
+  if (approvers.length !== 1 || role === undefined) return null;
+  const group = GroupKindSchema.safeParse(role.kind);
+  if (!group.success) return null;
+  const vote = VotePolicySchema.safeParse(role.vote_policy.call ?? parsed.data.default_vote_policy);
+  if (!vote.success || vote.data.weight_kind !== 'RoleWeight') return null;
+
+  const members = [...new Set(group.data.Group)];
+  const n = BigInt(members.length);
+  const { threshold, quorum } = vote.data;
+  // BigInt throughout: a weight is a U128 and a ratio's terms are u64.
+  let needed =
+    typeof threshold === 'string'
+      ? BigInt(threshold)
+      : (n * BigInt(threshold[0])) / BigInt(threshold[1]) + 1n;
+  if (needed > n) needed = n;
+  if (BigInt(quorum) > needed) needed = BigInt(quorum);
+  if (needed < 1n || needed > n) return null;
+  return { members, needed: Number(needed) };
 }

@@ -164,8 +164,8 @@ Files: `web/src/features/pass/`, `web/src/lib/router.tsx`, `web/src/lib/near/` (
 
 Files: `packages/client/src/reader.ts` (+ tests, fixtures), `web/src/features/events/`.
 
-- [ ] `readGroupVerifier(accountId): Promise<{ members: string[]; needed: number } | null>`: calls `get_policy` on the account. It answers only for a Sputnik DAO policy with exactly one role of kind `Group` whose permissions let it approve function calls (`*:*`, `call:*`, `*:VoteApprove` or `call:VoteApprove`) under `RoleWeight`; `needed` is `min(n, floor(n * num / den) + 1)` for a ratio threshold `[num, den]` (the role's `vote_policy.call` if present, else `default_vote_policy`). Anything else, or a failed view, is `null`.
-- [ ] The event page and the verifier line then read: `<account> · a group of 3: 2 must agree (a, b, c)`. A plain account reads as today.
+- [x] `readGroupVerifier(accountId): Promise<{ members: string[]; needed: number } | null>`: calls `get_policy` on the account. It answers only for a Sputnik DAO policy with exactly one role of kind `Group` whose permissions let it approve function calls (`*:*`, `call:*`, `*:VoteApprove` or `call:VoteApprove`) under `RoleWeight`; `needed` is `min(n, floor(n * num / den) + 1)` for a ratio threshold `[num, den]` (the role's `vote_policy.call` if present, else `default_vote_policy`). Anything else, or a failed view, is `null`.
+- [x] The event page and the verifier line then read: `<account> · a group of 3: 2 must agree (a, b, c)`. A plain account reads as today.
 
 ## Lane D: a verifier that is a group (integrator)
 
