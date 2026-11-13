@@ -318,7 +318,7 @@ Enums:
 - `outcome`: `Unresolved`, `Completed`, `Refundable`. `outcome_reason`: `Attested`, `Cancelled`, `Expired`.
 - `phase` (derived from time, for display): `AwaitingVerifier`, `OnSale`, `SoldOut`, `InProgress`, `AwaitingAttestation`, `Expirable`, `Completed`, `Refundable`. An event never accepted by `starts_at_ms` shows `InProgress` onward like any other and simply has no tickets.
 - Ticket `status` (stored): `Active`, `TransferPending`, `RefundPending`, `Refunded`.
-- Ticket `claim` (derived): `Reserved` (event unresolved), `Refundable` (event refundable, status `Active`), `RefundPending`, `Refunded`, `ReleasedToOrganizer` (event completed).
+- Ticket `claim` (derived): `Reserved` (event unresolved), `Refundable` (event refundable, status `Active` or `TransferPending`), `RefundPending`, `Refunded`, `ReleasedToOrganizer` (event completed). A ticket locked by a transfer to a contract keeps the claim of its event and shows the lock in `status`, so a client offers the refund only when `claim` allows it and `status` is `Active` (decision `2026-11-12-codes-for-cases-the-interface-does-not-name.md`).
 - Operation `kind`: `Refund`, `Payout`. History `kind`: `Purchased`, `Transferred`, `TransferReturned`, `RefundRequested`, `RefundSettled`, `RefundFailed`. The history keeps the first entry and the latest fifteen; `dropped` counts the rest.
 
 Accounting identity, true after every call and every callback:
@@ -340,7 +340,7 @@ Standard `ticket_escrow`, version `1.0.0`: `event_created`, `verification_accept
 
 ### Gas
 
-Client side, one source in `packages/client/src/actions.ts`: `create_event` 30 Tgas, `accept_verification` 30, `buy_ticket` 50, `cancel_event` 30, `attest_completed` 30, `expire_event` 30, `claim_refund` 100, `claim_payout` 100, `nft_transfer` 30, `nft_transfer_call` 150. Contract side, initial values that Task C4 replaces with measured ones: callback static gas 15 Tgas, resolver static gas 20 Tgas, `GAS_CLAIM_MIN` 60 Tgas.
+Client side, one source in `packages/client/src/actions.ts`: `create_event` 30 Tgas, `accept_verification` 30, `buy_ticket` 50, `cancel_event` 30, `attest_completed` 30, `expire_event` 30, `claim_refund` 100, `claim_payout` 100, `nft_transfer` 30, `nft_transfer_call` 150. Contract side, measured in Task C4 (`docs/gas.md`): callback static gas 15 Tgas, resolver static gas 40 Tgas, `GAS_CLAIM_MIN` 40 Tgas, `GAS_TRANSFER_CALL_MIN` 70 Tgas. (The initial values were 15, 20 and 60.)
 
 ---
 
@@ -442,11 +442,11 @@ Needs Walter's go for three things: installing the Rust toolchain in his WSL, cr
 
 **Interfaces.** Consumes C1's ledger functions. Produces `claim_refund`, `claim_payout`, `on_refund_result`, `on_payout_result`, `get_operation`, the liquidity check, the `fault-injection` feature.
 
-- [ ] Write the failing tests `t03`, `t07`, `t08`, `t09`, `t10`, `t11`, `t14` (callbacks), `t18`, `t19`, `t24`, the settlement assertions that `t04` and `t05` gain in this task, the Review Focus 3 test `claim_with_low_gas_fails_whole`, and unit tests of both callbacks for `Ok` and `Err` with a mocked promise result.
-- [ ] Run. Expected: fail.
-- [ ] Implement in this order inside each claim: checks, liquidity check, debit the ledger, record the operation, set the ticket status, emit `*_requested`, then `Promise::new(recipient).transfer(amount).then(Self::ext(current).with_static_gas(..).with_unused_gas_weight(0).on_*_result(operation_id))`. Spike S2 is the first thing this task proves; if the vanishing fixture is not deterministic, keep the unit tests as the proof of the failure branch, record a decision, and tell the integrator.
-- [ ] Run. Expected: all listed tests pass, C1's tests still pass.
-- [ ] Commit `feat(contract): refunds and payouts that reserve first and confirm in a callback`, tick, push.
+- [x] Write the failing tests `t03`, `t07`, `t08`, `t09`, `t10`, `t11`, `t14` (callbacks), `t18`, `t19`, `t24`, the settlement assertions that `t04` and `t05` gain in this task, the Review Focus 3 test `claim_with_low_gas_fails_whole`, and unit tests of both callbacks for `Ok` and `Err` with a mocked promise result.
+- [x] Run. Expected: fail.
+- [x] Implement in this order inside each claim: checks, liquidity check, debit the ledger, record the operation, set the ticket status, emit `*_requested`, then `Promise::new(recipient).transfer(amount).then(Self::ext(current).with_static_gas(..).with_unused_gas_weight(0).on_*_result(operation_id))`. Spike S2 is the first thing this task proves; if the vanishing fixture is not deterministic, keep the unit tests as the proof of the failure branch, record a decision, and tell the integrator.
+- [x] Run. Expected: all listed tests pass, C1's tests still pass.
+- [x] Commit `feat(contract): refunds and payouts that reserve first and confirm in a callback`, tick, push.
 
 ### Task C3: ticket transfers between contracts
 
@@ -454,21 +454,21 @@ Needs Walter's go for three things: installing the Rust toolchain in his WSL, cr
 
 **Interfaces.** Produces `nft_transfer_call` and `nft_resolve_transfer` with the lock (status `TransferPending`), and the history entries `Transferred` and `TransferReturned`.
 
-- [ ] Write the failing tests `t12`, `t13`, `t14` (resolver), `t22`.
-- [ ] Run. Expected: fail.
-- [ ] Implement: copy the standard `nft_transfer_call` body so the resolver gets our static gas; set the lock before the internal transfer; the resolver uses the unguarded internal transfer for the return path, treats a failed promise, invalid JSON or a result longer than 5 bytes as "return the ticket", and clears the lock on every path; `memo` and `msg` length limits enforced before any state change.
-- [ ] Run. Expected: pass, earlier tests still pass.
-- [ ] Commit `feat(contract): transfers to contracts with a per-ticket lock`, tick, push.
+- [x] Write the failing tests `t12`, `t13`, `t14` (resolver), `t22`.
+- [x] Run. Expected: fail.
+- [x] Implement: copy the standard `nft_transfer_call` body so the resolver gets our static gas; set the lock before the internal transfer; the resolver uses the unguarded internal transfer for the return path, treats a failed promise, invalid JSON or a result longer than 5 bytes as "return the ticket", and clears the lock on every path; `memo` and `msg` length limits enforced before any state change.
+- [x] Run. Expected: pass, earlier tests still pass.
+- [x] Commit `feat(contract): transfers to contracts with a per-ticket lock`, tick, push.
 
 ### Task C4: storage, history, gas
 
 **Files:** modify `contract/src/accounting.rs`, `tickets.rs`, `views.rs`; create `docs/gas.md`; tests `contract/tests/storage.rs`.
 
-- [ ] Write the failing tests `t16` and `history_keeps_first_and_latest` (after 20 transfers: 16 entries, the first is `Purchased`, `dropped` is 5).
-- [ ] Run. Expected: fail.
-- [ ] Implement: measure the worst-case bytes of an event and of a ticket (64-character accounts, maximum texts, full history, a pending operation) with `env::storage_usage()` deltas after `flush()`; set `storage_per_event` and `storage_per_ticket` from the measurements plus a 20% margin; measure the gas of every method and of both callbacks in the sandbox, set the contract-side gas constants to the measured maximum plus margin, and write the table in `docs/gas.md`. Report any client-side gas value that should change under "Needs the integrator".
-- [ ] Run. Expected: the whole suite passes; `get_config` shows the measured constants and `fault_injection: false`.
-- [ ] Commit `feat(contract): measured storage budget, bounded ticket history and gas table`, tick, push. End the report with `STATUS: DONE`.
+- [x] Write the failing tests `t16` and `history_keeps_first_and_latest` (after 20 transfers: 16 entries, the first is `Purchased`, `dropped` is 5).
+- [x] Run. Expected: fail.
+- [x] Implement: measure the worst-case bytes of an event and of a ticket (64-character accounts, maximum texts, full history, a pending operation) with `env::storage_usage()` deltas after `flush()`; set `storage_per_event` and `storage_per_ticket` from the measurements plus a 20% margin; measure the gas of every method and of both callbacks in the sandbox, set the contract-side gas constants to the measured maximum plus margin, and write the table in `docs/gas.md`. Report any client-side gas value that should change under "Needs the integrator".
+- [x] Run. Expected: the whole suite passes; `get_config` shows the measured constants and `fault_injection: false`.
+- [x] Commit `feat(contract): measured storage budget, bounded ticket history and gas table`, tick, push. End the report with `STATUS: DONE`.
 
 ---
 
@@ -571,18 +571,18 @@ Starts when W0 is on `main`. Enters the `agents` track of the hackathon only if 
 
 **Files:** `mcp/src/{server,tools,policy,format,config}.ts`, tests beside them.
 
-- [ ] Failing tests: `evaluate` allows a purchase within both caps; denies with "Price 2 NEAR is above the per-ticket cap of 1.5 NEAR" (Review Focus 5); denies when exposure plus price exceeds the cap; denies a contract or method outside the allowlist. Through the SDK's in-memory transport pair with a fixture reader and a recording signer: `listTools` returns exactly the ten names; `get_event` text names the verifier and the deadline; `buy_ticket` above the cap returns `denied` and the signer recorded nothing; `buy_ticket` within the caps records one call equal to `actions.buyTicket(...)`; with no key every write tool is denied.
-- [ ] Implement. Run. Expected: green. Commit `feat(mcp): capped agent tools over the ticket contract`, tick, push.
+- [x] Failing tests: `evaluate` allows a purchase within both caps; denies with "Price 2 NEAR is above the per-ticket cap of 1.5 NEAR" (Review Focus 5); denies when exposure plus price exceeds the cap; denies a contract or method outside the allowlist. Through the SDK's in-memory transport pair with a fixture reader and a recording signer: `listTools` returns exactly the ten names; `get_event` text names the verifier and the deadline; `buy_ticket` above the cap returns `denied` and the signer recorded nothing; `buy_ticket` within the caps records one call equal to `actions.buyTicket(...)`; with no key every write tool is denied.
+- [x] Implement. Run. Expected: green. Commit `feat(mcp): capped agent tools over the ticket contract`, tick, push.
 
 ### Task M2: signer, watcher, guide
 
 **Files:** `mcp/src/{signer,watch}.ts`, `mcp/scripts/smoke.mjs`, `docs/mcp.md`.
 
-- [ ] Spike S4: read the installed `near-api-js` declarations for the account and signer classes, send one function call with a deposit on testnet, and record the imports in the report.
-- [ ] Implement the signer behind the interface M1 used; `watch` (`pnpm --filter @ticket-escrow/mcp agent:watch`): every 30 s it reads the agent's tickets and, when one is claimable or its event is past the deadline, calls `expire_event` if needed and `claim_refund`, logging each transaction hash; it is a plain loop, described as such.
-- [ ] `smoke.mjs`: lists the tools and calls `list_events` and `verify_contract` against `CONTRACT_ID`; with a key, buys one ticket within the caps and prints the transaction link.
-- [ ] `docs/mcp.md`: what the server exposes, the caps and what enforces each, the `claude mcp add` command verified on the day, one example call and result per tool, limits.
-- [ ] Run everything. Expected: green; smoke output pasted in the report with no key in it. Commit `feat(mcp): testnet signer, refund watcher and connection guide`, tick, push. End the report with `STATUS: DONE`.
+- [x] Spike S4: read the installed `near-api-js` declarations for the account and signer classes, send one function call with a deposit on testnet, and record the imports in the report.
+- [x] Implement the signer behind the interface M1 used; `watch` (`pnpm --filter @ticket-escrow/mcp agent:watch`): every 30 s it reads the agent's tickets and, when one is claimable or its event is past the deadline, calls `expire_event` if needed and `claim_refund`, logging each transaction hash; it is a plain loop, described as such.
+- [x] `smoke.mjs`: lists the tools and calls `list_events` and `verify_contract` against `CONTRACT_ID`; with a key, buys one ticket within the caps and prints the transaction link.
+- [x] `docs/mcp.md`: what the server exposes, the caps and what enforces each, the `claude mcp add` command verified on the day, one example call and result per tool, limits.
+- [x] Run everything. Expected: green; smoke output pasted in the report with no key in it. Commit `feat(mcp): testnet signer, refund watcher and connection guide`, tick, push. End the report with `STATUS: DONE`.
 
 ---
 
@@ -590,15 +590,15 @@ Starts when W0 is on `main`. Enters the `agents` track of the hackathon only if 
 
 ### Task I1: testnet deployment and the scenario script (after G1)
 
-- [ ] Create a development contract account with the faucet, deploy the C1+C2 build, call `new`. Record the commands and the account in `docs/toolchain.md`.
-- [ ] `scripts/demo-scenario.mjs`: with four keychain accounts (organizer, verifier, Ana, Luis) it creates an event with windows of a few minutes, accepts, Ana buys, transfers to Luis, the organizer tries to collect and is rejected, time passes, a fifth account expires the event, Ana's claim is rejected, Luis claims. It writes `docs/proof.md`: one row per step with the claim it proves, the transaction link and the observed result. A second run covers the completed path.
+- [x] Create a development contract account with the faucet, deploy the C1+C2 build, call `new`. Record the commands and the account in `docs/toolchain.md`.
+- [x] `scripts/demo-scenario.mjs`: with four keychain accounts (organizer, verifier, Ana, Luis) it creates an event with windows of a few minutes, accepts, Ana buys, transfers to Luis, the organizer tries to collect and is rejected, time passes, a fifth account expires the event, Ana's claim is rejected, Luis claims. It writes `docs/proof.md`: one row per step with the claim it proves, the transaction link and the observed result. A second run covers the completed path.
 - [ ] Walter creates the Meteor testnet accounts; run spike S3 with him.
 
 ### Task I2: the documents a judge reads (by G4)
 
 - [ ] `README.md`, written for a machine reader first: what it is in two sentences; the problem with three sourced facts; how each is solved; "Try it" as numbered "do X, see Y" steps (open the hosted demo; run `./scripts/gate.sh` and see the test names pass; run the read-only deployment check); the claims table (claim → test name → transaction in `docs/proof.md`); what NEAR does here, concretely; "What is real and what is simulated" (testnet funds, demo accounts played by us, a verifier that is one account, short demo windows); trust limits; architecture and interface; AI and third-party disclosure; license.
 - [x] `docs/design.md`: the rules, state machines, accounting and decisions in English, derived from the spec without its market and naming sections.
-- [ ] `scripts/direct-calls.sh` (T20) and a "If the website is down" section in the README.
+- [ ] `scripts/direct-calls.sh` (T20, done and run on testnet 2026-11-12) and a "If the website is down" section in the README (pending with the README).
 - [ ] Hosted web on Vercel or Cloudflare Pages (Walter's account), kept up until 2026-11-25.
 
 ### Task I3: hardening and the final deployment (Saturday morning)

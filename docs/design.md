@@ -113,7 +113,7 @@ sequenceDiagram
 
 - The right is debited before the money leaves, so a second claim in the meantime finds nothing to claim (`t08_no_double_refund`).
 - The callback is private: only the contract can tell itself how a payment ended (`t14_callbacks_are_private`).
-- A failed transfer restores the right exactly once (`t10_failed_transfer_restores_claim_once`), and a new claim waits until the returned money is really back (`t24_restored_claim_waits_for_liquidity`).
+- A failed transfer restores the right exactly once (`t10_failed_transfer_restores_claim_once`), and a new claim is paid only when the contract can pay it without touching money held for others: if the returned funds have not arrived yet, it is rejected and can be sent again (`t24_restored_claim_waits_for_liquidity`).
 - A claim without enough gas for the callback is rejected before anything is reserved (`claim_with_low_gas_fails_whole`).
 - If the callback itself fails, the operation stays pending and nothing is sent again (`t11_failed_callback_keeps_pending`). We chose a stuck payment over a double payment, and there is deliberately no admin method to "unstick" it: such a method would be a way to move money outside the rules. This is a stated limit, not a solved problem.
 

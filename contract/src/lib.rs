@@ -9,10 +9,13 @@
 //!
 //! - `events.rs`: `create_event`, `accept_verification`, `cancel_event`, `attest_completed`,
 //!   `expire_event`.
-//! - `tickets.rs`: `buy_ticket` and the NEP-171 token surface (`nft_transfer`, `nft_token`,
-//!   enumeration, metadata).
+//! - `tickets.rs`: `buy_ticket` and the NEP-171 token surface (`nft_transfer`,
+//!   `nft_transfer_call` with its private `nft_resolve_transfer`, `nft_token`, enumeration,
+//!   metadata).
 //! - `views.rs`: `get_config`, `quote_event_budget`, `get_event`, `list_events`,
 //!   `get_accounting`, `get_ticket`, `list_tickets_for_owner`, `get_ticket_history`.
+//! - `settlement.rs`: `claim_refund`, `claim_payout`, their private callbacks, `get_operation` and
+//!   the liquidity check.
 //! - `accounting.rs`: the per-event ledger and the storage budget.
 //! - `errors.rs`, `log.rs`: error codes and NEP-297 events.
 //!
@@ -22,6 +25,7 @@ mod accounting;
 mod errors;
 mod events;
 mod log;
+mod settlement;
 mod tickets;
 mod views;
 
@@ -29,15 +33,19 @@ use near_contract_standards::non_fungible_token::{NonFungibleToken, TokenId};
 use near_sdk::store::{LookupMap, Vector};
 use near_sdk::{PanicOnDefault, env, near};
 
-pub use crate::accounting::Ledger;
+pub use crate::accounting::{Ledger, STORAGE_BYTES_PER_EVENT, STORAGE_BYTES_PER_TICKET};
 pub use crate::errors::Code;
 pub use crate::events::{EventTerms, Outcome, OutcomeReason};
-pub use crate::tickets::{HistoryEntry, HistoryKind, TicketStatus};
+pub use crate::settlement::{GAS_CLAIM_MIN, GAS_FOR_CALLBACK, OperationKind, OperationView};
+pub use crate::tickets::{
+    GAS_FOR_RESOLVE_TRANSFER, GAS_TRANSFER_CALL_MIN, HistoryEntry, HistoryKind, TicketStatus,
+};
 pub use crate::views::{
     AccountingView, Claim, Config, EventView, Phase, TicketHistory, TicketView,
 };
 
 use crate::events::EventRecord;
+use crate::settlement::Operation;
 use crate::tickets::Ticket;
 
 /// Most tickets one event can sell.
@@ -64,6 +72,7 @@ mod prefix {
     pub const TOKENS_PER_OWNER: &[u8; 1] = b"p";
     pub const EVENTS: &[u8; 1] = b"e";
     pub const TICKETS: &[u8; 1] = b"t";
+    pub const OPERATIONS: &[u8; 1] = b"x";
 }
 
 /// The whole state. Every amount it holds for someone is in one event's ledger.
@@ -77,6 +86,10 @@ pub struct Contract {
     pub(crate) events: Vector<EventRecord>,
     /// Ticket records by token id.
     pub(crate) tickets: LookupMap<TokenId, Ticket>,
+    /// Settlements in flight by operation id. An entry exists only while its transfer is pending.
+    pub(crate) operations: LookupMap<u64, Operation>,
+    /// The id of the latest operation; 0 before the first one.
+    pub(crate) last_operation_id: u64,
     /// Sum over all events of `principal_reserved + organizer_available`, in yoctoNEAR.
     pub(crate) total_held: u128,
 }
@@ -97,6 +110,8 @@ impl Contract {
             ),
             events: Vector::new(prefix::EVENTS),
             tickets: LookupMap::new(prefix::TICKETS),
+            operations: LookupMap::new(prefix::OPERATIONS),
+            last_operation_id: 0,
             total_held: 0,
         }
     }

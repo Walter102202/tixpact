@@ -1,0 +1,160 @@
+//! Test fixture: a contract that receives a ticket through `nft_transfer_call` and answers as the
+//! transfer's `msg` says. Used by `contract/tests/transfers.rs`. Never deployed outside the
+//! sandbox.
+//!
+//! | `msg` | Answer of `nft_on_transfer` |
+//! |---|---|
+//! | `keep` | `false`: keep the ticket |
+//! | `return` | `true`: send it back |
+//! | `panic` | the call fails |
+//! | `garbage` | `maybe`, which is not JSON |
+//! | `oversized` | `false` padded to 11 bytes: a valid "keep" longer than any boolean |
+//! | `huge` | as many zero bytes as its gas can pay to return, up to the protocol's 4 MiB (about 292 Tgas), made the cheapest way (fresh memory is already zero): the largest answer a receiver can make the resolver read |
+//! | `reenter` | tries `claim_refund` and `nft_transfer` on the ticket and reads `get_ticket`, then logs what it saw and keeps the ticket |
+//! | `hold` | answers `true` only after someone calls `release`, re-calling itself every block until then, so the transfer stays unresolved across blocks (`t13`) |
+
+use near_sdk::serde_json::{Value, json};
+use near_sdk::{AccountId, Gas, NearToken, Promise, PromiseError, env, near};
+
+/// `max_length_returned_data` of the protocol: the longest value a call may return.
+const MAX_RETURN_BYTES: usize = 4 * 1024 * 1024;
+/// Gas a call pays per byte it returns to another receipt, rounded up from 69.5 Mgas measured in
+/// the sandbox (`docs/gas.md`).
+const GAS_PER_RETURNED_BYTE: u64 = 70_000_000;
+/// Gas kept back from the answer for the rest of `nft_on_transfer`.
+const GAS_KEPT_BACK: Gas = Gas::from_tgas(5);
+
+/// Static gas of each step this fixture schedules.
+const GAS_FOR_CLAIM: Gas = Gas::from_tgas(70);
+const GAS_FOR_TRANSFER: Gas = Gas::from_tgas(20);
+const GAS_FOR_VIEW: Gas = Gas::from_tgas(10);
+const GAS_FOR_STEP: Gas = Gas::from_tgas(5);
+
+#[near(contract_state)]
+#[derive(Default)]
+pub struct TicketReceiver {
+    /// Set by `release`: a held transfer may now be answered.
+    released: bool,
+}
+
+#[near]
+impl TicketReceiver {
+    /// NEP-171 receiver. Writes its answer with `value_return` so that each mode can return
+    /// exactly the bytes it needs, including ones that are not a boolean.
+    pub fn nft_on_transfer(
+        &mut self,
+        sender_id: AccountId,
+        previous_owner_id: AccountId,
+        token_id: String,
+        msg: String,
+    ) {
+        let _ = sender_id;
+        let ticket_contract = env::predecessor_account_id();
+        match msg.as_str() {
+            "keep" => env::value_return(b"false"),
+            "return" => env::value_return(b"true"),
+            "panic" => env::panic_str("the receiver refuses this ticket"),
+            "garbage" => env::value_return(b"maybe"),
+            "oversized" => env::value_return(b"false      "),
+            "huge" => env::value_return(vec![0; Self::largest_affordable_answer()]),
+            "reenter" => {
+                Self::reenter(ticket_contract, previous_owner_id, token_id)
+                    .as_return()
+                    .detach();
+            }
+            "hold" => self.hold(),
+            _ => env::panic_str("unknown msg"),
+        }
+    }
+
+    /// Answers `true` once `release` has been called; until then calls itself again, one block
+    /// later each time.
+    pub fn hold(&self) {
+        if self.released {
+            env::value_return(b"true");
+        } else {
+            Self::ext(env::current_account_id())
+                .with_static_gas(GAS_FOR_STEP)
+                .hold()
+                .as_return()
+                .detach();
+        }
+    }
+
+    /// Lets a held transfer be answered.
+    pub fn release(&mut self) {
+        self.released = true;
+    }
+
+    /// Logs what the re-entering calls got and keeps the ticket.
+    #[private]
+    pub fn after_reenter(
+        &mut self,
+        #[callback_result] claim: Result<(), PromiseError>,
+        #[callback_result] transfer: Result<(), PromiseError>,
+        #[callback_result] ticket: Result<Value, PromiseError>,
+    ) -> bool {
+        let outcome = |result: bool| if result { "ok" } else { "failed" };
+        let status = ticket
+            .ok()
+            .and_then(|view| view["status"].as_str().map(str::to_string))
+            .unwrap_or_default();
+        env::log_str(&format!(
+            "reenter: claim={} transfer={} status={status}",
+            outcome(claim.is_ok()),
+            outcome(transfer.is_ok()),
+        ));
+        false
+    }
+}
+
+impl TicketReceiver {
+    /// The longest answer the gas left to this call can pay for.
+    fn largest_affordable_answer() -> usize {
+        let spare = env::prepaid_gas()
+            .as_gas()
+            .saturating_sub(env::used_gas().as_gas())
+            .saturating_sub(GAS_KEPT_BACK.as_gas());
+        usize::try_from(spare / GAS_PER_RETURNED_BYTE)
+            .unwrap_or(MAX_RETURN_BYTES)
+            .min(MAX_RETURN_BYTES)
+    }
+
+    fn reenter(
+        ticket_contract: AccountId,
+        previous_owner_id: AccountId,
+        token_id: String,
+    ) -> Promise {
+        let one_yocto = NearToken::from_yoctonear(1);
+        let claim = Promise::new(ticket_contract.clone()).function_call(
+            "claim_refund",
+            json!({ "token_id": token_id }).to_string().into_bytes(),
+            one_yocto,
+            GAS_FOR_CLAIM,
+        );
+        let transfer = Promise::new(ticket_contract.clone()).function_call(
+            "nft_transfer",
+            json!({
+                "receiver_id": previous_owner_id,
+                "token_id": token_id,
+                "approval_id": null,
+                "memo": null,
+            })
+            .to_string()
+            .into_bytes(),
+            one_yocto,
+            GAS_FOR_TRANSFER,
+        );
+        let view = Promise::new(ticket_contract).function_call(
+            "get_ticket",
+            json!({ "token_id": token_id }).to_string().into_bytes(),
+            NearToken::from_yoctonear(0),
+            GAS_FOR_VIEW,
+        );
+        claim.and(transfer).and(view).then(
+            Self::ext(env::current_account_id())
+                .with_static_gas(GAS_FOR_STEP)
+                .after_reenter(),
+        )
+    }
+}

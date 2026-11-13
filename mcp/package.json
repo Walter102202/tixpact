@@ -5,7 +5,11 @@
   "type": "module",
   "description": "Local MCP server: an agent with its own capped testnet account that buys, transfers and claims tickets.",
   "scripts": {
+    "agent:watch": "node dist/bin/watch.js",
     "build": "tsc -p tsconfig.build.json",
+    "smoke": "node scripts/smoke.mjs",
+    "start": "node dist/bin/serve.js",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

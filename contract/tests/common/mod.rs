@@ -7,8 +7,9 @@
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
+use near_api::types::transaction::actions::FunctionCallAction;
 use near_api::types::transaction::result::ExecutionFinalResult;
-use near_api::types::{PublicKey, Reference};
+use near_api::types::{Action, PublicKey, Reference};
 use near_api::{Account, AccountId, Chain, Contract, NearGas, NearToken, NetworkConfig, Signer};
 use near_sandbox::Sandbox;
 use near_sandbox::config::{
@@ -80,15 +81,130 @@ impl TestChain {
 
     /// Deploys the ticket escrow to [`ESCROW_ID`] and initializes it.
     pub async fn deploy_escrow(&self) -> TestResult<Contract> {
-        let account = self.accounts(&[ESCROW_ID], 50).await?.remove(0);
+        self.deploy_escrow_code(ESCROW_ID, false).await
+    }
+
+    /// Deploys the normal build, or the `fault-injection` one, to `id` with 50 NEAR, initializes
+    /// it, and checks that `get_config` reports the build that was asked for. A swapped build
+    /// fails here, before any test relies on it.
+    pub async fn deploy_escrow_code(
+        &self,
+        id: &str,
+        fault_injection: bool,
+    ) -> TestResult<Contract> {
+        let wasm = if fault_injection {
+            faulty_escrow_wasm()
+        } else {
+            escrow_wasm()
+        };
+        let account = self.accounts(&[id], 50).await?.remove(0);
         Contract::deploy(account.0.clone())
-            .use_code(escrow_wasm())
+            .use_code(wasm)
             .with_init_call("new", ())?
             .with_signer(self.signer.clone())
             .send_to(&self.network)
             .await?
             .assert_success();
-        Ok(account.as_contract())
+        let contract = account.as_contract();
+        let config: Value = contract
+            .call_function("get_config", ())
+            .read_only()
+            .fetch_from(&self.network)
+            .await?
+            .data;
+        assert_eq!(
+            config["fault_injection"], fault_injection,
+            "{id} runs the wrong build"
+        );
+        Ok(contract)
+    }
+
+    /// Creates `id` with `near` NEAR and deploys a fixture to it. Fixtures have no init method.
+    pub async fn deploy_fixture(&self, id: &str, near: u128, wasm: Vec<u8>) -> TestResult<Account> {
+        let account = self.accounts(&[id], near).await?.remove(0);
+        Contract::deploy(account.0.clone())
+            .use_code(wasm)
+            .without_init_call()
+            .with_signer(self.signer.clone())
+            .send_to(&self.network)
+            .await?
+            .assert_success();
+        Ok(account)
+    }
+
+    /// Signs and sends one function call to any contract; returns its outcome whether it failed
+    /// or not.
+    pub async fn call(
+        &self,
+        signer: &Account,
+        receiver: &AccountId,
+        method: &str,
+        args: Value,
+        deposit: NearToken,
+        tgas: u64,
+    ) -> TestResult<ExecutionFinalResult> {
+        let result = Contract(receiver.clone())
+            .call_function(method, args)
+            .transaction()
+            .deposit(deposit)
+            .gas(NearGas::from_tgas(tgas))
+            .with_signer(signer.0.clone(), self.signer.clone())
+            .send_to(&self.network)
+            .await?;
+        Ok(result
+            .into_full()
+            .ok_or("send_to returned before the transaction ran")?)
+    }
+
+    /// Whether an account exists in the latest block.
+    pub async fn exists(&self, account_id: &AccountId) -> bool {
+        Account(account_id.clone())
+            .view()
+            .fetch_from(&self.network)
+            .await
+            .is_ok()
+    }
+
+    /// Bytes of storage an account uses.
+    pub async fn storage_usage(&self, account_id: &AccountId) -> TestResult<u64> {
+        let balance = Account(account_id.clone())
+            .tokens()
+            .near_balance()
+            .fetch_from(&self.network)
+            .await?;
+        Ok(balance.storage_usage)
+    }
+
+    /// Sets an account's balance by patching the sandbox state, and waits until views show it.
+    /// Tests use it to build a liquidity shortfall the protocol would never produce on its own.
+    pub async fn set_balance(&self, account_id: &AccountId, yocto: u128) -> TestResult<()> {
+        let view = Account(account_id.clone())
+            .view()
+            .fetch_from(&self.network)
+            .await?
+            .data;
+        let near_api::types::account::ContractState::LocalHash(code_hash) = view.contract_state
+        else {
+            return Err("set_balance expects an account with its own contract code".into());
+        };
+        let record = json!({
+            "amount": yocto.to_string(),
+            "locked": view.locked.as_yoctonear().to_string(),
+            "code_hash": code_hash.to_string(),
+            "storage_usage": view.storage_usage,
+        });
+        self.sandbox
+            .patch_state(account_id.as_str().parse()?)
+            .account(record)
+            .send()
+            .await?;
+        for _ in 0..200 {
+            if self.balance(account_id).await? == yocto {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("the patched balance of {account_id} did not show up within 10 seconds");
     }
 
     /// The time of the latest block, in Unix milliseconds.
@@ -137,7 +253,16 @@ impl TestChain {
 
     /// Deploys the escrow at [`ESCROW_ID`] and returns it with its call helpers.
     pub async fn escrow(&self) -> TestResult<Escrow<'_>> {
-        let contract = self.deploy_escrow().await?;
+        let contract = self.deploy_escrow_code(ESCROW_ID, false).await?;
+        Ok(Escrow {
+            chain: self,
+            contract,
+        })
+    }
+
+    /// Deploys the `fault-injection` build at `id` and returns it with its call helpers.
+    pub async fn faulty_escrow(&self, id: &str) -> TestResult<Escrow<'_>> {
+        let contract = self.deploy_escrow_code(id, true).await?;
         Ok(Escrow {
             chain: self,
             contract,
@@ -170,6 +295,76 @@ pub fn escrow_wasm() -> Vec<u8> {
         std::fs::read(path).expect("the built wasm is readable")
     })
     .clone()
+}
+
+/// The contract built with the `fault-injection` feature: its settlement callbacks run out of gas
+/// after their transfer.
+///
+/// It has a cargo target directory and an output folder of its own. With a shared target
+/// directory, `cargo near build` copies `target/wasm32-unknown-unknown/release/ticket_escrow.wasm`
+/// after cargo has released its lock, so a normal build running in another test thread could
+/// replace that file in between and each build would ship the other's wasm.
+pub fn faulty_escrow_wasm() -> Vec<u8> {
+    static WASM: OnceLock<Vec<u8>> = OnceLock::new();
+    WASM.get_or_init(|| {
+        build_wasm(cargo_near_build::BuildOpts {
+            features: Some("fault-injection".to_string()),
+            out_dir: Some(out_dir("fault-injection")),
+            override_cargo_target_dir: Some(format!(
+                "{}/fault-injection-target",
+                env!("CARGO_TARGET_TMPDIR")
+            )),
+            ..Default::default()
+        })
+    })
+    .clone()
+}
+
+/// The wasm of the test fixture in `fixtures/vanishing-holder`.
+pub fn vanishing_holder_wasm() -> Vec<u8> {
+    static WASM: OnceLock<Vec<u8>> = OnceLock::new();
+    WASM.get_or_init(|| fixture_wasm("vanishing-holder"))
+        .clone()
+}
+
+/// The wasm of the test fixture in `fixtures/ticket-receiver`.
+pub fn ticket_receiver_wasm() -> Vec<u8> {
+    static WASM: OnceLock<Vec<u8>> = OnceLock::new();
+    WASM.get_or_init(|| fixture_wasm("ticket-receiver")).clone()
+}
+
+fn fixture_wasm(name: &str) -> Vec<u8> {
+    let manifest = format!(
+        "{}/../fixtures/{name}/Cargo.toml",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    build_wasm(cargo_near_build::BuildOpts {
+        manifest_path: Some(manifest.into()),
+        no_abi: true,
+        out_dir: Some(out_dir(name)),
+        ..Default::default()
+    })
+}
+
+fn out_dir(name: &str) -> cargo_near_build::camino::Utf8PathBuf {
+    format!("{}/wasm/{name}", env!("CARGO_TARGET_TMPDIR")).into()
+}
+
+fn build_wasm(opts: cargo_near_build::BuildOpts) -> Vec<u8> {
+    let path = cargo_near_build::build_with_cli(opts).expect("cargo near build failed");
+    std::fs::read(path).expect("the built wasm is readable")
+}
+
+/// yoctoNEAR per byte of storage on this protocol version.
+pub const STORAGE_BYTE_COST: u128 = 10_000_000_000_000_000_000;
+/// Gas of each function call inside an [`Escrow::batch`], in Tgas.
+pub const TGAS_PER_CALL: u64 = 25;
+
+/// A 64-character sandbox account id, the longest NEAR allows.
+pub fn long_id(name: &str) -> String {
+    let id = format!("{name:x<56}.sandbox");
+    assert_eq!(id.len(), 64);
+    id
 }
 
 /// The people of the story, each with 20 NEAR.
@@ -245,6 +440,35 @@ impl Escrow<'_> {
             .ok_or("send_to returned before the transaction ran")?)
     }
 
+    /// One transaction from `signer` to the escrow, with one function call of
+    /// [`TGAS_PER_CALL`] per `(method, args, deposit in yoctoNEAR)`. If any call fails, none of
+    /// them changes anything.
+    pub async fn batch(
+        &self,
+        signer: &Account,
+        calls: Vec<(&str, Value, u128)>,
+    ) -> TestResult<ExecutionFinalResult> {
+        let actions = calls
+            .into_iter()
+            .map(|(method, args, deposit)| {
+                Action::FunctionCall(Box::new(FunctionCallAction {
+                    method_name: method.to_string(),
+                    args: args.to_string().into_bytes(),
+                    gas: NearGas::from_tgas(TGAS_PER_CALL),
+                    deposit: NearToken::from_yoctonear(deposit),
+                }))
+            })
+            .collect();
+        let result = near_api::Transaction::construct(signer.0.clone(), self.id())
+            .add_actions(actions)
+            .with_signer(self.chain.signer.clone())
+            .send_to(&self.chain.network)
+            .await?;
+        Ok(result
+            .into_full()
+            .ok_or("send_to returned before the transaction ran")?)
+    }
+
     /// Calls a view method.
     pub async fn view<T: DeserializeOwned + Send + Sync>(
         &self,
@@ -307,6 +531,88 @@ impl Escrow<'_> {
         let args =
             json!({ "receiver_id": to, "token_id": token_id, "approval_id": null, "memo": null });
         self.call(from, "nft_transfer", args, ONE_YOCTO, TGAS).await
+    }
+
+    /// An `nft_transfer_call` to `to` with `msg`, sent as `from` with 1 yocto and `tgas`.
+    pub async fn transfer_call(
+        &self,
+        from: &Account,
+        to: &AccountId,
+        token_id: &str,
+        msg: &str,
+        tgas: u64,
+    ) -> TestResult<ExecutionFinalResult> {
+        let args = json!({
+            "receiver_id": to,
+            "token_id": token_id,
+            "approval_id": null,
+            "memo": null,
+            "msg": msg,
+        });
+        self.call(from, "nft_transfer_call", args, ONE_YOCTO, tgas)
+            .await
+    }
+
+    /// `claim_refund` sent by `holder` with 1 yocto and `tgas`.
+    pub async fn claim_refund(
+        &self,
+        holder: &Account,
+        token_id: &str,
+        tgas: u64,
+    ) -> TestResult<ExecutionFinalResult> {
+        let args = json!({ "token_id": token_id });
+        self.call(holder, "claim_refund", args, ONE_YOCTO, tgas)
+            .await
+    }
+
+    /// `claim_payout` sent by `organizer` with 1 yocto and 100 Tgas.
+    pub async fn claim_payout(
+        &self,
+        organizer: &Account,
+        event_id: u32,
+    ) -> TestResult<ExecutionFinalResult> {
+        let args = json!({ "event_id": event_id });
+        self.call(organizer, "claim_payout", args, ONE_YOCTO, TGAS)
+            .await
+    }
+
+    /// `cancel_event` by the organizer or the verifier, asserted to succeed.
+    pub async fn cancel(&self, by: &Account, event_id: u32) -> TestResult<()> {
+        let args = json!({ "event_id": event_id, "reason_ref": null });
+        self.call(by, "cancel_event", args, ONE_YOCTO, TGAS)
+            .await?
+            .assert_success();
+        Ok(())
+    }
+
+    /// `attest_completed` by the verifier, asserted to succeed.
+    pub async fn attest(&self, verifier: &Account, event_id: u32) -> TestResult<()> {
+        let args = json!({ "event_id": event_id, "evidence_ref": null });
+        self.call(verifier, "attest_completed", args, ONE_YOCTO, TGAS)
+            .await?
+            .assert_success();
+        Ok(())
+    }
+
+    pub async fn operation(&self, operation_id: u64) -> TestResult<Value> {
+        self.view("get_operation", json!({ "operation_id": operation_id }))
+            .await
+    }
+
+    pub async fn history(&self, token_id: &str) -> TestResult<Value> {
+        self.view("get_ticket_history", json!({ "token_id": token_id }))
+            .await
+    }
+
+    /// The sum over the given events of `principal_reserved + organizer_available`: what the
+    /// contract holds for others.
+    pub async fn held(&self, event_ids: &[u32]) -> TestResult<u128> {
+        let mut held = 0;
+        for event_id in event_ids {
+            let view = self.accounting(*event_id).await?;
+            held += amount(&view, "principal_reserved") + amount(&view, "organizer_available");
+        }
+        Ok(held)
     }
 
     pub async fn event(&self, event_id: u32) -> TestResult<Value> {
@@ -388,6 +694,80 @@ pub fn assert_fails_with(result: &ExecutionFinalResult, code: &str) {
         text.contains(&format!("Smart contract panicked: {code}: ")),
         "expected {code}, got: {text}"
     );
+}
+
+/// One NEAR transfer found among a transaction's receipts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Transfer {
+    pub receiver: String,
+    pub amount: u128,
+    pub succeeded: bool,
+}
+
+impl TestChain {
+    /// Every NEAR transfer that `sender` sent in a transaction's receipt tree, with whether it
+    /// arrived. Gas refunds come from the system, not from `sender`, so they are not counted.
+    pub async fn transfers_from(
+        &self,
+        result: &ExecutionFinalResult,
+        sender: &AccountId,
+    ) -> TestResult<Vec<Transfer>> {
+        let mut transfers = Vec::new();
+        for outcome in result.receipt_outcomes() {
+            let receipt = near_api::Transaction::receipt(outcome.transaction_hash)
+                .fetch_from(&self.network)
+                .await?;
+            let receipt = near_sdk::serde_json::to_value(&receipt)?;
+            if receipt["predecessor_id"] != sender.as_str() {
+                continue;
+            }
+            let actions = receipt["receipt"]["Action"]["actions"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            for action in actions {
+                if let Some(deposit) = action["Transfer"]["deposit"].as_str() {
+                    transfers.push(Transfer {
+                        receiver: receipt["receiver_id"].as_str().unwrap_or("").to_string(),
+                        amount: deposit.parse()?,
+                        succeeded: outcome.is_success(),
+                    });
+                }
+            }
+        }
+        Ok(transfers)
+    }
+}
+
+/// How many receipts ran on `account_id` and failed.
+pub fn failed_receipts_on(result: &ExecutionFinalResult, account_id: &AccountId) -> usize {
+    result
+        .receipt_failures()
+        .iter()
+        .filter(|outcome| &outcome.executor_id == account_id)
+        .count()
+}
+
+/// The panic messages (and other failures) of every failed receipt, as text.
+pub fn receipt_failure_texts(result: &ExecutionFinalResult) -> Vec<String> {
+    result
+        .receipt_failures()
+        .into_iter()
+        .map(|outcome| format!("{:?}", outcome.clone().into_result()))
+        .collect()
+}
+
+/// The `data` objects of a transaction's NEP-171 events named `name` (`nft_mint`,
+/// `nft_transfer`), in log order, after checking each event's envelope.
+pub fn nep171_events(result: &ExecutionFinalResult, name: &str) -> Vec<Value> {
+    events_named(result, name)
+        .into_iter()
+        .filter(|event| event["standard"] == "nep171")
+        .flat_map(|event| {
+            assert_eq!(event["version"], "1.0.0", "NEP-171 event version: {event}");
+            event["data"].as_array().cloned().unwrap_or_default()
+        })
+        .collect()
 }
 
 /// The `EVENT_JSON` logs of a transaction whose `event` field is `name`.

@@ -240,6 +240,168 @@ fn terms_hash_is_sha256_of_the_borsh_terms() {
     );
 }
 
+/// A contract whose event 1 was cancelled and whose ticket "1-1" has a refund in flight as
+/// operation 1. Returns it with Ana as the claimant.
+fn contract_with_a_pending_refund() -> Contract {
+    let mut contract = contract_with_a_sold_ticket();
+    call_as(ORGANIZER, 1, 1_600_000);
+    contract.cancel_event(1, None);
+    call_as(ANA, 1, 1_700_000);
+    let _ = contract.claim_refund("1-1".to_string());
+    let ticket = contract
+        .get_ticket("1-1".to_string())
+        .expect("ticket exists");
+    assert_eq!(ticket.status, TicketStatus::RefundPending);
+    assert_eq!(ticket.pending_operation_id, Some(1));
+    let accounting = contract.get_accounting(1).expect("event exists");
+    assert_eq!(accounting.refund_pending.0, PRICE);
+    assert_eq!(accounting.principal_reserved.0, 0);
+    assert_eq!(contract.total_held, 0);
+    contract
+}
+
+/// A contract whose event 1 was attested and whose payout is in flight as operation 1.
+fn contract_with_a_pending_payout() -> Contract {
+    let mut contract = contract_with_a_sold_ticket();
+    call_as(VERIFIER, 1, ENDS);
+    contract.attest_completed(1, None);
+    call_as(ORGANIZER, 1, ENDS + 1);
+    let _ = contract.claim_payout(1);
+    let accounting = contract.get_accounting(1).expect("event exists");
+    assert_eq!(accounting.organizer_pending.0, PRICE);
+    assert_eq!(accounting.organizer_available.0, 0);
+    assert_eq!(contract.total_held, 0);
+    contract
+}
+
+/// The callback as the runtime calls it: from the contract itself, after the transfer.
+fn as_callback() {
+    call_as(ESCROW, 0, 1_800_000);
+}
+
+fn assert_identity(contract: &Contract) {
+    let ledger = &contract.load_event(1).ledger;
+    assert!(ledger.identity_holds(), "{ledger:?}");
+    assert_eq!(contract.total_held, ledger.held());
+}
+
+#[test]
+fn refund_callback_settles_a_delivered_transfer() {
+    let mut contract = contract_with_a_pending_refund();
+    as_callback();
+    assert!(contract.on_refund_result(1, Ok(())));
+
+    let ticket = contract
+        .get_ticket("1-1".to_string())
+        .expect("ticket exists");
+    assert_eq!(ticket.status, TicketStatus::Refunded);
+    assert_eq!(ticket.claim, Claim::Refunded);
+    assert_eq!(ticket.pending_operation_id, None);
+    let accounting = contract.get_accounting(1).expect("event exists");
+    assert_eq!(accounting.refunds_settled.0, PRICE);
+    assert_eq!(accounting.refund_pending.0, 0);
+    assert!(contract.get_operation(1).is_none());
+    assert_identity(&contract);
+    let logs = near_sdk::test_utils::get_logs();
+    assert!(logs.iter().any(|line| line.contains("\"refund_settled\"")));
+}
+
+#[test]
+fn refund_callback_restores_the_right_after_a_failed_transfer() {
+    let mut contract = contract_with_a_pending_refund();
+    as_callback();
+    assert!(!contract.on_refund_result(1, Err(near_sdk::PromiseError::Failed)));
+
+    let ticket = contract
+        .get_ticket("1-1".to_string())
+        .expect("ticket exists");
+    assert_eq!(ticket.status, TicketStatus::Active);
+    assert_eq!(ticket.claim, Claim::Refundable);
+    assert_eq!(ticket.pending_operation_id, None);
+    let accounting = contract.get_accounting(1).expect("event exists");
+    assert_eq!(accounting.principal_reserved.0, PRICE);
+    assert_eq!(accounting.refund_pending.0, 0);
+    assert_eq!(accounting.refunds_settled.0, 0);
+    assert_eq!(contract.total_held, PRICE);
+    assert_identity(&contract);
+    let history = contract
+        .get_ticket_history("1-1".to_string())
+        .expect("ticket exists");
+    assert_eq!(
+        history.entries.last().map(|entry| entry.kind),
+        Some(HistoryKind::RefundFailed)
+    );
+
+    // A second delivery of the same callback finds nothing to restore.
+    as_callback();
+    assert!(!contract.on_refund_result(1, Err(near_sdk::PromiseError::Failed)));
+    assert_eq!(contract.total_held, PRICE);
+    assert_identity(&contract);
+}
+
+#[test]
+fn payout_callback_settles_a_delivered_transfer() {
+    let mut contract = contract_with_a_pending_payout();
+    as_callback();
+    assert!(contract.on_payout_result(1, Ok(())));
+
+    let accounting = contract.get_accounting(1).expect("event exists");
+    assert_eq!(accounting.organizer_settled.0, PRICE);
+    assert_eq!(accounting.organizer_pending.0, 0);
+    assert!(contract.get_operation(1).is_none());
+    assert_identity(&contract);
+
+    // Nothing is left to pay.
+    call_as(ORGANIZER, 1, ENDS + 2);
+    fails_with("ERR_NOTHING_TO_PAY", || {
+        let _ = contract.claim_payout(1);
+    });
+}
+
+#[test]
+fn payout_callback_makes_the_amount_available_again_after_a_failed_transfer() {
+    let mut contract = contract_with_a_pending_payout();
+    as_callback();
+    assert!(!contract.on_payout_result(1, Err(near_sdk::PromiseError::Failed)));
+
+    let accounting = contract.get_accounting(1).expect("event exists");
+    assert_eq!(accounting.organizer_available.0, PRICE);
+    assert_eq!(accounting.organizer_pending.0, 0);
+    assert_eq!(accounting.organizer_settled.0, 0);
+    assert_eq!(contract.total_held, PRICE);
+    assert_identity(&contract);
+
+    as_callback();
+    assert!(!contract.on_payout_result(1, Err(near_sdk::PromiseError::Failed)));
+    assert_eq!(contract.total_held, PRICE);
+}
+
+#[test]
+fn a_callback_ignores_an_operation_of_the_other_kind() {
+    let mut contract = contract_with_a_pending_payout();
+    as_callback();
+    assert!(!contract.on_refund_result(1, Ok(())));
+    let operation = contract.get_operation(1).expect("still pending");
+    assert_eq!(operation.kind, OperationKind::Payout);
+    assert_eq!(
+        contract
+            .get_accounting(1)
+            .expect("event exists")
+            .organizer_pending
+            .0,
+        PRICE
+    );
+}
+
+#[test]
+fn a_payout_in_flight_blocks_a_second_one() {
+    let mut contract = contract_with_a_pending_payout();
+    call_as(ORGANIZER, 1, ENDS + 2);
+    fails_with("ERR_PAYOUT_PENDING", || {
+        let _ = contract.claim_payout(1);
+    });
+}
+
 #[test]
 fn history_keeps_the_first_entry_and_the_latest_fifteen() {
     let mut contract = contract_with_a_sold_ticket();
@@ -262,4 +424,435 @@ fn history_keeps_the_first_entry_and_the_latest_fifteen() {
         id(holder),
         "the last entry names the current holder"
     );
+}
+
+const RECEIVER: &str = "receiver.near";
+
+/// Ana sends ticket "1-1" to a contract with `nft_transfer_call`; the resolver has not run.
+fn contract_with_a_transfer_in_flight() -> Contract {
+    use near_contract_standards::non_fungible_token::core::NonFungibleTokenCore;
+    let mut contract = contract_with_a_sold_ticket();
+    call_as(ANA, 1, 1_600_000);
+    let _ = contract.nft_transfer_call(id(RECEIVER), "1-1".to_string(), None, None, "keep".into());
+    let ticket = contract
+        .get_ticket("1-1".to_string())
+        .expect("ticket exists");
+    assert_eq!(ticket.status, TicketStatus::TransferPending);
+    assert_eq!(ticket.owner_id, id(RECEIVER));
+    contract
+}
+
+/// The resolver as the runtime calls it, at `now_ms`, with the receiver's answer `answer`.
+fn resolve_with(contract: &mut Contract, answer: near_sdk::PromiseResult, now_ms: u64) -> bool {
+    use near_contract_standards::non_fungible_token::core::NonFungibleTokenResolver;
+    testing_env!(
+        VMContextBuilder::new()
+            .current_account_id(id(ESCROW))
+            .predecessor_account_id(id(ESCROW))
+            .block_timestamp(now_ms * 1_000_000)
+            .account_balance(NearToken::from_near(1_000))
+            .build(),
+        near_sdk::test_vm_config(),
+        near_sdk::RuntimeFeesConfig::test(),
+        Default::default(),
+        vec![answer],
+    );
+    contract.nft_resolve_transfer(id(ANA), id(RECEIVER), "1-1".to_string(), None)
+}
+
+/// Resolves the in-flight transfer with `answer` and checks who holds the ticket afterwards. Each
+/// answer gets its own test: the mocked storage is per test thread, so one contract per test.
+fn resolve_and_check(answer: near_sdk::PromiseResult, kept: bool) {
+    let mut contract = contract_with_a_transfer_in_flight();
+    assert_eq!(resolve_with(&mut contract, answer, 1_600_001), kept);
+    let ticket = contract
+        .get_ticket("1-1".to_string())
+        .expect("ticket exists");
+    assert_eq!(ticket.status, TicketStatus::Active, "the lock is cleared");
+    let holder = if kept { RECEIVER } else { ANA };
+    assert_eq!(ticket.owner_id, id(holder));
+    let history = contract
+        .get_ticket_history("1-1".to_string())
+        .expect("ticket exists");
+    let last = history.entries.last().expect("history has entries");
+    let expected = if kept {
+        HistoryKind::Transferred
+    } else {
+        HistoryKind::TransferReturned
+    };
+    assert_eq!(last.kind, expected);
+    assert_eq!(last.account_id, id(holder));
+}
+
+#[test]
+fn resolver_keeps_the_ticket_on_a_clean_false() {
+    resolve_and_check(near_sdk::PromiseResult::Successful(b"false".to_vec()), true);
+}
+
+#[test]
+fn resolver_returns_the_ticket_on_true() {
+    resolve_and_check(near_sdk::PromiseResult::Successful(b"true".to_vec()), false);
+}
+
+#[test]
+fn resolver_returns_the_ticket_when_the_receiver_failed() {
+    resolve_and_check(near_sdk::PromiseResult::Failed, false);
+}
+
+#[test]
+fn resolver_returns_the_ticket_on_an_answer_that_is_not_json() {
+    resolve_and_check(
+        near_sdk::PromiseResult::Successful(b"maybe".to_vec()),
+        false,
+    );
+}
+
+#[test]
+fn resolver_returns_the_ticket_on_an_answer_longer_than_a_boolean() {
+    resolve_and_check(
+        near_sdk::PromiseResult::Successful(b"false      ".to_vec()),
+        false,
+    );
+}
+
+#[test]
+fn resolver_returns_the_ticket_on_an_empty_answer() {
+    resolve_and_check(near_sdk::PromiseResult::Successful(Vec::new()), false);
+}
+
+#[test]
+fn resolver_finishes_after_the_start_and_after_an_outcome() {
+    // The window only gates starting a transfer. One that started in time always finishes.
+    let mut contract = contract_with_a_transfer_in_flight();
+    call_as(ORGANIZER, 1, 1_700_000);
+    contract.cancel_event(1, None);
+    assert!(!resolve_with(
+        &mut contract,
+        near_sdk::PromiseResult::Failed,
+        STARTS + 10
+    ));
+    let ticket = contract
+        .get_ticket("1-1".to_string())
+        .expect("ticket exists");
+    assert_eq!(ticket.owner_id, id(ANA));
+    assert_eq!(ticket.status, TicketStatus::Active);
+    assert_eq!(ticket.claim, Claim::Refundable);
+}
+
+#[test]
+fn a_locked_ticket_cannot_be_claimed_or_moved() {
+    use near_contract_standards::non_fungible_token::core::NonFungibleTokenCore;
+    let mut contract = contract_with_a_transfer_in_flight();
+    call_as(ORGANIZER, 1, 1_700_000);
+    contract.cancel_event(1, None);
+    call_as(RECEIVER, 1, 1_700_001);
+    fails_with("ERR_TICKET_LOCKED", || {
+        let _ = contract.claim_refund("1-1".to_string());
+    });
+    call_as(RECEIVER, 1, 1_700_001);
+    fails_with("ERR_TICKET_LOCKED", || {
+        contract.nft_transfer(id(LUIS), "1-1".to_string(), None, None)
+    });
+}
+
+/// Sets the next call's caller, deposit, block time and prepaid gas.
+fn call_with_gas(predecessor: &str, deposit: u128, now_ms: u64, tgas: u64) {
+    testing_env!(
+        VMContextBuilder::new()
+            .current_account_id(id(ESCROW))
+            .predecessor_account_id(id(predecessor))
+            .signer_account_id(id(predecessor))
+            .attached_deposit(NearToken::from_yoctonear(deposit))
+            .block_timestamp(now_ms * 1_000_000)
+            .account_balance(NearToken::from_near(1_000))
+            .prepaid_gas(near_sdk::Gas::from_tgas(tgas))
+            .build()
+    );
+}
+
+/// Every check of `nft_transfer_call` runs before it writes anything. The mocked host does not
+/// roll back a failed call, so an early write would show here.
+#[test]
+fn transfer_call_checks_everything_before_any_change() {
+    let mut contract = contract_with_a_sold_ticket();
+    let unchanged = |contract: &Contract| {
+        let ticket = contract
+            .get_ticket("1-1".to_string())
+            .expect("ticket exists");
+        assert_eq!(ticket.status, TicketStatus::Active);
+        assert_eq!(ticket.owner_id, id(ANA));
+        let history = contract
+            .get_ticket_history("1-1".to_string())
+            .expect("ticket exists");
+        assert_eq!(history.entries.len(), 1, "nothing was recorded");
+    };
+    let receiver = || id(RECEIVER);
+    let token = || "1-1".to_string();
+
+    call_with_gas(ANA, 1, 1_600_000, 300);
+    fails_with("ERR_LIMIT", || {
+        let _ = contract.nft_transfer_call(receiver(), token(), None, None, "m".repeat(1_025));
+    });
+    unchanged(&contract);
+
+    call_with_gas(ANA, 1, 1_600_000, 300);
+    fails_with("ERR_LIMIT", || {
+        let memo = Some("m".repeat(257));
+        let _ = contract.nft_transfer_call(receiver(), token(), None, memo, "keep".into());
+    });
+    unchanged(&contract);
+
+    call_with_gas(ANA, 1, 1_600_000, 300);
+    fails_with("ERR_APPROVALS_DISABLED", || {
+        let _ = contract.nft_transfer_call(receiver(), token(), Some(0), None, "keep".into());
+    });
+    unchanged(&contract);
+
+    call_with_gas(ANA, 0, 1_600_000, 300);
+    fails_with("ERR_ONE_YOCTO", || {
+        let _ = contract.nft_transfer_call(receiver(), token(), None, None, "keep".into());
+    });
+    unchanged(&contract);
+
+    call_with_gas(ANA, 1, 1_600_000, GAS_TRANSFER_CALL_MIN.as_tgas() - 1);
+    fails_with("ERR_INSUFFICIENT_GAS", || {
+        let _ = contract.nft_transfer_call(receiver(), token(), None, None, "keep".into());
+    });
+    unchanged(&contract);
+
+    // At the limits it goes through.
+    call_with_gas(ANA, 1, 1_600_000, GAS_TRANSFER_CALL_MIN.as_tgas());
+    let _ = contract.nft_transfer_call(
+        receiver(),
+        token(),
+        None,
+        Some("m".repeat(256)),
+        "m".repeat(1_024),
+    );
+    let ticket = contract
+        .get_ticket("1-1".to_string())
+        .expect("ticket exists");
+    assert_eq!(ticket.status, TicketStatus::TransferPending);
+}
+
+/// `storage_usage` every measured call starts from. The mocked host resets the counter on each
+/// `testing_env!` but keeps the stored data, so each call's delta is read inside its own context.
+const BASE_USAGE: u64 = 10_000_000;
+
+/// A 64-character account id, the longest NEAR allows.
+fn long(name: &str) -> AccountId {
+    let id = format!("{name:x<59}.near");
+    assert_eq!(id.len(), 64);
+    id.parse().expect("valid account id")
+}
+
+/// Runs one call as `predecessor` and returns the bytes of storage it added, with every `store`
+/// collection written.
+fn bytes_added(
+    contract: &mut Contract,
+    predecessor: &AccountId,
+    deposit: u128,
+    now_ms: u64,
+    call: impl FnOnce(&mut Contract),
+) -> i64 {
+    testing_env!(
+        VMContextBuilder::new()
+            .current_account_id(id(ESCROW))
+            .predecessor_account_id(predecessor.clone())
+            .signer_account_id(predecessor.clone())
+            .attached_deposit(NearToken::from_yoctonear(deposit))
+            .block_timestamp(now_ms * 1_000_000)
+            .account_balance(NearToken::from_near(100_000))
+            .storage_usage(BASE_USAGE)
+            .build()
+    );
+    call(contract);
+    contract.events.flush();
+    contract.tickets.flush();
+    contract.operations.flush();
+    i64::try_from(near_sdk::env::storage_usage()).expect("small") - BASE_USAGE as i64
+}
+
+/// The largest event terms: 64-character verifier, longest title and venue, full capacity.
+fn largest_terms() -> EventTerms {
+    EventTerms {
+        title: "t".repeat(MAX_TITLE_BYTES as usize),
+        venue: "v".repeat(MAX_VENUE_BYTES as usize),
+        capacity: MAX_CAPACITY,
+        verifier_id: long("verifier"),
+        ..terms()
+    }
+}
+
+/// The measured constants are the worst case plus 20%, rounded up.
+fn with_margin(bytes: i64) -> u128 {
+    u128::try_from(bytes * 6).expect("positive").div_ceil(5)
+}
+
+/// Measures the most storage one event and one ticket can use (plan, Task C4): 64-character
+/// accounts everywhere, the longest texts, a full ticket history, a pending operation, and every
+/// holder with an owner index of its own. `storage_per_event` and `storage_per_ticket` must be
+/// exactly these numbers plus 20%.
+#[test]
+fn storage_constants_are_the_measured_worst_case_plus_twenty_percent() {
+    let organizer = long("organizer");
+    let verifier = long("verifier");
+    let budget = quote_event_budget(MAX_CAPACITY);
+    call_as(ESCROW, 0, 1_000_000);
+    let mut contract = Contract::new();
+
+    // Nine events first, so the measured ones have two-digit ids ("10-100").
+    for _ in 0..9 {
+        let _ = bytes_added(&mut contract, &organizer, budget, 1_000_000, |c| {
+            c.create_event(largest_terms());
+        });
+    }
+
+    // Event 10: sold out; its last ticket is the one measured.
+    let created = bytes_added(&mut contract, &organizer, budget, 1_000_000, |c| {
+        assert_eq!(c.create_event(largest_terms()), 10);
+    });
+    let hash = contract.get_event(10).expect("event exists").terms_hash;
+    let accepted = bytes_added(&mut contract, &verifier, 1, 1_000_000, |c| {
+        c.accept_verification(10, hash)
+    });
+    assert_eq!(accepted, 0, "accepting adds no bytes");
+    for serial in 1..MAX_CAPACITY {
+        let buyer = long(&format!("buyer-{serial}"));
+        let _ = bytes_added(&mut contract, &buyer, PRICE, 1_500_000, |c| {
+            c.buy_ticket(10);
+        });
+    }
+
+    let mut holder = long("holder-0");
+    let bought = bytes_added(&mut contract, &holder, PRICE, 1_500_000, |c| {
+        assert_eq!(c.buy_ticket(10), "10-100");
+    });
+    let mut ticket = bought;
+    // Twenty transfers, each to a new holder: the history fills up and the previous holder's
+    // owner index is removed.
+    for step in 1..=20 {
+        let next = long(&format!("holder-{step}"));
+        ticket += bytes_added(&mut contract, &holder, 1, 1_600_000, |c| {
+            c.nft_transfer(next.clone(), "10-100".to_string(), None, None)
+        });
+        holder = next;
+    }
+    let history = contract
+        .get_ticket_history("10-100".to_string())
+        .expect("ticket exists");
+    assert_eq!(history.entries.len(), HISTORY_CAP as usize);
+    let _ = bytes_added(&mut contract, &organizer, 1, 1_600_000, |c| {
+        c.cancel_event(10, Some("r".repeat(MAX_REF_BYTES as usize)))
+    });
+    ticket += bytes_added(&mut contract, &holder, 1, 1_700_000, |c| {
+        let _ = c.claim_refund("10-100".to_string());
+    });
+    let ticket_status = contract
+        .get_ticket("10-100".to_string())
+        .expect("ticket exists")
+        .status;
+    assert_eq!(ticket_status, TicketStatus::RefundPending);
+
+    // A ticket id is stored six times: the ticket record's key, the token owner's key, the
+    // token tree node, the holder's owner index (key and element) and the pending refund. The
+    // measured id is 6 bytes; the longest possible is 14 ("4294967295-100").
+    const TOKEN_ID_COPIES: i64 = 6;
+    let longest_id = format!("{}-{MAX_CAPACITY}", u32::MAX).len() as i64;
+    let ticket_worst = ticket + TOKEN_ID_COPIES * (longest_id - "10-100".len() as i64);
+
+    // Event 11: completed with a payout in flight, the larger of the two outcomes.
+    let mut event = created;
+    let hash_11 = {
+        let _ = bytes_added(&mut contract, &organizer, budget, 1_000_000, |c| {
+            assert_eq!(c.create_event(largest_terms()), 11);
+        });
+        contract.get_event(11).expect("event exists").terms_hash
+    };
+    let _ = bytes_added(&mut contract, &verifier, 1, 1_000_000, |c| {
+        c.accept_verification(11, hash_11)
+    });
+    let short_buy = bytes_added(&mut contract, &long("buyer-x"), PRICE, 1_500_000, |c| {
+        assert_eq!(c.buy_ticket(11), "11-1");
+    });
+    // At purchase five of the six copies exist; two more bytes of id cost two bytes each.
+    assert_eq!(bought - short_buy, 5 * 2, "the id copies are as counted");
+    event += bytes_added(&mut contract, &verifier, 1, ENDS, |c| {
+        c.attest_completed(11, Some("e".repeat(MAX_REF_BYTES as usize)))
+    });
+    event += bytes_added(&mut contract, &organizer, 1, ENDS + 1, |c| {
+        let _ = c.claim_payout(11);
+    });
+
+    eprintln!("measured worst case: event {event} bytes, ticket {ticket_worst} bytes");
+    assert_eq!(
+        accounting::STORAGE_BYTES_PER_EVENT,
+        with_margin(event),
+        "storage_per_event: measured {event} bytes"
+    );
+    assert_eq!(
+        accounting::STORAGE_BYTES_PER_TICKET,
+        with_margin(ticket_worst),
+        "storage_per_ticket: measured {ticket_worst} bytes"
+    );
+}
+
+/// `nft_transfer_call` is a second way into the transfer rules (R6, R8): each one rejects it
+/// exactly as it rejects `nft_transfer`, and leaves the ticket as it was.
+#[test]
+fn transfer_call_follows_every_transfer_rule() {
+    let mut contract = contract_with_a_sold_ticket();
+    let token = || "1-1".to_string();
+    let unchanged = |contract: &Contract, status: TicketStatus, entries: usize| {
+        let ticket = contract.get_ticket(token()).expect("ticket exists");
+        assert_eq!(ticket.owner_id, id(ANA));
+        assert_eq!(ticket.status, status);
+        let history = contract.get_ticket_history(token()).expect("ticket exists");
+        assert_eq!(history.entries.len(), entries);
+    };
+    let send = |contract: &mut Contract, caller: &str, to: &str, now_ms: u64, code: &str| {
+        call_with_gas(caller, 1, now_ms, 300);
+        fails_with(code, || {
+            let _ = contract.nft_transfer_call(id(to), token(), None, None, "keep".into());
+        });
+    };
+
+    // Someone who does not hold it.
+    send(&mut contract, LUIS, RECEIVER, 1_600_000, "ERR_UNAUTHORIZED");
+    unchanged(&contract, TicketStatus::Active, 1);
+    // To its own holder, and to the escrow itself.
+    send(&mut contract, ANA, ANA, 1_600_000, "ERR_UNAUTHORIZED");
+    unchanged(&contract, TicketStatus::Active, 1);
+    send(&mut contract, ANA, ESCROW, 1_600_000, "ERR_UNAUTHORIZED");
+    unchanged(&contract, TicketStatus::Active, 1);
+    // At the start and after it.
+    send(&mut contract, ANA, RECEIVER, STARTS, "ERR_TOO_LATE");
+    unchanged(&contract, TicketStatus::Active, 1);
+    send(&mut contract, ANA, RECEIVER, STARTS + 1, "ERR_TOO_LATE");
+    unchanged(&contract, TicketStatus::Active, 1);
+    // Once the event has an outcome.
+    call_as(ORGANIZER, 1, 1_700_000);
+    contract.cancel_event(1, None);
+    send(
+        &mut contract,
+        ANA,
+        RECEIVER,
+        1_700_001,
+        "ERR_ALREADY_RESOLVED",
+    );
+    unchanged(&contract, TicketStatus::Active, 1);
+    // While its refund is in flight: the lock answers before the outcome check.
+    call_as(ANA, 1, 1_700_002);
+    let _ = contract.claim_refund(token());
+    unchanged(&contract, TicketStatus::RefundPending, 2);
+    send(&mut contract, ANA, RECEIVER, 1_700_003, "ERR_TICKET_LOCKED");
+    unchanged(&contract, TicketStatus::RefundPending, 2);
+}
+
+#[test]
+fn resolver_returns_the_ticket_on_the_largest_answer() {
+    // `false` padded to 4 MiB, the protocol's limit: valid JSON, but longer than a boolean.
+    let mut answer = vec![b' '; 4 * 1024 * 1024];
+    answer[..5].copy_from_slice(b"false");
+    resolve_and_check(near_sdk::PromiseResult::Successful(answer), false);
 }
