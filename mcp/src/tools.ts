@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Agent } from './agent.js';
 import {
+  describeError,
   formatContractProof,
   formatEvent,
   formatEvents,
@@ -115,46 +116,77 @@ const result = <T extends Record<string, unknown>>(text: string, structuredConte
   structuredContent,
 });
 
+/** Turns an unexpected failure (an RPC down, a missing event) into a tool error with one sentence. */
+async function guarded<R>(
+  run: () => Promise<R>,
+): Promise<R | { isError: true; content: Array<{ type: 'text'; text: string }> }> {
+  try {
+    return await run();
+  } catch (error) {
+    return { isError: true, content: [{ type: 'text', text: describeError(error) }] };
+  }
+}
+
 /** Registers the ten tools, in `TOOL_NAMES` order, over one agent. */
 export function registerTools(server: McpServer, agent: Agent): void {
-  server.registerTool('list_events', meta('list_events'), async (input) => {
-    const output = await agent.listEvents(input);
-    return result(formatEvents(output, input.from_index), output);
-  });
-  server.registerTool('get_event', meta('get_event'), async (input) => {
-    const output = await agent.getEvent(input);
-    return result(formatEvent(output), output);
-  });
-  server.registerTool('get_ticket', meta('get_ticket'), async (input) => {
-    const output = await agent.getTicket(input);
-    return result(formatTicket(output), output);
-  });
-  server.registerTool('list_my_tickets', meta('list_my_tickets'), async () => {
-    const output = await agent.listMyTickets();
-    return result(formatMyTickets(output), output);
-  });
-  server.registerTool('get_wallet', meta('get_wallet'), async () => {
-    const output = await agent.getWallet();
-    return result(formatWallet(output), output);
-  });
-  server.registerTool('verify_contract', meta('verify_contract'), async () => {
-    const output = await agent.verifyContract();
-    return result(formatContractProof(output), output);
-  });
-  server.registerTool('buy_ticket', meta('buy_ticket'), async (input) => {
-    const output = await agent.buyTicket(input);
-    return result(formatWrite(output), output);
-  });
-  server.registerTool('transfer_ticket', meta('transfer_ticket'), async (input) => {
-    const output = await agent.transferTicket(input);
-    return result(formatWrite(output), output);
-  });
-  server.registerTool('expire_event', meta('expire_event'), async (input) => {
-    const output = await agent.expireEvent(input);
-    return result(formatWrite(output), output);
-  });
-  server.registerTool('claim_refund', meta('claim_refund'), async (input) => {
-    const output = await agent.claimRefund(input);
-    return result(formatWrite(output), output);
-  });
+  server.registerTool('list_events', meta('list_events'), async (input) =>
+    guarded(async () => {
+      const output = await agent.listEvents(input);
+      return result(formatEvents(output, input.from_index), output);
+    }),
+  );
+  server.registerTool('get_event', meta('get_event'), async (input) =>
+    guarded(async () => {
+      const output = await agent.getEvent(input);
+      return result(formatEvent(output), output);
+    }),
+  );
+  server.registerTool('get_ticket', meta('get_ticket'), async (input) =>
+    guarded(async () => {
+      const output = await agent.getTicket(input);
+      return result(formatTicket(output), output);
+    }),
+  );
+  server.registerTool('list_my_tickets', meta('list_my_tickets'), async () =>
+    guarded(async () => {
+      const output = await agent.listMyTickets();
+      return result(formatMyTickets(output), output);
+    }),
+  );
+  server.registerTool('get_wallet', meta('get_wallet'), async () =>
+    guarded(async () => {
+      const output = await agent.getWallet();
+      return result(formatWallet(output), output);
+    }),
+  );
+  server.registerTool('verify_contract', meta('verify_contract'), async () =>
+    guarded(async () => {
+      const output = await agent.verifyContract();
+      return result(formatContractProof(output), output);
+    }),
+  );
+  server.registerTool('buy_ticket', meta('buy_ticket'), async (input) =>
+    guarded(async () => {
+      const output = await agent.buyTicket(input);
+      return result(formatWrite(output), output);
+    }),
+  );
+  server.registerTool('transfer_ticket', meta('transfer_ticket'), async (input) =>
+    guarded(async () => {
+      const output = await agent.transferTicket(input);
+      return result(formatWrite(output), output);
+    }),
+  );
+  server.registerTool('expire_event', meta('expire_event'), async (input) =>
+    guarded(async () => {
+      const output = await agent.expireEvent(input);
+      return result(formatWrite(output), output);
+    }),
+  );
+  server.registerTool('claim_refund', meta('claim_refund'), async (input) =>
+    guarded(async () => {
+      const output = await agent.claimRefund(input);
+      return result(formatWrite(output), output);
+    }),
+  );
 }

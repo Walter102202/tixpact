@@ -47,3 +47,4 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-12 | The agent's exposure counts money still in the contract plus purchases not yet visible; writes run one at a time | `2026-11-12-agent-exposure-and-one-write-at-a-time.md` |
 | 2026-11-12 | Agent writes return one of five statuses; the chain is checked before the policy | `2026-11-12-agent-write-results-and-checks.md` |
 | 2026-11-12 | The agent's configuration fails closed, and the policy also bounds gas and deposits | `2026-11-12-agent-config-fails-closed.md` |
+| 2026-11-12 | The agent's signer knows the transaction hash before sending, and judges send errors itself | `2026-11-12-agent-signer-knows-the-hash-before-sending.md` |

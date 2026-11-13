@@ -15,6 +15,7 @@ import {
   type RecordedTx,
   TX_FIXTURES,
 } from '@ticket-escrow/client';
+import { FailoverRpcError } from 'near-api-js';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentConfig } from './config.js';
 import { createServer } from './server.js';
@@ -297,6 +298,21 @@ describe('read tools', () => {
       headroom: parseNear('1.5'),
     });
     expect(result.text).toContain('Per-ticket cap: 1.5 NEAR');
+  });
+
+  it('says plainly when every RPC endpoint failed', async () => {
+    const down: Reader = {
+      ...createFixtureReader(DATA),
+      async getEvent() {
+        throw new FailoverRpcError(2, [new TypeError('fetch failed'), new Error('timed out')]);
+      },
+    };
+    const client = await connect(deps(null, { reader: down }));
+    const result = await call(client, 'get_event', { event_id: 1 });
+    expect(result).toMatchObject({
+      isError: true,
+      text: 'Could not read the chain: every RPC endpoint failed (first error: fetch failed).',
+    });
   });
 
   it('read tools that need the agent account say so when it is not set', async () => {

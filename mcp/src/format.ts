@@ -7,6 +7,7 @@ import {
   PROMISE_TEXT,
   type TicketView,
 } from '@ticket-escrow/client';
+import { FailoverRpcError } from 'near-api-js';
 import type { ToolOutput, WriteResult } from './schemas.js';
 
 // Markdown views of the tool results, so every MCP client shows the model the same text. Amounts
@@ -15,6 +16,16 @@ import type { ToolOutput, WriteResult } from './schemas.js';
 
 export const near = (yocto: string) => `${formatNear(yocto, 24)} NEAR`;
 export const when = (ms: number) => formatDateTime(ms, 'UTC');
+
+/** One sentence for an unexpected failure; the failover provider's own message names no cause. */
+export function describeError(error: unknown): string {
+  if (error instanceof FailoverRpcError) {
+    const first = error.errors[0];
+    const detail = first instanceof Error ? first.message : String(first);
+    return `Could not read the chain: every RPC endpoint failed (first error: ${detail}).`;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
 
 function verifierLine(event: EventView): string {
   return event.verifier_accepted

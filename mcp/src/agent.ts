@@ -40,6 +40,8 @@ export interface AgentDeps {
 }
 
 export interface Agent {
+  /** The agent's account (`AGENT_ACCOUNT_ID`), or null when the server only reads. */
+  readonly accountId: string | null;
   listEvents(input: ToolInput<'list_events'>): Promise<ToolOutput<'list_events'>>;
   getEvent(input: ToolInput<'get_event'>): Promise<ToolOutput<'get_event'>>;
   getTicket(input: ToolInput<'get_ticket'>): Promise<ToolOutput<'get_ticket'>>;
@@ -318,6 +320,8 @@ export function createAgent(deps: AgentDeps): Agent {
   }
 
   return {
+    accountId: config.agentAccountId,
+
     async listEvents({ from_index, limit }) {
       const events = await reader.listEvents(from_index, limit);
       return {
