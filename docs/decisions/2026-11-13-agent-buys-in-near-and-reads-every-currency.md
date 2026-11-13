@@ -12,6 +12,7 @@ Contract v2 prices an event in NEAR or in one of a fixed list of NEP-141 tokens.
 ## Decision
 
 - `evaluate` gains an ordered check for purchases, after the deposit check and before the price cap: the event's currency, read with the event right before signing (`AgentState.eventCurrency`). A token currency is denied with reason `currency_not_near`: "Event 10 is priced in tusd.testnet, not in NEAR: this agent only buys tickets priced in NEAR, because its caps are in NEAR". A purchase whose currency was not read throws, like one whose exposure was not read. A denied token purchase reads no ticket list.
+- A call is sent where it says it goes: the agent signs `call.receiverId ?? contractId`, and `evaluate` first denies (`receiver_mismatch`) a call whose own `receiverId` differs from where it would be sent, before the contract check. The agent builds no token call today; this keeps the policy and the signer judging the same receiver if one is ever built (integrator's review, 2026-11-13).
 - The allow list is unchanged: the token calls (`ft_transfer_call`, `storage_deposit`, `faucet`) are denied as `contract_not_allowed` when sent to the token and `method_not_allowed` on the contract, and tests pin both.
 - The exposure counts NEAR tickets only.
 - Every amount is written in its own currency (`10 tUSD`, `1.5 NEAR`), exact. The read tools' results carry `tokens` (the accepted tokens with symbol and decimals), so a model reading the structured content knows the unit of every amount. The token list is read once per server, since a deployment fixes it at `new`; a failed read is retried on the next call. A NEAR-only path reads nothing new.
@@ -26,5 +27,5 @@ Contract v2 prices an event in NEAR or in one of a fixed list of NEP-141 tokens.
 
 ## Consequences
 
-- `AgentState` gains `eventCurrency`; `DenyReason` gains `currency_not_near`; the outputs of `list_events`, `get_event`, `get_ticket` and `list_my_tickets` gain `tokens`; `verify_contract` gains `near_events` and `tokens_held`. The tool count stays ten.
+- `AgentState` gains `eventCurrency`; `DenyReason` gains `currency_not_near` and `receiver_mismatch`; the outputs of `list_events`, `get_event`, `get_ticket` and `list_my_tickets` gain `tokens`; `verify_contract` gains `near_events` and `tokens_held`. The tool count stays ten.
 - `docs/mcp.md` (not this lane's file) should say that token events are read and claimed but not bought.

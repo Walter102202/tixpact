@@ -211,6 +211,23 @@ describe('fixtures with tokens (interface v2)', () => {
     expect(BigInt(await reader.tokenBalance(token, 'ana.testnet')) < price).toBe(true);
   });
 
+  it('record token purchases a real token would let reach the contract, and one it would refuse', () => {
+    const ledger = data.tokens[token]?.balances ?? {};
+    const sent = (tx: { status: Record<string, unknown> }) => {
+      const t = tx.status.transaction as {
+        signer_id: string;
+        actions: Array<{ FunctionCall: { args: string } }>;
+      };
+      const args = JSON.parse(atob(t.actions[0]?.FunctionCall.args ?? '')) as { amount: string };
+      return { signer: t.signer_id, amount: BigInt(args.amount) };
+    };
+    for (const tx of [TX_FIXTURES.tokenBuySucceeded, TX_FIXTURES.tokenBuyRejected]) {
+      const { signer, amount } = sent(tx);
+      expect(BigInt(ledger[signer] ?? -1) >= amount, `${signer} can pay ${amount}`).toBe(true);
+    }
+    expect(Object.hasOwn(ledger, sent(TX_FIXTURES.tokenBuyUnfunded).signer)).toBe(false);
+  });
+
   it('read the tUSD refund in flight and the ticket history of the gift to Sofia', async () => {
     const reader = createFixtureReader(data);
     expect(await reader.getOperation(12)).toMatchObject({ token_id: '11-2', currency: token });

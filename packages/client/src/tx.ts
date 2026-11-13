@@ -296,25 +296,24 @@ export function moneyMoved(result: TxResult): boolean {
 /**
  * Whether a purchase bought a ticket, for `buy_ticket` (NEAR) and for `ft_transfer_call` on a token
  * alike. A token purchase succeeds as a transaction even when the contract rejected it, because the
- * token refunds the buyer in its resolver: so the verdict comes from the receipts. Bought when a
- * receipt that succeeded logged `ticket_purchased` of standard `ticket_escrow` (its `token_id` is the
- * ticket); with `contractId`, only that contract's log counts. Otherwise not bought, with the `ERR_`
- * code of the failed receipt, or null when there is none.
+ * token refunds the buyer in its resolver: so the verdict comes from the receipts.
+ *
+ * Bought only when a receipt run by `contractId` (the escrow) succeeded and logged
+ * `ticket_purchased` of standard `ticket_escrow`; its `token_id` is the ticket, the first such event
+ * counts. A look-alike log from any other account (a token's own receipt) is never a purchase, and a
+ * result without events is never one. Otherwise not bought, with the `ERR_` code of the failed
+ * receipt when the escrow ran it, else null (the token refused before the escrow ran).
  */
-export function purchaseResult(outcome: TxResult, contractId?: string): PurchaseResult {
+export function purchaseResult(outcome: TxResult, contractId: string): PurchaseResult {
   for (const event of outcome.events ?? []) {
+    if (event.executorId !== contractId) continue;
     if (event.standard !== 'ticket_escrow' || event.event !== 'ticket_purchased') continue;
-    if (contractId !== undefined && event.executorId !== contractId) continue;
     const tokenId = purchasedTicket(event.data);
     if (tokenId !== null) return { bought: true, tokenId };
   }
-  // A result built by hand, without the events: a v1 `buy_ticket` returns the ticket id.
-  const returned = TokenIdSchema.safeParse(outcome.value);
-  if (outcome.events === undefined && outcome.ok && returned.success) {
-    return { bought: true, tokenId: returned.data };
-  }
-  const code = outcome.failedReceipt?.error.code;
-  return { bought: false, code: code === undefined || code === 'UNKNOWN' ? null : code };
+  const failed = outcome.failedReceipt;
+  const code = failed?.executorId === contractId ? failed.error.code : 'UNKNOWN';
+  return { bought: false, code: code === 'UNKNOWN' ? null : code };
 }
 
 export interface ReadUntilChangedOptions {
