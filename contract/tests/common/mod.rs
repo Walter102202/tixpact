@@ -85,12 +85,23 @@ impl TestChain {
     }
 
     /// Deploys the normal build, or the `fault-injection` one, to `id` with 50 NEAR, initializes
-    /// it, and checks that `get_config` reports the build that was asked for. A swapped build
-    /// fails here, before any test relies on it.
+    /// it with [`listed_tokens`], and checks that `get_config` reports the build that was asked
+    /// for. A swapped build fails here, before any test relies on it.
     pub async fn deploy_escrow_code(
         &self,
         id: &str,
         fault_injection: bool,
+    ) -> TestResult<Contract> {
+        self.deploy_escrow_listing(id, fault_injection, listed_tokens())
+            .await
+    }
+
+    /// [`TestChain::deploy_escrow_code`] with `new(tokens)` given these tokens.
+    pub async fn deploy_escrow_listing(
+        &self,
+        id: &str,
+        fault_injection: bool,
+        tokens: Value,
     ) -> TestResult<Contract> {
         let wasm = if fault_injection {
             faulty_escrow_wasm()
@@ -100,7 +111,7 @@ impl TestChain {
         let account = self.accounts(&[id], 50).await?.remove(0);
         Contract::deploy(account.0.clone())
             .use_code(wasm)
-            .with_init_call("new", ())?
+            .with_init_call("new", json!({ "tokens": tokens }))?
             .with_signer(self.signer.clone())
             .send_to(&self.network)
             .await?
@@ -804,6 +815,84 @@ pub const TEUR_ID: &str = "teur.sandbox";
 pub const HOSTILE_ID: &str = "hostile.sandbox";
 /// A `fixtures/hostile-token` that no escrow lists.
 pub const UNLISTED_ID: &str = "unlisted.sandbox";
+/// One whole tUSD, in its smallest unit.
+pub const USD: u128 = 1_000_000;
+/// One whole HOST, in its smallest unit.
+pub const HOST: u128 = 1_000_000_000_000_000_000;
+
+/// The tokens every escrow under test accepts (`new(tokens)`): tUSD, tEUR and HOST. Their
+/// contracts are deployed only by the tests that use them.
+pub fn listed_tokens() -> Value {
+    json!([
+        { "account_id": TUSD_ID, "symbol": "tUSD", "decimals": 6 },
+        { "account_id": TEUR_ID, "symbol": "tEUR", "decimals": 24 },
+        { "account_id": HOSTILE_ID, "symbol": "HOST", "decimals": 18 },
+    ])
+}
+
+/// Event terms priced in `currency` (`None` is NEAR) at `price` of its smallest unit.
+pub fn priced_terms(
+    verifier: &Account,
+    times: [u64; 3],
+    capacity: u32,
+    currency: Option<&str>,
+    price: u128,
+) -> Value {
+    let mut terms = terms(verifier, times, capacity);
+    terms["price"] = json!(price.to_string());
+    terms["currency"] = json!(currency);
+    terms
+}
+
+/// The `msg` of a purchase through `ft_transfer_call`.
+pub fn purchase_msg(event_id: u32) -> String {
+    json!({ "event_id": event_id }).to_string()
+}
+
+/// Asserts that a purchase through `ft_transfer_call` was rejected with `code`: the escrow's
+/// `ft_on_transfer` failed with it, the token's resolver reports that nothing was used (`"0"`),
+/// and no ticket was minted. Whether every token came back is checked on the balances.
+#[track_caller]
+pub fn assert_purchase_rejected(result: &ExecutionFinalResult, escrow: &AccountId, code: &str) {
+    let failures: Vec<String> = result
+        .receipt_failures()
+        .into_iter()
+        .filter(|outcome| &outcome.executor_id == escrow)
+        .map(|outcome| format!("{:?}", outcome.clone().into_result()))
+        .collect();
+    assert_eq!(failures.len(), 1, "one failed escrow receipt: {failures:?}");
+    assert!(
+        failures[0].contains(&format!("Smart contract panicked: {code}: ")),
+        "expected {code}, got: {failures:?}"
+    );
+    let used: String = result
+        .clone()
+        .assert_success()
+        .json()
+        .expect("ft_transfer_call returns the amount used");
+    assert_eq!(used, "0", "the token used nothing");
+    assert!(nep171_events(result, "nft_mint").is_empty(), "no ticket minted");
+    assert!(events_named(result, "ticket_purchased").is_empty());
+}
+
+/// Asserts that a purchase through `ft_transfer_call` bought a ticket for exactly `price`: the
+/// token's resolver reports the whole amount used, and one `ticket_purchased` event was logged.
+/// Returns the ticket's id.
+#[track_caller]
+pub fn assert_purchase_accepted(result: &ExecutionFinalResult, price: u128) -> String {
+    let used: String = result
+        .clone()
+        .assert_success()
+        .json()
+        .expect("ft_transfer_call returns the amount used");
+    assert_eq!(used, price.to_string(), "the token used the whole price");
+    let purchased = events_named(result, "ticket_purchased");
+    assert_eq!(purchased.len(), 1, "one purchase: {purchased:?}");
+    purchased[0]["data"][0]["token_id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("ticket_purchased without a token id: {purchased:?}"))
+        .to_string()
+}
 
 /// Gas of the buyer's `ft_transfer_call`, as the client attaches it (`buyTicketWithToken`), in
 /// Tgas.
