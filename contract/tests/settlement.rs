@@ -394,8 +394,10 @@ async fn t11_failed_callback_keeps_pending() -> TestResult {
 #[tokio::test]
 async fn t14_callbacks_are_private() -> TestResult {
     // A refund left pending by the fault-injection build gives the callbacks something real to
-    // corrupt. Nobody can call them: not a stranger, not the holder, not the organizer, and not
-    // even a transaction signed with the escrow's own key, which has no transfer result to give.
+    // corrupt, and the transfer resolver a ticket to move: called directly with Ana as the
+    // receiver and Mallory as the previous owner, it would "send back" Ana's ticket to Mallory.
+    // Nobody can call them: not a stranger, not the holder, not the organizer, and not even a
+    // transaction signed with the escrow's own key, which has no promise result to give.
     let chain = TestChain::start().await?;
     let escrow = chain
         .escrow_with("faulty.sandbox", faulty_escrow_wasm())
@@ -411,11 +413,23 @@ async fn t14_callbacks_are_private() -> TestResult {
         .ok_or("no pending operation")?;
     let operation_before = escrow.operation(operation_id).await?;
     let accounting_before = escrow.accounting(event_id).await?;
+    let history_before = escrow.history(&token_id).await?;
 
     let itself = Account(escrow.id());
-    let args = json!({ "operation_id": operation_id });
+    let operation = json!({ "operation_id": operation_id });
+    let resolve = json!({
+        "previous_owner_id": cast.mallory.0,
+        "receiver_id": cast.ana.0,
+        "token_id": token_id,
+        "approved_account_ids": null,
+    });
+    let callbacks = [
+        ("on_refund_result", &operation),
+        ("on_payout_result", &operation),
+        ("nft_resolve_transfer", &resolve),
+    ];
     for caller in [&cast.mallory, &cast.ana, &cast.organizer, &itself] {
-        for callback in ["on_refund_result", "on_payout_result"] {
+        for (callback, args) in callbacks {
             let result = escrow
                 .call(caller, callback, args.clone(), NO_DEPOSIT, 100)
                 .await?;
@@ -428,6 +442,7 @@ async fn t14_callbacks_are_private() -> TestResult {
     }
 
     assert_eq!(escrow.ticket(&token_id).await?, ticket_before);
+    assert_eq!(escrow.history(&token_id).await?, history_before);
     assert_eq!(escrow.operation(operation_id).await?, operation_before);
     assert_eq!(escrow.accounting(event_id).await?, accounting_before);
     Ok(())

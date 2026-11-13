@@ -425,3 +425,212 @@ fn history_keeps_the_first_entry_and_the_latest_fifteen() {
         "the last entry names the current holder"
     );
 }
+
+const RECEIVER: &str = "receiver.near";
+
+/// Ana sends ticket "1-1" to a contract with `nft_transfer_call`; the resolver has not run.
+fn contract_with_a_transfer_in_flight() -> Contract {
+    use near_contract_standards::non_fungible_token::core::NonFungibleTokenCore;
+    let mut contract = contract_with_a_sold_ticket();
+    call_as(ANA, 1, 1_600_000);
+    let _ = contract.nft_transfer_call(id(RECEIVER), "1-1".to_string(), None, None, "keep".into());
+    let ticket = contract
+        .get_ticket("1-1".to_string())
+        .expect("ticket exists");
+    assert_eq!(ticket.status, TicketStatus::TransferPending);
+    assert_eq!(ticket.owner_id, id(RECEIVER));
+    contract
+}
+
+/// The resolver as the runtime calls it, at `now_ms`, with the receiver's answer `answer`.
+fn resolve_with(contract: &mut Contract, answer: near_sdk::PromiseResult, now_ms: u64) -> bool {
+    use near_contract_standards::non_fungible_token::core::NonFungibleTokenResolver;
+    testing_env!(
+        VMContextBuilder::new()
+            .current_account_id(id(ESCROW))
+            .predecessor_account_id(id(ESCROW))
+            .block_timestamp(now_ms * 1_000_000)
+            .account_balance(NearToken::from_near(1_000))
+            .build(),
+        near_sdk::test_vm_config(),
+        near_sdk::RuntimeFeesConfig::test(),
+        Default::default(),
+        vec![answer],
+    );
+    contract.nft_resolve_transfer(id(ANA), id(RECEIVER), "1-1".to_string(), None)
+}
+
+/// Resolves the in-flight transfer with `answer` and checks who holds the ticket afterwards. Each
+/// answer gets its own test: the mocked storage is per test thread, so one contract per test.
+fn resolve_and_check(answer: near_sdk::PromiseResult, kept: bool) {
+    let mut contract = contract_with_a_transfer_in_flight();
+    assert_eq!(resolve_with(&mut contract, answer, 1_600_001), kept);
+    let ticket = contract
+        .get_ticket("1-1".to_string())
+        .expect("ticket exists");
+    assert_eq!(ticket.status, TicketStatus::Active, "the lock is cleared");
+    let holder = if kept { RECEIVER } else { ANA };
+    assert_eq!(ticket.owner_id, id(holder));
+    let history = contract
+        .get_ticket_history("1-1".to_string())
+        .expect("ticket exists");
+    let last = history.entries.last().expect("history has entries");
+    let expected = if kept {
+        HistoryKind::Transferred
+    } else {
+        HistoryKind::TransferReturned
+    };
+    assert_eq!(last.kind, expected);
+    assert_eq!(last.account_id, id(holder));
+}
+
+#[test]
+fn resolver_keeps_the_ticket_on_a_clean_false() {
+    resolve_and_check(near_sdk::PromiseResult::Successful(b"false".to_vec()), true);
+}
+
+#[test]
+fn resolver_returns_the_ticket_on_true() {
+    resolve_and_check(near_sdk::PromiseResult::Successful(b"true".to_vec()), false);
+}
+
+#[test]
+fn resolver_returns_the_ticket_when_the_receiver_failed() {
+    resolve_and_check(near_sdk::PromiseResult::Failed, false);
+}
+
+#[test]
+fn resolver_returns_the_ticket_on_an_answer_that_is_not_json() {
+    resolve_and_check(
+        near_sdk::PromiseResult::Successful(b"maybe".to_vec()),
+        false,
+    );
+}
+
+#[test]
+fn resolver_returns_the_ticket_on_an_answer_longer_than_a_boolean() {
+    resolve_and_check(
+        near_sdk::PromiseResult::Successful(b"false      ".to_vec()),
+        false,
+    );
+}
+
+#[test]
+fn resolver_returns_the_ticket_on_an_empty_answer() {
+    resolve_and_check(near_sdk::PromiseResult::Successful(Vec::new()), false);
+}
+
+#[test]
+fn resolver_finishes_after_the_start_and_after_an_outcome() {
+    // The window only gates starting a transfer. One that started in time always finishes.
+    let mut contract = contract_with_a_transfer_in_flight();
+    call_as(ORGANIZER, 1, 1_700_000);
+    contract.cancel_event(1, None);
+    assert!(!resolve_with(
+        &mut contract,
+        near_sdk::PromiseResult::Failed,
+        STARTS + 10
+    ));
+    let ticket = contract
+        .get_ticket("1-1".to_string())
+        .expect("ticket exists");
+    assert_eq!(ticket.owner_id, id(ANA));
+    assert_eq!(ticket.status, TicketStatus::Active);
+    assert_eq!(ticket.claim, Claim::Refundable);
+}
+
+#[test]
+fn a_locked_ticket_cannot_be_claimed_or_moved() {
+    use near_contract_standards::non_fungible_token::core::NonFungibleTokenCore;
+    let mut contract = contract_with_a_transfer_in_flight();
+    call_as(ORGANIZER, 1, 1_700_000);
+    contract.cancel_event(1, None);
+    call_as(RECEIVER, 1, 1_700_001);
+    fails_with("ERR_TICKET_LOCKED", || {
+        let _ = contract.claim_refund("1-1".to_string());
+    });
+    call_as(RECEIVER, 1, 1_700_001);
+    fails_with("ERR_TICKET_LOCKED", || {
+        contract.nft_transfer(id(LUIS), "1-1".to_string(), None, None)
+    });
+}
+
+/// Sets the next call's caller, deposit, block time and prepaid gas.
+fn call_with_gas(predecessor: &str, deposit: u128, now_ms: u64, tgas: u64) {
+    testing_env!(
+        VMContextBuilder::new()
+            .current_account_id(id(ESCROW))
+            .predecessor_account_id(id(predecessor))
+            .signer_account_id(id(predecessor))
+            .attached_deposit(NearToken::from_yoctonear(deposit))
+            .block_timestamp(now_ms * 1_000_000)
+            .account_balance(NearToken::from_near(1_000))
+            .prepaid_gas(near_sdk::Gas::from_tgas(tgas))
+            .build()
+    );
+}
+
+/// Every check of `nft_transfer_call` runs before it writes anything. The mocked host does not
+/// roll back a failed call, so an early write would show here.
+#[test]
+fn transfer_call_checks_everything_before_any_change() {
+    let mut contract = contract_with_a_sold_ticket();
+    let unchanged = |contract: &Contract| {
+        let ticket = contract
+            .get_ticket("1-1".to_string())
+            .expect("ticket exists");
+        assert_eq!(ticket.status, TicketStatus::Active);
+        assert_eq!(ticket.owner_id, id(ANA));
+        let history = contract
+            .get_ticket_history("1-1".to_string())
+            .expect("ticket exists");
+        assert_eq!(history.entries.len(), 1, "nothing was recorded");
+    };
+    let receiver = || id(RECEIVER);
+    let token = || "1-1".to_string();
+
+    call_with_gas(ANA, 1, 1_600_000, 300);
+    fails_with("ERR_LIMIT", || {
+        let _ = contract.nft_transfer_call(receiver(), token(), None, None, "m".repeat(1_025));
+    });
+    unchanged(&contract);
+
+    call_with_gas(ANA, 1, 1_600_000, 300);
+    fails_with("ERR_LIMIT", || {
+        let memo = Some("m".repeat(257));
+        let _ = contract.nft_transfer_call(receiver(), token(), None, memo, "keep".into());
+    });
+    unchanged(&contract);
+
+    call_with_gas(ANA, 1, 1_600_000, 300);
+    fails_with("ERR_APPROVALS_DISABLED", || {
+        let _ = contract.nft_transfer_call(receiver(), token(), Some(0), None, "keep".into());
+    });
+    unchanged(&contract);
+
+    call_with_gas(ANA, 0, 1_600_000, 300);
+    fails_with("ERR_ONE_YOCTO", || {
+        let _ = contract.nft_transfer_call(receiver(), token(), None, None, "keep".into());
+    });
+    unchanged(&contract);
+
+    call_with_gas(ANA, 1, 1_600_000, 49);
+    fails_with("ERR_INSUFFICIENT_GAS", || {
+        let _ = contract.nft_transfer_call(receiver(), token(), None, None, "keep".into());
+    });
+    unchanged(&contract);
+
+    // At the limits it goes through.
+    call_with_gas(ANA, 1, 1_600_000, 50);
+    let _ = contract.nft_transfer_call(
+        receiver(),
+        token(),
+        None,
+        Some("m".repeat(256)),
+        "m".repeat(1_024),
+    );
+    let ticket = contract
+        .get_ticket("1-1".to_string())
+        .expect("ticket exists");
+    assert_eq!(ticket.status, TicketStatus::TransferPending);
+}

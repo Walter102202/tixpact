@@ -4,7 +4,11 @@
 //! The token storage (`NonFungibleToken`) is the only record of who holds a ticket. A `Ticket`
 //! stores what the standard does not: its event, its principal, its lock and its history.
 
-use near_contract_standards::non_fungible_token::core::NonFungibleTokenCore;
+use std::collections::HashMap;
+
+use near_contract_standards::non_fungible_token::core::{
+    NonFungibleTokenCore, NonFungibleTokenResolver, ext_nft_receiver,
+};
 use near_contract_standards::non_fungible_token::enumeration::NonFungibleTokenEnumeration;
 use near_contract_standards::non_fungible_token::events::{NftMint, NftTransfer};
 use near_contract_standards::non_fungible_token::metadata::{
@@ -12,13 +16,21 @@ use near_contract_standards::non_fungible_token::metadata::{
 };
 use near_contract_standards::non_fungible_token::{Token, TokenId};
 use near_sdk::json_types::U128;
-use near_sdk::{AccountId, PromiseOrValue, env, near};
+use near_sdk::{AccountId, Gas, PromiseOrValue, env, near, serde_json};
 
 use crate::accounting::add;
 use crate::errors::{Code, ensure, ensure_one_yocto, ensure_text_fits, fail};
 use crate::events::{EventRecord, Outcome};
 use crate::log;
-use crate::{Contract, ContractExt, HISTORY_CAP, MAX_MEMO_BYTES, MAX_PAGE};
+use crate::{Contract, ContractExt, HISTORY_CAP, MAX_MEMO_BYTES, MAX_MSG_BYTES, MAX_PAGE};
+
+/// Static gas of `nft_resolve_transfer`. The standard gives its resolver a fixed 5 Tgas; ours
+/// also clears the lock and may move the ticket back, so it gets its own amount.
+pub const GAS_FOR_RESOLVE_TRANSFER: Gas = Gas::from_tgas(20);
+
+/// Least prepaid gas `nft_transfer_call` accepts: its own work, a share for the receiver and the
+/// resolver's static gas. Below it the call fails as a whole.
+pub const GAS_TRANSFER_CALL_MIN: Gas = Gas::from_tgas(50);
 
 /// Where a ticket stands, as stored. `TransferPending` and `RefundPending` are locks (R8).
 #[near(serializers = [borsh, json])]
@@ -126,6 +138,7 @@ impl Contract {
         token_id: &TokenId,
         approval_id: Option<u64>,
         memo: Option<&str>,
+        msg: Option<&str>,
     ) -> (AccountId, Ticket) {
         ensure_one_yocto();
         ensure(
@@ -134,6 +147,7 @@ impl Contract {
             "approvals are disabled: approval_id must be null",
         );
         ensure_text_fits(memo, MAX_MEMO_BYTES, "the memo");
+        ensure_text_fits(msg, MAX_MSG_BYTES, "the msg");
         let ticket = self.load_ticket(token_id);
         let holder = self
             .holder_of(token_id)
@@ -317,6 +331,7 @@ impl NonFungibleTokenCore for Contract {
             &token_id,
             approval_id,
             memo.as_deref(),
+            None,
         );
         self.move_ticket(
             &token_id,
@@ -329,7 +344,13 @@ impl NonFungibleTokenCore for Contract {
         self.save_ticket(&token_id, ticket);
     }
 
-    /// Not available until Task C3.
+    /// Transfers a ticket to a contract and calls its `nft_on_transfer`, under the same rules as
+    /// `nft_transfer`. The ticket is locked (`TransferPending`) until `nft_resolve_transfer` runs:
+    /// meanwhile it can be neither claimed nor moved (R8). 1 yoctoNEAR and at least 50 Tgas.
+    /// Resolves to `true` if the receiver kept the ticket.
+    ///
+    /// The body follows `near-contract-standards` 5.30.1 (`core_impl.rs`), with two changes: the
+    /// lock, and the resolver's own static gas instead of the standard's fixed 5 Tgas.
     #[payable]
     fn nft_transfer_call(
         &mut self,
@@ -339,14 +360,95 @@ impl NonFungibleTokenCore for Contract {
         memo: Option<String>,
         msg: String,
     ) -> PromiseOrValue<bool> {
-        let _ = (receiver_id, token_id, approval_id, memo, msg);
-        fail(Code::Limit, "not available yet")
+        let sender_id = env::predecessor_account_id();
+        let (holder, mut ticket) = self.check_transfer(
+            &sender_id,
+            &receiver_id,
+            &token_id,
+            approval_id,
+            memo.as_deref(),
+            Some(&msg),
+        );
+        ensure(
+            env::prepaid_gas() >= GAS_TRANSFER_CALL_MIN,
+            Code::InsufficientGas,
+            "attach at least 50 Tgas so the transfer can be resolved",
+        );
+        ticket.status = TicketStatus::TransferPending;
+        self.move_ticket(
+            &token_id,
+            &mut ticket,
+            &holder,
+            &receiver_id,
+            HistoryKind::Transferred,
+            memo.as_deref(),
+        );
+        self.save_ticket(&token_id, ticket);
+
+        ext_nft_receiver::ext(receiver_id.clone())
+            // Everything left goes to the receiver; the resolver's gas is reserved apart.
+            .with_unused_gas_weight(1)
+            .nft_on_transfer(sender_id, holder.clone(), token_id.clone(), msg)
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_FOR_RESOLVE_TRANSFER)
+                    .with_unused_gas_weight(0)
+                    .nft_resolve_transfer(holder, receiver_id, token_id, None),
+            )
+            .into()
     }
 
     /// The standard view of one ticket, or `null`.
     fn nft_token(&self, token_id: TokenId) -> Option<Token> {
         let owner_id = self.holder_of(&token_id)?;
         self.token_view(token_id, owner_id)
+    }
+}
+
+#[near]
+impl NonFungibleTokenResolver for Contract {
+    /// Callback of `nft_transfer_call`. Keeps the ticket with the receiver only if it answered a
+    /// clean `false`; a failed call, an answer that is not a boolean or one longer than `false`
+    /// sends it back. It ignores the time window, so a transfer that started before the event
+    /// still finishes, and it clears the lock on every path. Returns whether the receiver keeps
+    /// the ticket.
+    #[private]
+    fn nft_resolve_transfer(
+        &mut self,
+        previous_owner_id: AccountId,
+        receiver_id: AccountId,
+        token_id: TokenId,
+        approved_account_ids: Option<HashMap<AccountId, u64>>,
+    ) -> bool {
+        // Approvals are disabled: there is nothing to restore.
+        let _ = approved_account_ids;
+        const MAX_RESULT_LENGTH: usize = "false".len();
+        let must_return = env::promise_result_checked(0, MAX_RESULT_LENGTH)
+            .ok()
+            .and_then(|value| serde_json::from_slice::<bool>(&value).ok())
+            .unwrap_or(true);
+
+        let Some(mut ticket) = self.tickets.get(&token_id).cloned() else {
+            return true;
+        };
+        if ticket.status == TicketStatus::TransferPending {
+            ticket.status = TicketStatus::Active;
+        }
+        // While locked the receiver could not move the ticket, so it still holds it.
+        let still_with_receiver = self.holder_of(&token_id).as_ref() == Some(&receiver_id);
+        let kept = !(must_return && still_with_receiver);
+        if !kept {
+            self.move_ticket(
+                &token_id,
+                &mut ticket,
+                &receiver_id,
+                &previous_owner_id,
+                HistoryKind::TransferReturned,
+                None,
+            );
+        }
+        self.save_ticket(&token_id, ticket);
+        kept
     }
 }
 

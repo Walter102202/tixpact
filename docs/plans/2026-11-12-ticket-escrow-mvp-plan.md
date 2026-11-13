@@ -454,11 +454,11 @@ Needs Walter's go for three things: installing the Rust toolchain in his WSL, cr
 
 **Interfaces.** Produces `nft_transfer_call` and `nft_resolve_transfer` with the lock (status `TransferPending`), and the history entries `Transferred` and `TransferReturned`.
 
-- [ ] Write the failing tests `t12`, `t13`, `t14` (resolver), `t22`.
-- [ ] Run. Expected: fail.
-- [ ] Implement: copy the standard `nft_transfer_call` body so the resolver gets our static gas; set the lock before the internal transfer; the resolver uses the unguarded internal transfer for the return path, treats a failed promise, invalid JSON or a result longer than 5 bytes as "return the ticket", and clears the lock on every path; `memo` and `msg` length limits enforced before any state change.
-- [ ] Run. Expected: pass, earlier tests still pass.
-- [ ] Commit `feat(contract): transfers to contracts with a per-ticket lock`, tick, push.
+- [x] Write the failing tests `t12`, `t13`, `t14` (resolver), `t22`.
+- [x] Run. Expected: fail.
+- [x] Implement: copy the standard `nft_transfer_call` body so the resolver gets our static gas; set the lock before the internal transfer; the resolver uses the unguarded internal transfer for the return path, treats a failed promise, invalid JSON or a result longer than 5 bytes as "return the ticket", and clears the lock on every path; `memo` and `msg` length limits enforced before any state change.
+- [x] Run. Expected: pass, earlier tests still pass.
+- [x] Commit `feat(contract): transfers to contracts with a per-ticket lock`, tick, push.
 
 ### Task C4: storage, history, gas
 

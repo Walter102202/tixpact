@@ -9,8 +9,9 @@
 //!
 //! - `events.rs`: `create_event`, `accept_verification`, `cancel_event`, `attest_completed`,
 //!   `expire_event`.
-//! - `tickets.rs`: `buy_ticket` and the NEP-171 token surface (`nft_transfer`, `nft_token`,
-//!   enumeration, metadata).
+//! - `tickets.rs`: `buy_ticket` and the NEP-171 token surface (`nft_transfer`,
+//!   `nft_transfer_call` with its private `nft_resolve_transfer`, `nft_token`, enumeration,
+//!   metadata).
 //! - `views.rs`: `get_config`, `quote_event_budget`, `get_event`, `list_events`,
 //!   `get_accounting`, `get_ticket`, `list_tickets_for_owner`, `get_ticket_history`.
 //! - `settlement.rs`: `claim_refund`, `claim_payout`, their private callbacks, `get_operation` and
@@ -36,7 +37,9 @@ pub use crate::accounting::Ledger;
 pub use crate::errors::Code;
 pub use crate::events::{EventTerms, Outcome, OutcomeReason};
 pub use crate::settlement::{GAS_CLAIM_MIN, GAS_FOR_CALLBACK, OperationKind, OperationView};
-pub use crate::tickets::{HistoryEntry, HistoryKind, TicketStatus};
+pub use crate::tickets::{
+    GAS_FOR_RESOLVE_TRANSFER, GAS_TRANSFER_CALL_MIN, HistoryEntry, HistoryKind, TicketStatus,
+};
 pub use crate::views::{
     AccountingView, Claim, Config, EventView, Phase, TicketHistory, TicketView,
 };
