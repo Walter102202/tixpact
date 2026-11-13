@@ -23,6 +23,7 @@ import { AccountLink } from '../../ui/AccountLink';
 import { LoadState } from '../../ui/LoadState';
 import { TxStatus } from '../../ui/TxStatus';
 import { outcomeLine } from '../events/eventCopy';
+import { refusedByToken, SettlementRefused } from '../tokens/SettlementRefused';
 import { ClaimPanel } from './ClaimPanel';
 import { TransferPanel } from './TransferPanel';
 import { claimWord, historyText } from './ticketCopy';
@@ -172,6 +173,21 @@ function TicketDetails({ data, reread, apply }: { data: TicketData } & Reread) {
             failureTitle="The payment did not complete."
             failureNote="The state above was read again from the contract."
             failureDetail={callbackFailure}
+            failureBody={(result, signerId) => {
+              const refused = refusedByToken(result, ticket.currency);
+              // A refusal by the token: plain words, not "Failed step: the transfer to tusd…".
+              if (refused === null) return undefined;
+              return (
+                <SettlementRefused
+                  failed={refused}
+                  payee={signerId}
+                  unit={unit}
+                  // As the contract was read again: its callback gives the right back (R7).
+                  restored={claimable ? 'The claim is back on the ticket.' : null}
+                  retry="claim"
+                />
+              );
+            }}
             succeeded={moneyMoved}
             success={(_, signerId) => (
               <p>

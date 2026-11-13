@@ -350,6 +350,57 @@ describe('holding a tUSD ticket', () => {
     expect(screen.getByRole('button', { name: 'Check again' })).toBeTruthy();
   });
 
+  it('a claim the token refused says nothing was paid, why, and offers the registration', async () => {
+    // The registration could not be read, so the claim was offered; the token did not know Sofia.
+    let registrationDown = true;
+    const fixtures = createFixtureReader(FIXTURES_WITH_TOKENS);
+    const reader: Reader = {
+      ...fixtures,
+      tokenRegistration: (token, account) =>
+        registrationDown
+          ? Promise.reject(new Error('down'))
+          : fixtures.tokenRegistration(token, account),
+    };
+    const wallet = createFixtureWallet('sofia.testnet');
+    wallet.answer = async () => ({
+      txHash: TX_FIXTURES.tokenClaimRefused.hash,
+      signerId: TX_FIXTURES.tokenClaimRefused.signerId,
+    });
+    await openTicket('11-4', services('sofia.testnet', { reader, wallet }));
+    await screen.findByText(/Could not check that sofia\.testnet is registered with tUSD/);
+    registrationDown = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Claim 25 tUSD to sofia.testnet' }));
+    const title = await screen.findByText('The payment did not complete.');
+    const box = title.closest('[role="alert"]') as HTMLElement;
+    expect(box.textContent).toContain(
+      'Nothing was paid and nothing was lost: tUSD could not pay sofia.testnet, which is not registered with it.',
+    );
+    expect(box.textContent).toContain(
+      'The claim is back on the ticket. Register sofia.testnet with tUSD, then claim again.',
+    );
+    expect(box.textContent).not.toContain('Failed step');
+    expect(screen.queryByText(/Refunded/)).toBeNull();
+    // The registration is read again, and this time it answers: the one-step registration shows.
+    expect(
+      await screen.findByRole('button', { name: 'Register with tUSD for 0.00125 NEAR' }),
+    ).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Claim / })).toBeNull();
+  });
+
+  it('a NEAR claim whose transfer failed keeps the generic words', async () => {
+    const wallet = createFixtureWallet('luis.testnet');
+    wallet.answer = async () => ({
+      txHash: TX_FIXTURES.refundTransferFailed.hash,
+      signerId: TX_FIXTURES.refundTransferFailed.signerId,
+    });
+    await openTicket('8-1', services('luis.testnet', { wallet }));
+    fireEvent.click(screen.getByRole('button', { name: 'Claim 1.5 NEAR to luis.testnet' }));
+    const title = await screen.findByText('The payment did not complete.');
+    const box = title.closest('[role="alert"]') as HTMLElement;
+    expect(box.textContent).toContain('Failed step: the transfer to');
+    expect(box.textContent).not.toContain('Nothing was paid');
+  });
+
   it('checks no registration for a NEAR ticket', async () => {
     let asked = 0;
     const fixtures = createFixtureReader(FIXTURES_WITH_TOKENS);

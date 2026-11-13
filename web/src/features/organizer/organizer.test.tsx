@@ -684,6 +684,42 @@ describe('/organizer: events priced in a token', () => {
     ]);
   });
 
+  it('a payout the token refused says nothing was paid, why, and offers the registration', async () => {
+    // The page read org.testnet as registered; it unregistered from tUSD before collecting.
+    let unregistered = false;
+    const fixtures = createFixtureReader(FIXTURES_WITH_TOKENS);
+    const reader: Reader = {
+      ...fixtures,
+      tokenRegistration: async (token, account) => {
+        const found = await fixtures.tokenRegistration(token, account);
+        return unregistered && account === ORGANIZER ? { ...found, registered: false } : found;
+      },
+    };
+    const wallet = createFixtureWallet(ORGANIZER);
+    wallet.answer = async () => ({
+      txHash: TX_FIXTURES.tokenPayoutRefused.hash,
+      signerId: TX_FIXTURES.tokenPayoutRefused.signerId,
+    });
+    await openOrganizer(testServices({ reader, wallet }));
+    const collect = await screen.findByRole('button', { name: 'Collect 25 tUSD to org.testnet' });
+    unregistered = true;
+    fireEvent.click(collect);
+    const title = await screen.findByText('The payout did not complete.');
+    const box = title.closest('[role="alert"]') as HTMLElement;
+    expect(box.textContent).toContain(
+      'Nothing was paid and nothing was lost: tUSD could not pay org.testnet, which is not registered with it.',
+    );
+    expect(box.textContent).toContain(
+      '25 tUSD is available to collect again. Register org.testnet with tUSD, then collect again.',
+    );
+    expect(box.textContent).not.toContain('Failed step');
+    // The registration is read again: the one-step registration replaces the collect button.
+    expect(
+      await screen.findByRole('button', { name: 'Register with tUSD for 0.00125 NEAR' }),
+    ).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Collect 25 tUSD to org.testnet' })).toBeNull();
+  });
+
   it('keeps the payout when the registration cannot be checked, and says what may happen', async () => {
     const reader: Reader = {
       ...createFixtureReader(FIXTURES_WITH_TOKENS),

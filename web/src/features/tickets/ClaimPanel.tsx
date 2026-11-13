@@ -1,8 +1,10 @@
 import { actions, type TicketView, type Unit } from '@ticket-escrow/client';
+import { useEffect } from 'react';
 import { moneyExact } from '../../lib/money';
 import { type Refresh, type TxControl, useTx } from '../../lib/near/useTx';
 import { useWallet } from '../../lib/near/useWallet';
 import { RegisterPanel } from '../tokens/RegisterPanel';
+import { refusedByToken } from '../tokens/SettlementRefused';
 import { useTokenAccount } from '../tokens/useTokenAccount';
 import type { TicketData } from './TicketPage';
 
@@ -37,6 +39,14 @@ export function ClaimPanel({
   // Read only when it decides something: a claimable ticket shown to its holder.
   const asked = claimable && isHolder ? ticket.owner_id : null;
   const { load: holder, refresh: holderRefresh } = useTokenAccount(ticket.currency, asked);
+  // A claim the token refused says the holder may not be registered: read it again, so the
+  // registration is offered when that is why.
+  const refused =
+    tx.view.kind === 'done' && refusedByToken(tx.view.result, ticket.currency) !== null;
+  const { reload } = holder;
+  useEffect(() => {
+    if (refused) reload();
+  }, [refused, reload]);
   if (!claimable || busy) return null;
 
   if (!signedIn) {

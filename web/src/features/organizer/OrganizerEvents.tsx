@@ -7,7 +7,7 @@ import {
   type Reader,
   type Unit,
 } from '@ticket-escrow/client';
-import { type ReactNode, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { moneyExact, unitFor } from '../../lib/money';
 import { useTx } from '../../lib/near/useTx';
 import { readAllPages } from '../../lib/pages';
@@ -17,6 +17,7 @@ import { useServices } from '../../services';
 import { LoadState } from '../../ui/LoadState';
 import { TxStatus } from '../../ui/TxStatus';
 import { RegisterPanel } from '../tokens/RegisterPanel';
+import { refusedByToken, SettlementRefused } from '../tokens/SettlementRefused';
 import { useTokenAccount } from '../tokens/useTokenAccount';
 
 export interface OrganizedEvent {
@@ -135,6 +136,14 @@ function OrganizedRow({
   const registerTx = useTx();
   const toCheck = event.currency !== null && available > 0n && !paid ? organizer : null;
   const { load: payee, refresh: payeeRefresh } = useTokenAccount(event.currency, toCheck);
+  // A payout the token refused says the organizer may not be registered: read it again, so the
+  // registration is offered when that is why.
+  const refused =
+    tx.view.kind === 'done' && refusedByToken(tx.view.result, event.currency) !== null;
+  const { reload: rereadPayee } = payee;
+  useEffect(() => {
+    if (refused) rereadPayee();
+  }, [refused, rereadPayee]);
   const payeeAccount = payee.state.status === 'ready' ? payee.state.data : null;
   const registration = payeeAccount && !payeeAccount.registered && (
     <RegisterPanel
@@ -250,6 +259,23 @@ function OrganizedRow({
               </p>
             ) : null
           }
+          failureBody={(result, signerId) => {
+            const failed = refusedByToken(result, event.currency);
+            // A refusal by the token: plain words, not "Failed step: the transfer to tusd…".
+            if (failed === null) return undefined;
+            return (
+              <SettlementRefused
+                failed={failed}
+                payee={signerId}
+                unit={unit}
+                // As the contract was read again: its callback makes the amount available (R7).
+                restored={
+                  available > 0n ? `${amount(available)} is available to collect again.` : null
+                }
+                retry="collect"
+              />
+            );
+          }}
           succeeded={moneyMoved}
           success={() => (
             <p>

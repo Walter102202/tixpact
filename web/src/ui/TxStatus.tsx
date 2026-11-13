@@ -64,7 +64,8 @@ export function TxStatus({
   failureDetail?: (result: TxResult, signerId: string) => ReactNode;
   /**
    * Replaces the failed step and its message, for a transaction whose receipts the generic words
-   * would misname (a purchase in a token runs on the token first, then on this contract).
+   * would misname (a purchase in a token runs on the token first, then on this contract). When it
+   * returns `undefined`, the generic words stay.
    */
   failureBody?: (result: TxResult, signerId: string) => ReactNode;
   /** What counts as success; a claim also needs the contract to say money moved (`moneyMoved`). */
@@ -161,11 +162,12 @@ function TxContent({
       const { result, signerId, reread } = view;
       if (!succeeded(result)) {
         const note = rereadNote(reread, failureNote);
+        const body = failureBody?.(result, signerId);
         return (
           <div className="tx tx-failed" role="alert">
             <strong>{failureTitle}</strong>
-            {failureBody
-              ? failureBody(result, signerId)
+            {body !== undefined
+              ? body
               : result.failedReceipt && (
                   <>
                     <p>Failed step: {failedStepText(result.failedReceipt)}.</p>
