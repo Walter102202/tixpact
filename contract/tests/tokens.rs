@@ -794,10 +794,10 @@ async fn t29_token_payout_failure_paths() -> TestResult {
     hostile.register(&cast.organizer, &cast.organizer.0).await?;
     let host_price = 5 * HOST;
     let offsets = [60, 70, 900];
-    let (unregistered, times) =
-        on_sale(&escrow, &cast, offsets, 2, Some(TUSD_ID), TUSD_PRICE).await?;
+    let (unregistered, _) = on_sale(&escrow, &cast, offsets, 2, Some(TUSD_ID), TUSD_PRICE).await?;
     let (failing, _) = on_sale(&escrow, &cast, offsets, 2, Some(HOSTILE_ID), host_price).await?;
-    let (pending, _) = on_sale(&faulty, &cast, offsets, 2, Some(TUSD_ID), TUSD_PRICE).await?;
+    // Each event's times are counted from its own creation, so the last one ends last.
+    let (pending, times) = on_sale(&faulty, &cast, offsets, 2, Some(TUSD_ID), TUSD_PRICE).await?;
     buy_with(&tusd, &escrow, &cast.ana, unregistered, TUSD_PRICE).await?;
     buy_with(&hostile, &escrow, &cast.luis, failing, host_price).await?;
     buy_with(&tusd, &faulty, &cast.ana, pending, TUSD_PRICE).await?;
@@ -910,10 +910,11 @@ async fn t30_currencies_do_not_share_money() -> TestResult {
     // Two NEAR events and two token events. B is priced in tEUR at the same number as the NEAR
     // price, so any amount that crossed currencies would show.
     let offsets = [90, 100, 900];
-    let (a, times) = on_sale(&escrow, &cast, offsets, 2, None, PRICE).await?;
+    let (a, _) = on_sale(&escrow, &cast, offsets, 2, None, PRICE).await?;
     let (b, _) = on_sale(&escrow, &cast, offsets, 2, Some(TEUR_ID), PRICE).await?;
     let (c, _) = on_sale(&escrow, &cast, offsets, 2, Some(TUSD_ID), TUSD_PRICE).await?;
-    let (d, _) = on_sale(&escrow, &cast, offsets, 2, None, PRICE).await?;
+    // Each event's times are counted from its own creation, so the last one ends last.
+    let (d, times) = on_sale(&escrow, &cast, offsets, 2, None, PRICE).await?;
     escrow.buy(&cast.ana, a, PRICE).await?;
     let luis_b = buy_with(&teur, &escrow, &cast.luis, b, PRICE).await?;
     let mallory_b = buy_with(&teur, &escrow, &cast.mallory, b, PRICE).await?;
@@ -1358,9 +1359,9 @@ async fn t32_metadata_follows_the_state() -> TestResult {
     // number, half a NEAR, and the most digits a buyer here can pay.
     let offsets = [120, 130, 900];
     let usd_price = 10 * USD + USD / 2;
-    let (refunded, times) = on_sale(&escrow, &cast, offsets, 3, Some(TUSD_ID), usd_price).await?;
+    let (refunded, _) = on_sale(&escrow, &cast, offsets, 3, Some(TUSD_ID), usd_price).await?;
     let (tiny, _) = on_sale(&escrow, &cast, offsets, 2, Some(TUSD_ID), 1).await?;
-    let (completed, _) = on_sale(&escrow, &cast, offsets, 2, None, PRICE).await?;
+    let (completed, times) = on_sale(&escrow, &cast, offsets, 2, None, PRICE).await?;
     let (half, _) = on_sale(&escrow, &cast, offsets, 2, None, NEAR / 2).await?;
     let (pending, _) = on_sale(&faulty, &cast, offsets, 2, Some(TEUR_ID), 2 * NEAR).await?;
     // The worst title for the drawing: 120 bytes that all need escaping in XML.

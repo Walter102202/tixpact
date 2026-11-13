@@ -375,10 +375,13 @@ async fn storage_of_a_token_event_and_ticket() -> TestResult {
         escrow.accept(verifier, paid).await?;
         paid_events[side] = paid;
 
+        // Every ticket of the contract is a node of one token tree, and each node but the root
+        // adds an 8-byte link to its parent. The payer's ticket goes first, so that the measured
+        // purchase is never the root on either side.
+        buy_in(&escrow, token, payer, paid).await?;
         let before = usage(&escrow).await?;
         buy_in(&escrow, token, buyer, created).await?;
         deltas[side][1] = usage(&escrow).await? - before;
-        buy_in(&escrow, token, payer, paid).await?;
 
         // Twenty moves with the longest memo, then a holder of its own.
         let token_id = format!("{created}-1");

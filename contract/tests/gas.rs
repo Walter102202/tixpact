@@ -14,7 +14,8 @@ use near_api::{Account, NearToken};
 use near_sdk::serde_json::{Value, json};
 use testresult::TestResult;
 use ticket_escrow::{
-    GAS_CLAIM_MIN, GAS_FOR_CALLBACK, GAS_FOR_RESOLVE_TRANSFER, GAS_TRANSFER_CALL_MIN,
+    GAS_CLAIM_MIN, GAS_FOR_CALLBACK, GAS_FOR_RESOLVE_TRANSFER, GAS_FT_TRANSFER,
+    GAS_TOKEN_CLAIM_MIN, GAS_TRANSFER_CALL_MIN,
 };
 
 /// Gas the client attaches per method (plan, "Gas"; `packages/client/src/actions.ts`), in Tgas.
@@ -754,16 +755,19 @@ async fn gas_of_token_settlement_in_its_worst_case() -> TestResult {
     };
     let escrow_id = escrow.id();
 
-    // Two payout events with a short window: one organizer is registered with the token, the
-    // other is not.
+    // Three payout events with a short window: two organized by an account registered with the
+    // token (one is paid at the token claim minimum), one by an account that is not.
     let short = chain.times_from_now([120, 150, 200]).await?;
     let paid = escrow
+        .create_event(&organizer, largest(short, 1, &tusd_id, USD))
+        .await?;
+    let paid_at_minimum = escrow
         .create_event(&organizer, largest(short, 1, &tusd_id, USD))
         .await?;
     let lost = escrow
         .create_event(&lost_organizer, largest(short, 1, &tusd_id, USD))
         .await?;
-    for event_id in [paid, lost] {
+    for event_id in [paid, paid_at_minimum, lost] {
         escrow.accept(&verifier, event_id).await?;
         let result = tusd
             .transfer_call(&buyer, &escrow_id, USD, &purchase_msg(event_id))
@@ -804,16 +808,17 @@ async fn gas_of_token_settlement_in_its_worst_case() -> TestResult {
         (&tusd, event, USD),
         (&tusd, unresolved, USD),
         (&hostile, host_event, HOST),
+        (&tusd, event, USD),
     ] {
         let result = token
             .transfer_call(&buyer, &escrow_id, price, &purchase_msg(event_id))
             .await?;
         bought.push(assert_purchase_accepted(&result, price));
     }
-    let [t2, t3, t4]: [String; 3] = bought.try_into().map_err(|_| "three tickets")?;
+    let [t2, t3, t4, t5]: [String; 4] = bought.try_into().map_err(|_| "four tickets")?;
 
-    // Full histories: the three tUSD tickets move sixteen times, then each goes to its holder.
-    let moved = [&t1, &t2, &t3];
+    // Full histories: the four tUSD tickets move sixteen times, then each goes to its holder.
+    let moved = [&t1, &t2, &t3, &t5];
     let transfers = |to: &Account| -> Vec<(&str, Value, u128)> {
         moved
             .iter()
@@ -837,7 +842,7 @@ async fn gas_of_token_settlement_in_its_worst_case() -> TestResult {
         };
         escrow.batch(from, transfers(to)).await?.assert_success();
     }
-    let to_holders = [(&t1, &h1), (&t2, &h2), (&t3, &h3)]
+    let to_holders = [(&t1, &h1), (&t2, &h2), (&t3, &h3), (&t5, &h1)]
         .iter()
         .map(|(token_id, holder)| {
             let args = json!({
@@ -872,6 +877,30 @@ async fn gas_of_token_settlement_in_its_worst_case() -> TestResult {
     record_token(
         &mut rows, &escrow, &tusd.id, case, tgas_used, &result, failed,
     )?;
+    // A token claim needs GAS_TOKEN_CLAIM_MIN: one Tgas less is refused before anything is
+    // written or sent; exactly the minimum pays.
+    escrow.attest(&verifier, paid_at_minimum).await?;
+    let minimum = GAS_TOKEN_CLAIM_MIN.as_tgas();
+    let args = json!({ "event_id": paid_at_minimum });
+    let below = escrow
+        .call(
+            &organizer,
+            "claim_payout",
+            args.clone(),
+            ONE_YOCTO,
+            minimum - 1,
+        )
+        .await?;
+    common::assert_fails_with(&below, "ERR_INSUFFICIENT_GAS");
+    assert!(common::token_moves(&below, &tusd.id).is_empty());
+    let result = escrow
+        .call(&organizer, "claim_payout", args, ONE_YOCTO, minimum)
+        .await?;
+    let case = "claim_payout at GAS_TOKEN_CLAIM_MIN + ft_transfer + on_payout_result (delivered)";
+    let settled = Some("payout_settled");
+    record_token(
+        &mut rows, &escrow, &tusd.id, case, minimum, &result, settled,
+    )?;
 
     // Refunds of tickets with full histories.
     for event_id in [event, host_event] {
@@ -888,6 +917,20 @@ async fn gas_of_token_settlement_in_its_worst_case() -> TestResult {
     record_token(
         &mut rows, &escrow, &tusd.id, case, tgas_used, &result, settled,
     )?;
+    let below = escrow.claim_refund(&h1, &t5, minimum - 1).await?;
+    common::assert_fails_with(&below, "ERR_INSUFFICIENT_GAS");
+    assert!(
+        common::token_moves(&below, &tusd.id).is_empty(),
+        "nothing was sent below the minimum"
+    );
+    assert_eq!(escrow.ticket(&t5).await?["status"], "Active");
+    let result = escrow.claim_refund(&h1, &t5, minimum).await?;
+    let case = "claim_refund at GAS_TOKEN_CLAIM_MIN + ft_transfer + on_refund_result (full history, delivered)";
+    let settled = Some("refund_settled");
+    record_token(
+        &mut rows, &escrow, &tusd.id, case, minimum, &result, settled,
+    )?;
+    assert_eq!(escrow.ticket(&t5).await?["status"], "Refunded");
     let result = escrow.claim_refund(&h2, &t2, tgas_used).await?;
     let case = "claim_refund + ft_transfer + on_refund_result (full history, holder not registered, restored)";
     let failed = Some("refund_failed");
@@ -950,8 +993,12 @@ async fn gas_of_token_settlement_in_its_worst_case() -> TestResult {
         );
     }
 
-    // What the margin rules of `docs/gas.md` give for the token path.
-    let settlement = || rows.iter().filter(|row| row.case.starts_with("claim_"));
+    // What the margin rules of `docs/gas.md` give for the token path, from the plain test token.
+    // The hostile row is left out: that token burns whatever gas it is given.
+    let settlement = || {
+        rows.iter()
+            .filter(|row| row.case.starts_with("claim_") && !row.case.contains("as long as"))
+    };
     let worst_ft_transfer = settlement().map(|row| row.token).max().unwrap_or(0);
     let worst_callback = settlement()
         .filter_map(|row| row.follow_up)
@@ -969,15 +1016,16 @@ async fn gas_of_token_settlement_in_its_worst_case() -> TestResult {
         tgas(worst_callback * MARGIN),
         GAS_FOR_CALLBACK.as_tgas()
     );
+    let claim_minimum = round_up_tgas(
+        GAS_FT_TRANSFER.as_gas() + GAS_FOR_CALLBACK.as_gas() + worst_call * MARGIN,
+        10,
+    );
     eprintln!(
-        "worst claim call {:.2} Tgas: a token claim minimum of ft_transfer static + {} + 5x call, rounded up to 10 Tgas = {} Tgas with {ft_transfer_static} Tgas for ft_transfer",
+        "worst claim call {:.2} Tgas: GAS_FT_TRANSFER {} + GAS_FOR_CALLBACK {} + 5x call, rounded up to 10 Tgas = {claim_minimum} Tgas against GAS_TOKEN_CLAIM_MIN {}",
         tgas(worst_call),
+        GAS_FT_TRANSFER.as_tgas(),
         GAS_FOR_CALLBACK.as_tgas(),
-        round_up_tgas(
-            (ft_transfer_static + GAS_FOR_CALLBACK.as_tgas()) * 1_000_000_000_000
-                + worst_call * MARGIN,
-            10
-        )
+        GAS_TOKEN_CLAIM_MIN.as_tgas()
     );
     let worst_purchase = rows
         .iter()
@@ -990,6 +1038,19 @@ async fn gas_of_token_settlement_in_its_worst_case() -> TestResult {
         tgas(worst_purchase),
         common::FT_TRANSFER_CALL_TGAS
     );
-    assert!(worst_callback * MARGIN <= GAS_FOR_CALLBACK.as_gas());
+    // The rules of `docs/gas.md`, applied to the token path.
+    assert!(
+        worst_callback * MARGIN <= GAS_FOR_CALLBACK.as_gas(),
+        "the callbacks keep five times their worst case"
+    );
+    assert!(
+        ft_transfer_static <= GAS_FT_TRANSFER.as_tgas(),
+        "GAS_FT_TRANSFER keeps five times the token's worst ft_transfer"
+    );
+    assert!(
+        claim_minimum <= GAS_TOKEN_CLAIM_MIN.as_tgas(),
+        "GAS_TOKEN_CLAIM_MIN covers both static gases plus five times the claim"
+    );
+    assert!(worst_purchase * 5 <= common::FT_TRANSFER_CALL_TGAS * 1_000_000_000_000);
     Ok(())
 }
