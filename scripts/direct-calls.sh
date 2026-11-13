@@ -91,7 +91,7 @@ budget="$(view quote_event_budget '{"capacity":1}' | tr -d '" \n')"
 starts=$((($(date +%s) + STARTS_IN_SECONDS) * 1000))
 ends=$((starts + WINDOW_SECONDS * 1000))
 deadline=$((starts + 2 * WINDOW_SECONDS * 1000))
-terms="{\"terms\":{\"title\":\"Direct calls\",\"venue\":\"Command line\",\"starts_at_ms\":$starts,\"ends_at_ms\":$ends,\"resolution_deadline_ms\":$deadline,\"price\":\"$price\",\"capacity\":1,\"verifier_id\":\"$VERIFIER_ID\"}}"
+terms="{\"terms\":{\"title\":\"Direct calls\",\"venue\":\"Command line\",\"starts_at_ms\":$starts,\"ends_at_ms\":$ends,\"resolution_deadline_ms\":$deadline,\"price\":\"$price\",\"capacity\":1,\"verifier_id\":\"$VERIFIER_ID\",\"currency\":null}}"
 event_id="$(call "$ORGANIZER_ID" create_event "$terms" '30 Tgas' "$budget yoctoNEAR")"
 tx
 case "$event_id" in
