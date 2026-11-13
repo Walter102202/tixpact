@@ -17,8 +17,10 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { failed: 
       <section className="page" role="alert">
         <h1>Something went wrong</h1>
         <p>This page hit an error and stopped.</p>
+        {/* Never "nothing was sent": the error can come right after a transaction left the wallet. */}
         <p className="muted">
-          Nothing was sent. Reloading reads everything again from the contract.
+          If you had just approved a transaction, check it in the explorer before trying again.
+          Reloading reads everything again from the contract.
         </p>
         <button type="button" className="btn" onClick={() => window.location.reload()}>
           Reload the page

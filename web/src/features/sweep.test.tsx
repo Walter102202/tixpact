@@ -111,5 +111,11 @@ describe('ErrorBoundary', () => {
     }
     expect(screen.getByText('This page hit an error and stopped.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Reload the page' })).toBeTruthy();
+    // A render error can follow a transaction that already left the wallet: never claim otherwise.
+    const page = document.body.textContent ?? '';
+    expect(page).not.toMatch(/nothing (was|has been) sent/i);
+    expect(page).toContain(
+      'If you had just approved a transaction, check it in the explorer before trying again.',
+    );
   });
 });

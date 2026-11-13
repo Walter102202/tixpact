@@ -9,6 +9,8 @@ interface ProofData {
   proof: AccountProof;
   /** Sum of `principal_reserved` over every event, yoctoNEAR. */
   reserved: string;
+  /** Sum of `organizer_available` over every event, yoctoNEAR. */
+  available: string;
   events: number;
 }
 
@@ -29,8 +31,14 @@ export function ProofPage() {
       readAllPages((from, limit) => reader.listEvents(from, limit)),
     ]);
     const rows = await Promise.all(events.map((e) => reader.getAccounting(e.event_id)));
-    const reserved = rows.reduce((sum, row) => sum + BigInt(row?.principal_reserved ?? '0'), 0n);
-    return { proof, reserved: reserved.toString(), events: events.length };
+    const sum = (pick: (row: NonNullable<(typeof rows)[number]>) => string) =>
+      rows.reduce((total, row) => total + BigInt(row ? pick(row) : '0'), 0n).toString();
+    return {
+      proof,
+      reserved: sum((row) => row.principal_reserved),
+      available: sum((row) => row.organizer_available),
+      events: events.length,
+    };
   });
 
   return (
@@ -57,8 +65,10 @@ function ProofFacts({
   reload: () => void;
 }) {
   const { fixtureMode } = useServices();
-  const { proof, reserved, events } = data;
-  const covers = BigInt(proof.balance) >= BigInt(reserved);
+  const { proof, reserved, available, events } = data;
+  // What the contract must still pay out of its balance (its own invariant: balance >= storage +
+  // reserved + available). Amounts already being sent have left it.
+  const covers = BigInt(proof.balance) >= BigInt(reserved) + BigInt(available);
   return (
     <section className="card proof-card" aria-label="What the chain says">
       <dl className="facts">
@@ -70,21 +80,24 @@ function ProofFacts({
         <dd>{keysText(proof.accessKeys)}</dd>
         <dt>Contract balance</dt>
         <dd>{near(proof.balance)}</dd>
-        <dt>Reserved ticket principal</dt>
-        <dd>
-          {near(reserved)} across {events} {events === 1 ? 'event' : 'events'}
-        </dd>
+        <dt>Reserved for ticket holders</dt>
+        <dd>{near(reserved)}</dd>
+        <dt>Waiting for organizers to collect</dt>
+        <dd>{near(available)}</dd>
+        <dt>Events read</dt>
+        <dd>{events}</dd>
         <dt>Read at block</dt>
         <dd>{proof.blockHeight.toLocaleString('en-US')}</dd>
       </dl>
       <p className="proof-verdict">
         {covers
-          ? 'The balance covers the reserved ticket principal.'
-          : 'The balance is below the reserved ticket principal.'}
+          ? 'The balance covers both.'
+          : 'The balance is below what the contract holds for others.'}
       </p>
       <p className="muted">
-        The reserved principal is the ticket money not yet refunded or released to an organizer. The
-        balance also pays for storage and holds what organizers have yet to collect.
+        The contract must be able to pay both out of its balance: the ticket money not yet refunded
+        or released, and what confirmed events owe their organizers. Refunds and payouts already
+        being sent have left it. The balance also pays for storage.
       </p>
       <div className="proof-actions">
         {!fixtureMode && (

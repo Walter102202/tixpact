@@ -5,6 +5,7 @@ import {
   explorerAccountUrl,
   FIXTURES,
   formatNear,
+  parseNear,
   type Reader,
 } from '@ticket-escrow/client';
 import { describe, expect, it } from 'vitest';
@@ -49,7 +50,10 @@ describe('/proof', () => {
     expect(fact('Access keys')).toBe('0 keys: nobody can change this contract');
     expect(fact('Contract balance')).toBe(`${formatNear(FIXTURES.accountProof.balance)} NEAR`);
     // 6 + 4 + 1 + 0.8 + 1.2 + 3: principal_reserved summed over every fixture event.
-    expect(fact('Reserved ticket principal')).toBe('16 NEAR across 8 events');
+    expect(fact('Reserved for ticket holders')).toBe('16 NEAR');
+    // Event 7 is confirmed and its organizer has not collected: organizer_available 4.5.
+    expect(fact('Waiting for organizers to collect')).toBe('4.5 NEAR');
+    expect(fact('Events read')).toBe('8');
     expect(fact('Read at block')).toBe('190,000,000');
   });
 
@@ -63,14 +67,24 @@ describe('/proof', () => {
     expect(fact('Access keys')).toBe('1 key: this deployment can still be changed');
   });
 
-  it('compares the balance with what the contract holds for tickets', async () => {
+  it('compares the balance with both amounts the contract holds for others', async () => {
     await openProof();
-    expect(screen.getByText(/The balance covers the reserved ticket principal/)).toBeTruthy();
+    expect(screen.getByText('The balance covers both.')).toBeTruthy();
   });
 
-  it('says so when the balance is below the reserved principal', async () => {
+  it('counts what organizers have yet to collect: a balance between the two is below', async () => {
+    // 16 NEAR reserved + 4.5 NEAR to collect = 20.5 NEAR; 18 NEAR covers the first alone.
+    await openProof(testServices({ reader: readerWith({ balance: parseNear('18') }) }));
+    expect(
+      screen.getByText('The balance is below what the contract holds for others.'),
+    ).toBeTruthy();
+  });
+
+  it('says so when the balance is below both', async () => {
     await openProof(testServices({ reader: readerWith({ balance: '1' }) }));
-    expect(screen.getByText(/The balance is below the reserved ticket principal/)).toBeTruthy();
+    expect(
+      screen.getByText('The balance is below what the contract holds for others.'),
+    ).toBeTruthy();
   });
 
   it('links the contract account to the explorer on live data', async () => {
