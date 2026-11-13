@@ -154,7 +154,7 @@ The list of tokens cannot change after deployment, and the currency is part of t
 
 ## A ticket that shows its state
 
-The ticket's NFT text and picture are not stored: the contract computes them at every read. The text says where the money is ("10 tUSD is reserved in the contract until the event is resolved.", "10 tUSD was refunded to the holder.", "The event was confirmed and the price went to the organizer."), and the picture, an SVG the contract draws, carries the same word. A wallet or a marketplace that shows the NFT shows this, so a refunded ticket offered for sale says it was refunded.
+The ticket's NFT text and picture are not stored: the contract computes them at every read. The text says where the money is ("10 tUSD is reserved in the contract until the event is resolved.", "10 tUSD was refunded to the holder.", "The event was confirmed and the price went to the organizer."), and the picture, an SVG the contract draws, carries the same word. A wallet or a marketplace that shows the NFT shows this, so a refunded ticket offered for sale says it was refunded. The web app's ticket page shows the same picture and sentence under "As wallets show it", and checks the picture against the hash the contract gives.
 
 ## The ticket at the door
 
