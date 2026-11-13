@@ -1267,8 +1267,8 @@ export const TX_FIXTURES = {
   }),
 
   /**
-   * Ana tries to buy a ticket to event 12 after it started: `ft_on_transfer` panics, the token
-   * gives the 12.5 tUSD back in its resolver, and the transaction itself succeeds.
+   * Luis, who holds 40 tUSD, tries to buy a ticket to event 12 after it started: `ft_on_transfer`
+   * panics, the token gives the 12.5 tUSD back in its resolver, and the transaction itself succeeds.
    */
   tokenBuyRejected: tokenPurchase({
     hash: 'Ezf6RTqKhHuVm438VrJNvboHeg9n6EDsYaAHU9gL4NbC',
@@ -1278,7 +1278,7 @@ export const TX_FIXTURES = {
       '3NwTP5f4Rjtz1NMTs81gXCjAdoCFqA7XRKyx87HpSabu',
       '1VdouCCNStLcoAW4Zwp92GDw1B1HdjY1VELyXbvCDeVB',
     ],
-    buyer: ANA,
+    buyer: LUIS,
     eventId: 12,
     amount: usd(12.5),
     onTransfer: {

@@ -169,6 +169,21 @@ describe('evaluate', () => {
     );
   });
 
+  it('denies a call whose own receiver differs from where it would be sent', () => {
+    const tokenCall = actions.faucet('tusd.testnet');
+    // The builder says the call goes to the token; signing it on the contract is not that call.
+    expect(evaluate(policy, nothingHeld, { receiverId: CONTRACT, call: tokenCall })).toEqual({
+      outcome: 'deny',
+      reason: 'receiver_mismatch',
+      message: 'faucet is built for tusd.testnet but would be sent to ticket-escrow.testnet',
+    });
+    // A call that names the contract itself is the same call as one that names no receiver.
+    const named = { ...actions.claimRefund('8-1'), receiverId: CONTRACT };
+    expect(evaluate(policy, nothingHeld, { receiverId: CONTRACT, call: named })).toEqual({
+      outcome: 'allow',
+    });
+  });
+
   it('keeps the allow list closed to the token calls of interface v2', () => {
     const event = { event_id: 10, price: '10000000', currency: 'tusd.testnet' };
     const tokenCalls = [
@@ -182,8 +197,9 @@ describe('evaluate', () => {
         outcome: 'deny',
         reason: 'contract_not_allowed',
       });
-      // Even aimed at the escrow contract, the method is not on the list.
-      expect(evaluate(policy, nearPurchase, { receiverId: CONTRACT, call })).toMatchObject({
+      // Stripped of its receiver and aimed at the escrow contract, the method is not on the list.
+      const { receiverId: _token, ...bare } = call;
+      expect(evaluate(policy, nearPurchase, { receiverId: CONTRACT, call: bare })).toMatchObject({
         outcome: 'deny',
         reason: 'method_not_allowed',
       });
