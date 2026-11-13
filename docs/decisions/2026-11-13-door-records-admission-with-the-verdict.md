@@ -1,6 +1,6 @@
 # The door records an admission with its "Admit" verdict; a ticket admitted here reads "Do not admit"
 
-Date: 2026-11-13. Author: lane P. Status: accepted. Replaces the door's "Mark as admitted" button and "Already admitted" verdict in `2026-11-13-web-entry-pass-pages.md`.
+Date: 2026-11-13. Author: lane P. Status: accepted; its Undo and its "Check again" sentence are replaced by `2026-11-13-door-checks-every-arrival-and-undo-says-so.md`. Replaces the door's "Mark as admitted" button and "Already admitted" verdict in `2026-11-13-web-entry-pass-pages.md`.
 
 ## Context
 
