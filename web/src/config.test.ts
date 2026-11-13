@@ -8,8 +8,15 @@ describe('readConfig', () => {
       contractId: null,
       rpcUrls: DEFAULT_RPC_URLS,
       fixtureMode: true,
+      faucetTokens: [],
     });
     expect(readConfig({ VITE_CONTRACT_ID: '   ' }).fixtureMode).toBe(true);
+  });
+
+  it('takes the tokens with a test faucet as a comma-separated list', () => {
+    expect(
+      readConfig({ VITE_FAUCET_TOKENS: ' tusd.testnet , ,usdt.testnet' }).faucetTokens,
+    ).toEqual(['tusd.testnet', 'usdt.testnet']);
   });
 
   it('reads the contract when one is set, unless fixtures are asked for', () => {

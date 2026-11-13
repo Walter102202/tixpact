@@ -669,6 +669,16 @@ section,
   gap: 12px 24px;
 }
 
+/* Prices in a token (interface v2): new states in the same design, no new look. */
+.balance {
+  color: var(--foreground);
+  font-weight: 500;
+}
+.register-panel,
+.faucet {
+  margin-top: 16px;
+}
+
 @media (max-width: 760px) {
   .terms-form {
     grid-template-columns: minmax(0, 1fr);

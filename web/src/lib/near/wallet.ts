@@ -26,8 +26,17 @@ export interface FixtureWallet extends WalletPort {
 }
 
 export const FIXTURE_ACCOUNT = 'luis.testnet';
-/** The fixture accounts a demo viewer can act as: two holders, the organizer, the verifier. */
-export const DEMO_ACCOUNTS = ['luis.testnet', 'ana.testnet', 'org.testnet', 'teatro.testnet'];
+/**
+ * The fixture accounts a demo viewer can act as: two holders, the organizer, the verifier, and a
+ * holder who is not registered with the test dollar token (interface v2).
+ */
+export const DEMO_ACCOUNTS = [
+  'luis.testnet',
+  'ana.testnet',
+  'org.testnet',
+  'teatro.testnet',
+  'sofia.testnet',
+];
 
 export function isFixtureWallet(wallet: WalletPort): wallet is FixtureWallet {
   return 'signInAs' in wallet;
@@ -42,6 +51,9 @@ const RECORDED: Partial<Record<ContractCall['methodName'], RecordedTx>> = {
   attest_completed: TX_FIXTURES.eventAttested,
   cancel_event: TX_FIXTURES.eventCancelled,
   claim_payout: TX_FIXTURES.payoutSettled,
+  ft_transfer_call: TX_FIXTURES.tokenBuySucceeded,
+  storage_deposit: TX_FIXTURES.tokenRegistered,
+  faucet: TX_FIXTURES.faucetMinted,
 };
 
 export function createFixtureWallet(accountId: string | null = FIXTURE_ACCOUNT): FixtureWallet {

@@ -1,10 +1,11 @@
-import { type EventView, formatNear } from '@ticket-escrow/client';
+import type { EventView } from '@ticket-escrow/client';
+import { money, moneyExact, NEAR_UNIT } from '../../lib/money';
 
-/** Rounded to 4 decimals: for lists, facts and summaries. */
-export const near = (yocto: string) => `${formatNear(yocto)} NEAR`;
+/** A NEAR amount whatever the event's currency (a storage budget, a deposit, a balance), rounded. */
+export const near = (yocto: string) => money(yocto, NEAR_UNIT);
 
-/** Every digit: for a button that moves money, so it names exactly what the wallet charges. */
-export const nearExact = (yocto: string) => `${formatNear(yocto, 24)} NEAR`;
+/** A NEAR amount with every digit: for a button that moves money. */
+export const nearExact = (yocto: string) => moneyExact(yocto, NEAR_UNIT);
 
 /** Why tickets cannot be bought right now, or null while the event is on sale. */
 export function buyBlockedReason(event: EventView): string | null {

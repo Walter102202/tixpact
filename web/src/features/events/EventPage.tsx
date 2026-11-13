@@ -4,19 +4,24 @@ import {
   formatDateTime,
   PHASE_LABELS,
   PROMISE_TEXT,
+  type Unit,
 } from '@ticket-escrow/client';
+import { money, unitFor } from '../../lib/money';
 import { useWallet } from '../../lib/near/useWallet';
 import { Link } from '../../lib/router';
 import { useLoad } from '../../lib/useLoad';
 import { useServices } from '../../services';
 import { AccountLink } from '../../ui/AccountLink';
+import { CurrencyFact } from '../../ui/CurrencyFact';
 import { LoadState } from '../../ui/LoadState';
 import { BuyPanel } from './BuyPanel';
-import { near, outcomeLine, referenceLabel, verifierStatus } from './eventCopy';
+import { outcomeLine, referenceLabel, verifierStatus } from './eventCopy';
 
 export interface EventData {
   event: EventView;
   accounting: AccountingView | null;
+  /** The unit of the event's currency: every amount below is in it. */
+  unit: Unit;
 }
 
 export function EventPage({ id }: { id: string }) {
@@ -29,7 +34,7 @@ export function EventPage({ id }: { id: string }) {
       reader.getEvent(eventId),
       reader.getAccounting(eventId),
     ]);
-    return event ? { event, accounting } : null;
+    return event ? { event, accounting, unit: await unitFor(reader, event.currency) } : null;
   }
 
   const load = useLoad(`event:${id}`, read);
@@ -64,7 +69,7 @@ function EventDetails({
 }) {
   const { timeZone } = useServices();
   const { accountId } = useWallet();
-  const { event, accounting } = data;
+  const { event, accounting, unit } = data;
   const outcome = outcomeLine(event);
   const time = (ms: number) => formatDateTime(ms, timeZone);
 
@@ -80,9 +85,10 @@ function EventDetails({
         <div>
           <dl className="facts">
             <dt>Price</dt>
-            <dd>{near(event.price)}</dd>
+            <dd>{money(event.price, unit)}</dd>
+            <CurrencyFact currency={event.currency} unit={unit} />
             <dt>Reserved in the contract</dt>
-            <dd>{accounting ? near(accounting.principal_reserved) : 'Not available'}</dd>
+            <dd>{accounting ? money(accounting.principal_reserved, unit) : 'Not available'}</dd>
             <dt>Tickets sold</dt>
             <dd>
               {event.sold} of {event.capacity}

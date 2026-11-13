@@ -58,6 +58,8 @@ describe('shell', () => {
       'ana.testnet',
       'org.testnet',
       'teatro.testnet',
+      // Holds a tUSD ticket without being registered with tUSD (interface v2).
+      'sofia.testnet',
     ]);
     fireEvent.change(picker, { target: { value: 'org.testnet' } });
     expect(within(screen.getByRole('banner')).getByText('org.testnet')).toBeTruthy();

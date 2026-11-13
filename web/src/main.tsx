@@ -9,7 +9,7 @@ import './styles/tokens.css';
 import './styles/app.css';
 import './styles/landing.css';
 
-function liveServices(contractId: string, rpcUrls: string[]): AppServices {
+function liveServices(contractId: string, rpcUrls: string[], faucets: string[]): AppServices {
   const rpc = createRpc(rpcUrls);
   return {
     network: 'testnet',
@@ -19,6 +19,7 @@ function liveServices(contractId: string, rpcUrls: string[]): AppServices {
     txRpc: rpc,
     wallet: createNearConnectWallet({ contractId, rpcUrls }),
     timeZone: viewerTimeZone(),
+    faucets,
   };
 }
 
@@ -26,7 +27,7 @@ const config = readConfig(import.meta.env);
 const services =
   config.fixtureMode || config.contractId === null
     ? createFixtureServices()
-    : liveServices(config.contractId, config.rpcUrls);
+    : liveServices(config.contractId, config.rpcUrls, config.faucetTokens);
 
 const root = document.getElementById('root');
 if (!root) {

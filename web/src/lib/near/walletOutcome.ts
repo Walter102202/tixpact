@@ -19,6 +19,18 @@ export function toConnectorAction(call: ContractCall): ConnectorAction {
   };
 }
 
+/**
+ * The transaction the wallet signs for one call: to the escrow contract, or to the token a call of
+ * interface v2 names (`receiverId`), so a purchase in a token is sent to the token.
+ */
+export function transactionFor(call: ContractCall, signerId: string, contractId: string) {
+  return {
+    signerId,
+    receiverId: call.receiverId ?? contractId,
+    actions: [toConnectorAction(call)],
+  };
+}
+
 const OutcomeSchema = z.object({ transaction_outcome: z.object({ id: z.string().min(1) }) });
 const SignedSchema = z.object({ transaction: z.object({ hash: z.string().min(1) }) });
 
