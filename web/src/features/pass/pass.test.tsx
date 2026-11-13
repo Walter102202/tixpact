@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import {
   createFixtureReader,
   decodePass,
@@ -212,11 +212,13 @@ describe('the pass page', () => {
     expect((await screen.findByRole('timer')).textContent).toBe('Admits for 5:00');
     await countdownRunning();
 
+    // Testing Library turns React's act environment off while findBy waits, so the countdown's
+    // effect may still be queued here; it reads the clock when it runs, hence waitFor.
     act(() => vi.advanceTimersByTime(60_000));
-    expect(screen.getByRole('timer').textContent).toBe('Admits for 4:00');
+    await waitFor(() => expect(screen.getByRole('timer').textContent).toBe('Admits for 4:00'));
 
     act(() => vi.advanceTimersByTime(4 * 60_000 + 1_000));
-    expect(screen.queryByRole('timer')).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('timer')).toBeNull());
     expect(screen.queryByRole('img', { name: /QR code/ })).toBeNull();
     expect(
       screen.getByText('This pass expired at 21:08. Sign a new one to show at the door.'),

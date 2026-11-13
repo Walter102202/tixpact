@@ -5,12 +5,10 @@ import {
   base64Encode,
   baseDecode,
   baseEncode,
-  FailoverRpcError,
   type KeyPair,
   KeyPairEd25519,
   PublicKey,
 } from 'near-api-js';
-import { AccessKeyDoesNotExistError, AccountDoesNotExistError } from 'near-api-js/rpc-errors';
 import { z } from 'zod';
 import { AccountIdSchema, type TicketView, TokenIdSchema } from './schemas.js';
 
@@ -429,25 +427,22 @@ export async function checkPass(
 
 /** The one RPC read the live chain needs besides the reader. `FailoverRpcProvider` satisfies it. */
 export interface PassRpc {
-  viewAccessKey(params: {
+  viewAccessKeyList(params: {
     accountId: string;
-    publicKey: string;
     finalityQuery: typeof FINAL;
+    afterKey?: string;
   }): Promise<unknown>;
 }
 
-const AccessKeySchema = z.object({ permission: z.unknown() });
+const AccessKeyListPageSchema = z.object({
+  keys: z.array(
+    z.object({ public_key: z.string(), access_key: z.object({ permission: z.unknown() }) }),
+  ),
+  last_key: z.string().nullish(),
+});
 
-/** Whether a failed read says the key or its account does not exist, on every endpoint asked. */
-function saysMissing(error: unknown): boolean {
-  const errors = error instanceof FailoverRpcError ? [...error.errors] : [error];
-  return (
-    errors.length > 0 &&
-    errors.every(
-      (e) => e instanceof AccessKeyDoesNotExistError || e instanceof AccountDoesNotExistError,
-    )
-  );
-}
+/** Pages of keys read before giving up; the reader's account proof uses the same bound. */
+const MAX_KEY_PAGES = 100;
 
 /**
  * The demo chain (fixture mode): every account's only full-access key is its built-in demo key
@@ -463,22 +458,37 @@ export function createFixturePassChain(reader: {
   };
 }
 
-/** The live chain for `checkPass`: the access key and the ticket, both read at `final`. */
+/**
+ * The live chain for `checkPass`: the access key and the ticket, both read at `final`.
+ *
+ * The key is looked up in the account's key list, not asked for by name: `view_access_key` answers
+ * a missing key with an error, which near-api-js's failover takes for a broken endpoint (it logs
+ * it and asks the next one), while a deleted key or a changed account is an ordinary answer at a
+ * door. The list answers with a definite "not there", and on testnet an account that does not exist
+ * reads as an empty list (both endpoints, 2026-11-13). A list read that fails still rejects, so the
+ * check reads "the chain could not be read" (threat model E9).
+ */
 export function createPassChain(
   reader: { getTicket(tokenId: string): Promise<TicketView | null> },
   rpc: PassRpc,
 ): PassChain {
   return {
     async accessKey(accountId, publicKey) {
-      let raw: unknown;
-      try {
-        raw = await rpc.viewAccessKey({ accountId, publicKey, finalityQuery: FINAL });
-      } catch (error) {
-        if (saysMissing(error)) return 'missing';
-        throw error;
+      let afterKey: string | undefined;
+      for (let page = 0; page < MAX_KEY_PAGES; page += 1) {
+        const list = AccessKeyListPageSchema.parse(
+          await rpc.viewAccessKeyList(
+            afterKey === undefined
+              ? { accountId, finalityQuery: FINAL }
+              : { accountId, finalityQuery: FINAL, afterKey },
+          ),
+        );
+        const found = list.keys.find((key) => key.public_key === publicKey);
+        if (found) return found.access_key.permission === 'FullAccess' ? 'full' : 'function-call';
+        if (!list.last_key) return 'missing';
+        afterKey = list.last_key;
       }
-      const { permission } = AccessKeySchema.parse(raw);
-      return permission === 'FullAccess' ? 'full' : 'function-call';
+      throw new Error(`view_access_key_list did not end for ${accountId}`);
     },
     ticket: (tokenId) => reader.getTicket(tokenId),
   };
