@@ -143,29 +143,29 @@ signature  ed25519:ZQFWWD6ZAFSE1TJ5oSKoHpSWMihvSRaXVrK71ctXj99uQwv4VFFrWw9o4RSab
 
 Files: `packages/client/src/pass.ts`, `pass.test.ts`, export from `index.ts`; `scripts/pass.mjs`; `mcp/src/tools.ts` and its tests; `docs/threat-model.md` (section "Entry pass").
 
-- [ ] Tests first: the known-answer vector verifies; changing any of message, nonce, recipient, account or signature fails `signature`; each of the other four checks fails alone with its sentence (transferred ticket, function-call key, deleted key, refunded ticket, pass six minutes old, pass two minutes ahead); `decodePass` reads a bare pass and a URL and returns `null` on garbage.
-- [ ] Implement `pass.ts` with the crypto already in the workspace (near-api-js and its dependencies); add no dependency for it.
-- [ ] `node scripts/pass.mjs verify <pass or URL>` (env `CONTRACT_ID`, RPC as the other scripts): prints the five checks, one per line, `ok` or `NO` with the sentence, then `ADMIT` or `DO NOT ADMIT`; exit 0 or 1. `node scripts/pass.mjs encode` reads the JSON the NEAR CLI prints on stdin plus `--ticket`, `--issued`, `--nonce` and prints the pass, so a pass can be made with the CLI alone.
-- [ ] MCP tool `show_entry_pass { token_id }`: refuses when the agent does not hold the ticket; otherwise signs with the agent's key and returns the pass and, when `SITE_URL` is set, the door link. It signs no transaction. Tool count and every place that prints it change from 10 to 11 (the integrator updates the README).
-- [ ] Threat model: what a pass proves, a screenshot shared inside five minutes, a key deleted after signing, a function-call key, the attendant's clock, no record of admissions shared between devices.
+- [x] Tests first: the known-answer vector verifies; changing any of message, nonce, recipient, account or signature fails `signature`; each of the other four checks fails alone with its sentence (transferred ticket, function-call key, deleted key, refunded ticket, pass six minutes old, pass two minutes ahead); `decodePass` reads a bare pass and a URL and returns `null` on garbage.
+- [x] Implement `pass.ts` with the crypto already in the workspace (near-api-js and its dependencies); add no dependency for it.
+- [x] `node scripts/pass.mjs verify <pass or URL>` (env `CONTRACT_ID`, RPC as the other scripts): prints the five checks, one per line, `ok` or `NO` with the sentence, then `ADMIT` or `DO NOT ADMIT`; exit 0 or 1. `node scripts/pass.mjs encode` reads the JSON the NEAR CLI prints on stdin plus `--ticket`, `--issued`, `--nonce` and prints the pass, so a pass can be made with the CLI alone.
+- [x] MCP tool `show_entry_pass { token_id }`: refuses when the agent does not hold the ticket; otherwise signs with the agent's key and returns the pass and, when `SITE_URL` is set, the door link. It signs no transaction. Tool count and every place that prints it change from 10 to 11 (the integrator updates the README).
+- [x] Threat model: what a pass proves, a screenshot shared inside five minutes, a key deleted after signing, a function-call key, the attendant's clock, no record of admissions shared between devices.
 
 ### Task P2: the holder's pass page and the door page
 
 Files: `web/src/features/pass/`, `web/src/lib/router.tsx`, `web/src/lib/near/` (message signing), the ticket page, tests.
 
-- [ ] The ticket page offers "Show entry pass" to the signed-in holder of an `Active` ticket that is not refunded. Anyone else reads: `Only the holder can show the entry pass for this ticket.`
-- [ ] The wallet signs the message through near-connect's `signMessage` (read its types in `node_modules` and in `C:\dev\near-project-reports\sources\`; Meteor and Intear are the two wallets). The account in the answer must be the connected one. A wallet that cannot sign messages gets a sentence, not an error.
-- [ ] The pass view: a QR code of `<origin>/door#p=<pass>`, the ticket and holder, a countdown to expiry, "Sign a new pass" once expired, and a link that opens the door check in a new tab. The pass travels in the URL fragment so it reaches no server. One small QR dependency without dependencies of its own is allowed (list it for the README).
-- [ ] `/door`: with a pass in the URL it runs `checkPass` against the chain and shows one verdict, large: `Admit` with the ticket and holder, or `Do not admit` with the failing sentences, and the five checks below. Without a pass it explains itself and takes a pasted link. A valid pass can be marked as admitted; the same ticket shown again on this device reads `Already admitted on this device at 21:03`. Kept in `localStorage`, wrapped in try/catch.
-- [ ] Demo mode (no `VITE_CONTRACT_ID`): demo accounts sign with built-in demo keys that the fixture chain lists as their full-access keys, so both pages work end to end and are marked as demo data like the rest.
-- [ ] Tests: holder and non-holder, expiry and re-sign, a pass that turns invalid after the ticket is transferred, the door's verdicts, the second scan.
+- [x] The ticket page offers "Show entry pass" to the signed-in holder of an `Active` ticket that is not refunded. Anyone else reads: `Only the holder can show the entry pass for this ticket.`
+- [x] The wallet signs the message through near-connect's `signMessage` (read its types in `node_modules` and in `C:\dev\near-project-reports\sources\`; Meteor and Intear are the two wallets). The account in the answer must be the connected one. A wallet that cannot sign messages gets a sentence, not an error.
+- [x] The pass view: a QR code of `<origin>/door#p=<pass>`, the ticket and holder, a countdown to expiry, "Sign a new pass" once expired, and a link that opens the door check in a new tab. The pass travels in the URL fragment so it reaches no server. One small QR dependency without dependencies of its own is allowed (list it for the README).
+- [x] `/door`: with a pass in the URL it runs `checkPass` against the chain and shows one verdict, large: `Admit` with the ticket and holder, or `Do not admit` with the failing sentences, and the five checks below. Without a pass it explains itself and takes a pasted link. A valid pass can be marked as admitted; the same ticket shown again on this device reads `Already admitted on this device at 21:03`. Kept in `localStorage`, wrapped in try/catch.
+- [x] Demo mode (no `VITE_CONTRACT_ID`): demo accounts sign with built-in demo keys that the fixture chain lists as their full-access keys, so both pages work end to end and are marked as demo data like the rest.
+- [x] Tests: holder and non-holder, expiry and re-sign, a pass that turns invalid after the ticket is transferred, the door's verdicts, the second scan.
 
 ### Task P3: an event page that says its verifier is a group
 
 Files: `packages/client/src/reader.ts` (+ tests, fixtures), `web/src/features/events/`.
 
-- [ ] `readGroupVerifier(accountId): Promise<{ members: string[]; needed: number } | null>`: calls `get_policy` on the account. It answers only for a Sputnik DAO policy with exactly one role of kind `Group` whose permissions let it approve function calls (`*:*`, `call:*`, `*:VoteApprove` or `call:VoteApprove`) under `RoleWeight`; `needed` is `min(n, floor(n * num / den) + 1)` for a ratio threshold `[num, den]` (the role's `vote_policy.call` if present, else `default_vote_policy`). Anything else, or a failed view, is `null`.
-- [ ] The event page and the verifier line then read: `<account> · a group of 3: 2 must agree (a, b, c)`. A plain account reads as today.
+- [x] `readGroupVerifier(accountId): Promise<{ members: string[]; needed: number } | null>`: calls `get_policy` on the account. It answers only for a Sputnik DAO policy with exactly one role of kind `Group` whose permissions let it approve function calls (`*:*`, `call:*`, `*:VoteApprove` or `call:VoteApprove`) under `RoleWeight`; `needed` is `min(n, floor(n * num / den) + 1)` for a ratio threshold `[num, den]` (the role's `vote_policy.call` if present, else `default_vote_policy`). Anything else, or a failed view, is `null`.
+- [x] The event page and the verifier line then read: `<account> · a group of 3: 2 must agree (a, b, c)`. A plain account reads as today.
 
 ## Lane D: a verifier that is a group (integrator)
 

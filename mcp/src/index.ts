@@ -28,9 +28,11 @@ export { createServer, SERVER_NAME } from './server.js';
 export {
   type AgentSigner,
   createNearSigner,
+  type MessageToSign,
   type NearSignerOptions,
   publicKeyOf,
   SendError,
+  type SignedMessageText,
 } from './signer.js';
 export {
   createWatchState,

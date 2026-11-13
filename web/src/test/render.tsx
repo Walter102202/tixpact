@@ -1,5 +1,10 @@
 import { render } from '@testing-library/react';
-import { createFixtureReader, createFixtureRpc, FIXTURE_NOW_MS } from '@ticket-escrow/client';
+import {
+  createFixturePassChain,
+  createFixtureReader,
+  createFixtureRpc,
+  FIXTURE_NOW_MS,
+} from '@ticket-escrow/client';
 import { App } from '../App';
 import { createFixtureWallet, type FixtureWallet } from '../lib/near/wallet';
 import type { AppServices } from '../services';
@@ -13,11 +18,13 @@ export function testServices(overrides: Partial<AppServices> = {}): AppServices 
   wallet: FixtureWallet;
 } {
   const wallet = (overrides.wallet as FixtureWallet | undefined) ?? createFixtureWallet();
+  const reader = overrides.reader ?? createFixtureReader();
   return {
     network: 'testnet',
     contractId: 'ticket-escrow.testnet',
     fixtureMode: true,
-    reader: createFixtureReader(),
+    reader,
+    passChain: createFixturePassChain(reader),
     txRpc: createFixtureRpc(),
     timeZone: TEST_TIME_ZONE,
     trackOptions: { sleep: noSleep },

@@ -71,3 +71,15 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | The wallet selector offers only Meteor and Intear, through an allow list on `availableWallets` | `2026-11-13-web-wallet-selector-meteor-and-intear.md` |
 | 2026-11-13 | The landing states the problem and plays the refund: motion decided at mount, sticky floating header, fixed event columns | `2026-11-13-web-landing-problem-and-motion.md` |
 | 2026-11-13 | The release goes to a clean account, `ticket-escrow.testnet`, with the same wasm; its key is deleted only with Walter present | `2026-11-13-the-release-goes-to-a-clean-account.md` |
+| 2026-11-13 | A changed account in an entry pass fails the `key` check, not `signature`: NEP-413 does not sign the account | `2026-11-13-entry-pass-account-bound-by-the-key-check.md` |
+| 2026-11-13 | The entry pass hash uses `@noble/hashes` 2.4.0, declared by the client package (already in the lockfile through near-api-js) | `2026-11-13-entry-pass-sha256-from-noble-hashes.md` |
+| 2026-11-13 | The agent's `show_entry_pass` refuses tickets the door would refuse, and is read-only; `scripts/pass.mjs request` builds the CLI command | `2026-11-13-agent-entry-pass-tool.md` |
+| 2026-11-13 | The web's entry pass: one click to sign, the pass in the URL fragment, the door's verdict ("Admit", "Do not admit", "Already admitted") per device; QR by `uqr` 0.1.3 | `2026-11-13-web-entry-pass-pages.md` |
+| 2026-11-13 | A verifier is shown as a group when its Sputnik DAO policy says one group decides function calls; `needed` counts the quorum as the contract does | `2026-11-13-group-verifier-reads-the-dao-policy.md` |
+| 2026-11-13 | Entry pass signatures are verified under RFC 8032's strict rules (`@noble/curves` 2.4.0, `zip215: false`): ZIP-215 accepts a forgery for small-order keys | `2026-11-13-entry-pass-strict-ed25519.md` |
+| 2026-11-13 | The door page is one the attendant opens from their own bookmark; it names its site, and demo verdicts read "Demo: would admit" | `2026-11-13-door-opened-by-the-attendant.md` |
+| 2026-11-13 | The door records an admission with its "Admit" verdict (with an "Undo"), per mode; a ticket admitted here reads "Do not admit" | `2026-11-13-door-records-admission-with-the-verdict.md` |
+| 2026-11-13 | A role of any other kind that can approve calls, `Everyone` included, makes the verifier read as a plain account | `2026-11-13-group-verifier-any-other-approver-gives-null.md` |
+| 2026-11-13 | The door page scans QR codes itself with `BarcodeDetector` where the browser has it; no new dependency; not tried on a physical phone | `2026-11-13-door-scanner-in-the-page.md` |
+| 2026-11-13 | The group verifier counts every label that can change who decides calls (`policy…`, members, upgrades, config); `needed` is the minimum; the line says "its rules now" | `2026-11-13-group-verifier-counts-every-rule-changing-label.md` |
+| 2026-11-13 | The door checks every new fragment and dates every verdict; Undo works after "Check again" and says whether it removed the admission | `2026-11-13-door-checks-every-arrival-and-undo-says-so.md` |

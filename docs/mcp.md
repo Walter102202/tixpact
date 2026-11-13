@@ -40,6 +40,7 @@ pnpm install --frozen-lockfile && pnpm build
 | `AGENT_PRIVATE_KEY` | to sign | its secret key, `ed25519:...` |
 | `MAX_PRICE_YOCTO` | to sign | per-ticket cap in yoctoNEAR (1 NEAR = 1 followed by 24 zeros) |
 | `MAX_EXPOSURE_YOCTO` | to sign | exposure cap in yoctoNEAR |
+| `SITE_URL` | no | where the web app is served (`https`, or `http://localhost` while developing); `show_entry_pass` then returns the door link `<SITE_URL>/door#p=<pass>` |
 
 With a key, the account and both caps are required; there are no default caps. Without a key the server runs read-only. A configuration error names the variable (for `RPC_URLS`, the entry's position) and never repeats its value.
 
@@ -285,6 +286,25 @@ Refunded 1.5 NEAR to luis.testnet. Transaction: https://testnet.nearblocks.io/tx
 
 If the transfer or the contract's callback fails, the result is `failed` with the failed step, and the text says `The refund did not complete: …`; it never says "Refunded".
 
+### `show_entry_pass`
+
+Signs a five-minute entry pass for a ticket the agent holds: a NEP-413 message signed with the agent's key (`docs/threat-model.md`, "Entry pass"). It signs no transaction and sends nothing to the chain, so it needs no caps and is marked read-only. It is refused, before anything is signed, without a key, for a ticket the agent does not hold, and for a ticket that would not admit anyone (refunded, being refunded, or on its way to a contract). With `SITE_URL` set the result carries the door link; without it, the pass itself. `structuredContent` has `pass`, `encoded` (what the door reads), `door_url` and `expires_at_ms`. Output on the fixture chain with `SITE_URL=https://ticket-escrow.example` (the pass cut here):
+
+```json
+{ "name": "show_entry_pass", "arguments": { "token_id": "1-3" } }
+```
+
+```text
+# Entry pass for ticket 1-3
+
+Signed by luis.testnet at Nov 13, 2026, 16:29 UTC. It admits until Nov 13, 2026, 16:34 UTC (five minutes); after that, ask for a new one.
+Door link (open it, or show it as a QR code, at the entrance): https://ticket-escrow.example/door#p=eyJ2IjoxLCJjb250cmFjdCI6InRpY2tldC1lc2Nyb3cudGVzdG5ldCIs…
+Anyone can check it against the chain with `node scripts/pass.mjs verify <pass>` or by opening the link. It is valid only while luis.testnet still holds the ticket and the key that signed it.
+Nothing was sent to the chain.
+```
+
+For ticket 1-1, held by `ana.testnet`, it is a tool error: `Ticket 1-1 is held by ana.testnet, not by luis.testnet: only its holder can show its entry pass. Nothing was signed.`
+
 ## The refund watcher
 
 ```bash
@@ -305,7 +325,7 @@ claim_refund 8-1: succeeded, tx <hash> https://testnet.nearblocks.io/txns/<hash>
 CONTRACT_ID=<contract>.testnet pnpm --filter @ticket-escrow/mcp smoke
 ```
 
-It starts the built server as a child process over stdio, exactly as an MCP client does, checks that it lists the ten tools, and calls `list_events` and `verify_contract`. With a key (and the account and both caps) it also calls `get_wallet` and buys one ticket within the caps (the first event on sale at or below the per-ticket cap, or `SMOKE_EVENT_ID`), and prints the transaction link. It passes to the child only the variables in the table above. It exits non-zero on any failure.
+It starts the built server as a child process over stdio, exactly as an MCP client does, checks that it lists the eleven tools, and calls `list_events` and `verify_contract`. With a key (and the account and both caps) it also calls `get_wallet` and buys one ticket within the caps (the first event on sale at or below the per-ticket cap, or `SMOKE_EVENT_ID`), and prints the transaction link. It passes to the child only the variables in the table above. It exits non-zero on any failure.
 
 ## Limits
 

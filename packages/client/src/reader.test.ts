@@ -2,7 +2,7 @@ import { FailoverRpcError, FailoverRpcProvider } from 'near-api-js';
 import { AccountDoesNotExistError } from 'near-api-js/rpc-errors';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createFixtureReader, FIXTURES } from './fixtures.js';
-import { createReader, createRpc, type ReaderRpc } from './reader.js';
+import { createReader, createRpc, groupVerifierOf, type ReaderRpc } from './reader.js';
 import type { TxStatusRpc } from './tx.js';
 
 const CONTRACT = 'ticket-escrow.testnet';
@@ -285,5 +285,293 @@ describe('createRpc against endpoints that hang or fail', () => {
     const rpc = createRpc([DEAD]);
     expect(await rpc.callFunction(VIEW)).toBe(8);
     expect(calls).toEqual([DEAD, DEAD]);
+  });
+});
+
+// The policy a DAO made by sputnikv2.testnet with the default policy answers to `get_policy`
+// (shape read from peter.sputnikv2.testnet on 2026-11-13), with a council of three.
+const COUNCIL = ['a.testnet', 'b.testnet', 'c.testnet'];
+function daoPolicy(
+  overrides: { council?: Record<string, unknown>; defaultVotePolicy?: unknown } = {},
+) {
+  return {
+    roles: [
+      { name: 'all', kind: 'Everyone', permissions: ['*:AddProposal'], vote_policy: {} },
+      {
+        name: 'council',
+        kind: { Group: COUNCIL },
+        permissions: [
+          '*:Finalize',
+          '*:AddProposal',
+          '*:VoteApprove',
+          '*:VoteReject',
+          '*:VoteRemove',
+        ],
+        vote_policy: {},
+        ...overrides.council,
+      },
+    ],
+    default_vote_policy: overrides.defaultVotePolicy ?? {
+      weight_kind: 'RoleWeight',
+      quorum: '0',
+      threshold: [1, 2],
+    },
+    proposal_bond: '1000000000000000000000000',
+    proposal_period: '604800000000000',
+    bounty_bond: '1000000000000000000000000',
+    bounty_forgiveness_period: '86400000000000',
+  };
+}
+
+/** `get_policy` of ticket-jury.sputnikv2.testnet (Sputnik DAO 2.3.1), as the chain answered it. */
+const TICKET_JURY_POLICY = {
+  bounty_bond: '1000000000000000000000000',
+  bounty_forgiveness_period: '86400000000000',
+  default_vote_policy: { quorum: '0', threshold: [1, 2], weight_kind: 'RoleWeight' },
+  proposal_bond: '1000000000000000000000000',
+  proposal_period: '604800000000000',
+  roles: [
+    { kind: 'Everyone', name: 'all', permissions: ['*:AddProposal'], vote_policy: {} },
+    {
+      kind: {
+        Group: ['te-d1-venue.testnet', 'te-d1-verifier.testnet', 'te-d1-auditor.testnet'],
+      },
+      name: 'council',
+      permissions: ['*:Finalize', '*:AddProposal', '*:VoteApprove', '*:VoteReject', '*:VoteRemove'],
+      vote_policy: {},
+    },
+  ],
+};
+
+describe('readGroupVerifier', () => {
+  it("reads the real policy of the group-verifier proof's DAO: 3 members, 2 needed", () => {
+    expect(groupVerifierOf(TICKET_JURY_POLICY)).toEqual({
+      members: ['te-d1-venue.testnet', 'te-d1-verifier.testnet', 'te-d1-auditor.testnet'],
+      needed: 2,
+    });
+  });
+
+  async function read(policy: unknown) {
+    const { rpc, calls } = fakeRpc({ get_policy: policy });
+    const group = await createReader({ contractId: CONTRACT, rpc }).readGroupVerifier?.(
+      'dao.sputnikv2.testnet',
+    );
+    return { group, calls };
+  }
+
+  it('reads a Sputnik DAO council under the default policy: 2 of 3 must agree', async () => {
+    const { group, calls } = await read(daoPolicy());
+    expect(group).toEqual({ members: COUNCIL, needed: 2 });
+    expect(calls).toEqual([
+      {
+        kind: 'viewAccount',
+        params: { accountId: 'dao.sputnikv2.testnet', blockQuery: FINAL },
+      },
+      {
+        kind: 'callFunction',
+        params: {
+          contractId: 'dao.sputnikv2.testnet',
+          method: 'get_policy',
+          args: {},
+          blockQuery: FINAL,
+        },
+      },
+    ]);
+  });
+
+  it('applies min(n, floor(n * num / den) + 1) to the ratio', async () => {
+    const ratio = (threshold: [number, number], members: string[]) =>
+      groupVerifierOf(
+        daoPolicy({
+          council: { kind: { Group: members } },
+          defaultVotePolicy: { weight_kind: 'RoleWeight', quorum: '0', threshold },
+        }),
+      )?.needed;
+    const five = ['a.testnet', 'b.testnet', 'c.testnet', 'd.testnet', 'e.testnet'];
+    expect(ratio([1, 2], five)).toBe(3);
+    expect(ratio([2, 3], five)).toBe(4);
+    expect(ratio([1, 1], five)).toBe(5);
+    expect(ratio([0, 1], five)).toBe(1);
+    expect(ratio([1, 2], ['a.testnet', 'b.testnet'])).toBe(2);
+  });
+
+  it("uses the role's own policy for a label before the default one", async () => {
+    const { group } = await read(
+      daoPolicy({
+        council: {
+          permissions: ['call:VoteApprove'],
+          vote_policy: { call: { weight_kind: 'RoleWeight', quorum: '0', threshold: [1, 1] } },
+        },
+      }),
+    );
+    expect(group?.needed).toBe(3);
+  });
+
+  describe('counts every label that can change who decides calls', () => {
+    const byOne = { weight_kind: 'RoleWeight', quorum: '0', threshold: '1' };
+
+    it('one member alone can change the policy: needed is 1, not 2', () => {
+      for (const label of ['policy', 'policy_add_or_update_role', 'policy_update_parameters']) {
+        const policy = daoPolicy({
+          council: { permissions: ['*:*'], vote_policy: { [label]: byOne } },
+        });
+        expect(groupVerifierOf(policy), label).toEqual({ members: COUNCIL, needed: 1 });
+      }
+    });
+
+    it('one member alone can add or remove members, or upgrade the contract: needed is 1', () => {
+      for (const label of [
+        'add_member_to_role',
+        'remove_member_from_role',
+        'upgrade_self',
+        'upgrade_remote',
+        'config',
+      ]) {
+        const policy = daoPolicy({ council: { vote_policy: { [label]: byOne } } });
+        expect(groupVerifierOf(policy), label).toEqual({ members: COUNCIL, needed: 1 });
+      }
+    });
+
+    it('another group that can approve a policy change, an upgrade or a new member gives null', () => {
+      for (const permission of [
+        'policy:VoteApprove',
+        'policy_remove_role:*',
+        'upgrade_self:VoteApprove',
+        'add_member_to_role:VoteApprove',
+      ]) {
+        const policy = daoPolicy();
+        policy.roles.push({
+          name: 'board',
+          kind: { Group: ['a.testnet'] },
+          permissions: [permission],
+          vote_policy: {},
+        } as never);
+        expect(groupVerifierOf(policy), permission).toBeNull();
+      }
+    });
+
+    it('a label that weighs by token gives null; a label that can never pass is left out', () => {
+      const tokenWeight = { weight_kind: 'TokenWeight', quorum: '0', threshold: [1, 2] };
+      expect(
+        groupVerifierOf(daoPolicy({ council: { vote_policy: { policy: tokenWeight } } })),
+      ).toBeNull();
+      const never = { weight_kind: 'RoleWeight', quorum: '9', threshold: [1, 2] };
+      expect(
+        groupVerifierOf(daoPolicy({ council: { vote_policy: { upgrade_self: never } } })),
+      ).toEqual({ members: COUNCIL, needed: 2 });
+      expect(groupVerifierOf(daoPolicy({ council: { vote_policy: { call: never } } }))).toBeNull();
+    });
+
+    it('a group that cannot approve calls is not described, even if it decides the policy', () => {
+      expect(
+        groupVerifierOf(daoPolicy({ council: { permissions: ['policy:VoteApprove'] } })),
+      ).toBeNull();
+    });
+  });
+
+  it('counts the quorum and a fixed weight as the contract does', async () => {
+    const policy = (vote: unknown) => groupVerifierOf(daoPolicy({ defaultVotePolicy: vote }));
+    expect(policy({ weight_kind: 'RoleWeight', quorum: '3', threshold: [1, 2] })?.needed).toBe(3);
+    expect(policy({ weight_kind: 'RoleWeight', quorum: '0', threshold: '2' })?.needed).toBe(2);
+    expect(policy({ weight_kind: 'RoleWeight', quorum: '0', threshold: '9' })?.needed).toBe(3);
+    // More votes than members can never be reached: not described as a group that decides.
+    expect(policy({ weight_kind: 'RoleWeight', quorum: '4', threshold: [1, 2] })).toBeNull();
+  });
+
+  it('accepts each permission that lets the council approve a function call', () => {
+    for (const permission of ['*:*', 'call:*', '*:VoteApprove', 'call:VoteApprove']) {
+      expect(
+        groupVerifierOf(daoPolicy({ council: { permissions: [permission] } })),
+        permission,
+      ).toEqual({
+        members: COUNCIL,
+        needed: 2,
+      });
+    }
+    // Another group that cannot approve calls is ignored.
+    const withOthers = daoPolicy();
+    withOthers.roles.push({
+      name: 'community',
+      kind: { Group: ['d.testnet'] },
+      permissions: ['*:AddProposal'],
+      vote_policy: {},
+    } as never);
+    expect(groupVerifierOf(withOthers)).toEqual({ members: COUNCIL, needed: 2 });
+    // A role of another kind that can approve calls gives null, Everyone included.
+    for (const kind of ['Everyone', { Member: '1' }]) {
+      const open = daoPolicy();
+      open.roles.push({
+        name: 'open',
+        kind,
+        permissions: ['call:VoteApprove'],
+        vote_policy: {},
+      } as never);
+      expect(groupVerifierOf(open), JSON.stringify(kind)).toBeNull();
+    }
+    for (const permission of ['transfer:VoteApprove', '*:VoteReject', 'call:AddProposal']) {
+      expect(
+        groupVerifierOf(daoPolicy({ council: { permissions: [permission] } })),
+        permission,
+      ).toBeNull();
+    }
+  });
+
+  it('is null for anything that is not one group deciding by role weight', () => {
+    const tokenWeight = { weight_kind: 'TokenWeight', quorum: '0', threshold: [1, 2] };
+    const twoGroups = daoPolicy();
+    twoGroups.roles.push({
+      ...twoGroups.roles[1],
+      name: 'board',
+      kind: { Group: ['d.testnet'] },
+    } as never);
+    const memberRole = daoPolicy({ council: { kind: { Member: '1' } } });
+    for (const policy of [
+      daoPolicy({ defaultVotePolicy: tokenWeight }),
+      twoGroups,
+      memberRole,
+      daoPolicy({ council: { kind: { Group: [] } } }),
+      daoPolicy({ council: { kind: { Group: ['Not An Account'] } } }),
+      { roles: 'none' },
+      null,
+      '1.0.0',
+    ]) {
+      expect(groupVerifierOf(policy)).toBeNull();
+    }
+  });
+
+  it('does not ask an account without code for a policy (near-api-js logs every failed view)', async () => {
+    const { rpc, calls } = fakeRpc({ get_policy: daoPolicy() });
+    const plain: ReaderRpc = {
+      ...rpc,
+      async viewAccount(params) {
+        calls.push({ kind: 'viewAccount', params });
+        return { amount: 1n, code_hash: '1'.repeat(32), block_height: 1 };
+      },
+    };
+    const reader = createReader({ contractId: CONTRACT, rpc: plain });
+    expect(await reader.readGroupVerifier?.('teatro.testnet')).toBeNull();
+    expect(calls.map((c) => c.kind)).toEqual(['viewAccount']);
+  });
+
+  it('is null for a plain account, or when the view fails', async () => {
+    const rpc: ReaderRpc = {
+      ...fakeRpc({}).rpc,
+      async callFunction() {
+        throw new Error('CodeDoesNotExist');
+      },
+    };
+    expect(
+      await createReader({ contractId: CONTRACT, rpc }).readGroupVerifier?.('teatro.testnet'),
+    ).toBeNull();
+  });
+
+  it('answers on fixture data from its policies, and null for every other account', async () => {
+    const reader = createFixtureReader({ ...FIXTURES, policies: { 'dao.testnet': daoPolicy() } });
+    expect(await reader.readGroupVerifier?.('dao.testnet')).toEqual({
+      members: COUNCIL,
+      needed: 2,
+    });
+    expect(await reader.readGroupVerifier?.('teatro.testnet')).toBeNull();
+    expect(await createFixtureReader().readGroupVerifier?.('teatro.testnet')).toBeNull();
   });
 });

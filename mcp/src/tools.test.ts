@@ -3,12 +3,18 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
   actions,
   type ContractCall,
+  checkPass,
   createFixtureReader,
   createFixtureRpc,
+  decodePass,
+  demoPassKey,
+  type EntryPass,
   FIXTURE_CONTRACT_ID,
   FIXTURES,
   type FixtureData,
   formatDateTime,
+  nep413Hash,
+  PASS_TTL_MS,
   PROMISE_TEXT,
   parseNear,
   type Reader,
@@ -104,6 +110,8 @@ interface Recorded {
 
 function recordingSigner(hashes: Record<string, string> = HASHES) {
   const calls: Recorded[] = [];
+  const messages: string[] = [];
+  const key = demoPassKey(AGENT);
   const signer: AgentSigner = {
     accountId: AGENT,
     async signAndSend(receiverId, call) {
@@ -112,8 +120,15 @@ function recordingSigner(hashes: Record<string, string> = HASHES) {
       if (hash === undefined) throw new Error(`no recorded transaction for ${call.methodName}`);
       return hash;
     },
+    async signMessage(payload) {
+      messages.push(payload.message);
+      return {
+        publicKey: key.getPublicKey().toString(),
+        signature: Buffer.from(key.sign(nep413Hash(payload)).signature).toString('base64'),
+      };
+    },
   };
-  return { signer, calls };
+  return { signer, calls, messages };
 }
 
 function config(overrides: Partial<AgentConfig> = {}): AgentConfig {
@@ -187,7 +202,7 @@ const unreachableReader: Reader = new Proxy({} as Reader, {
 });
 
 describe('the tool list', () => {
-  it('has exactly the ten tools of the plan', async () => {
+  it('has exactly the eleven tools of the plan', async () => {
     const client = await connect(deps(recordingSigner().signer));
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name)).toEqual([
@@ -201,6 +216,7 @@ describe('the tool list', () => {
       'transfer_ticket',
       'expire_event',
       'claim_refund',
+      'show_entry_pass',
     ]);
     expect(tools.map((t) => t.name)).toEqual([...TOOL_NAMES]);
   });
@@ -1085,3 +1101,100 @@ function unreachableTxRpc() {
     },
   };
 }
+
+describe('show_entry_pass', () => {
+  /** The door's chain over the fixture data, where the agent's demo key is a full-access key. */
+  const door = {
+    accessKey: async (accountId: string, publicKey: string) =>
+      accountId === AGENT && publicKey === demoPassKey(AGENT).getPublicKey().toString()
+        ? ('full' as const)
+        : ('missing' as const),
+    ticket: (tokenId: string) => createFixtureReader(DATA).getTicket(tokenId),
+  };
+
+  it('signs a pass for a ticket the agent holds, which the door admits, and signs no transaction', async () => {
+    const { signer, calls, messages } = recordingSigner();
+    const client = await connect(deps(signer));
+    const before = Date.now();
+    const result = await call(client, 'show_entry_pass', { token_id: '1-3' });
+    expect(result.isError).toBe(false);
+    expect(calls).toEqual([]);
+    expect(messages).toHaveLength(1);
+    const pass = result.data.pass as EntryPass;
+    expect(pass).toMatchObject({
+      v: 1,
+      contract: FIXTURE_CONTRACT_ID,
+      ticket: '1-3',
+      account: AGENT,
+    });
+    expect(pass.issuedAtMs).toBeGreaterThanOrEqual(before);
+    expect(result.data.expires_at_ms).toBe(pass.issuedAtMs + PASS_TTL_MS);
+    expect(decodePass(result.data.encoded as string)).toEqual(pass);
+    expect(result.data.door_url).toBeNull();
+    const verdict = await checkPass(pass, FIXTURE_CONTRACT_ID, door, pass.issuedAtMs + 1_000);
+    expect(verdict.admitted).toBe(true);
+    expect(result.text).toContain('Entry pass for ticket 1-3');
+    expect(result.text).toContain(result.data.encoded as string);
+    expect(result.text).toContain('Nothing was sent to the chain.');
+  });
+
+  it('gives the door link when SITE_URL is set', async () => {
+    const { signer } = recordingSigner();
+    const site = 'https://tickets.example';
+    const client = await connect(deps(signer, { config: config({ siteUrl: `${site}/` }) }));
+    const result = await call(client, 'show_entry_pass', { token_id: '1-3' });
+    const link = result.data.door_url as string;
+    expect(link.startsWith(`${site}/door#p=`)).toBe(true);
+    expect(decodePass(link)).toEqual(result.data.pass);
+    expect(result.text).toContain(link);
+  });
+
+  it('refuses a ticket the agent does not hold, and signs nothing', async () => {
+    const { signer, calls, messages } = recordingSigner();
+    const client = await connect(deps(signer));
+    const result = await call(client, 'show_entry_pass', { token_id: '1-1' });
+    expect(result).toMatchObject({
+      isError: true,
+      text: 'Ticket 1-1 is held by ana.testnet, not by luis.testnet: only its holder can show its entry pass. Nothing was signed.',
+    });
+    expect(messages).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+
+  it('refuses a ticket that would not admit anyone, and signs nothing', async () => {
+    const { signer, messages } = recordingSigner();
+    const client = await connect(deps(signer));
+    const refunded = await call(client, 'show_entry_pass', { token_id: '8-3' });
+    expect(refunded).toMatchObject({
+      isError: true,
+      text: 'Ticket 8-3 was refunded: it no longer admits anyone. Nothing was signed.',
+    });
+    const refunding = await call(client, 'show_entry_pass', { token_id: '8-2' });
+    expect(refunding.text).toBe(
+      'Ticket 8-2 is being refunded: it no longer admits anyone. Nothing was signed.',
+    );
+    const missing = await call(client, 'show_entry_pass', { token_id: '9-9' });
+    expect(missing.text).toBe('Ticket 9-9 does not exist.');
+    expect(messages).toEqual([]);
+  });
+
+  it('without a key it says so before reading the chain', async () => {
+    const client = await connect(deps(null, { reader: unreachableReader }));
+    const result = await call(client, 'show_entry_pass', { token_id: '1-3' });
+    expect(result.isError).toBe(true);
+    expect(result.text).toMatch(/^No key configured/);
+  });
+
+  it('says why when signing was turned off', async () => {
+    const client = await connect(
+      deps(null, {
+        reader: unreachableReader,
+        signingOffReason: 'RPC_URLS entry 1 reports chain mainnet, not testnet',
+      }),
+    );
+    const result = await call(client, 'show_entry_pass', { token_id: '1-3' });
+    expect(result.text).toBe(
+      'Signing is off: RPC_URLS entry 1 reports chain mainnet, not testnet. Nothing was signed.',
+    );
+  });
+});

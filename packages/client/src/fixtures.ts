@@ -1,5 +1,5 @@
 import { parseNear } from './format.js';
-import type { AccountProof, Reader } from './reader.js';
+import { type AccountProof, groupVerifierOf, type Reader } from './reader.js';
 import {
   type AccountingView,
   AccountingViewSchema,
@@ -392,6 +392,8 @@ export interface FixtureData {
   histories: Record<string, TicketHistory>;
   operations: OperationView[];
   accountProof: AccountProof;
+  /** What `get_policy` answers per account (Sputnik DAO verifiers); every other account has none. */
+  policies?: Record<string, unknown>;
 }
 
 export const FIXTURES: FixtureData = {
@@ -449,6 +451,7 @@ export function createFixtureReader(data: FixtureData = FIXTURES): Reader {
     getAccountProof: async () => structuredClone(data.accountProof),
     // The accounts the fixture data names exist; any other does not.
     accountExists: async (accountId) => fixtureAccounts(data).has(accountId),
+    readGroupVerifier: async (accountId) => groupVerifierOf(data.policies?.[accountId]),
   };
 }
 

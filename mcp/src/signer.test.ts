@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { actions, parseNear } from '@ticket-escrow/client';
+import { actions, nep413Hash, parseNear, passRequest } from '@ticket-escrow/client';
 import {
   baseEncode,
   FailoverRpcError,
@@ -283,5 +283,20 @@ describe('createNearSigner', () => {
     expect(() =>
       createNearSigner({ accountId: AGENT, secretKey: bad, provider: chain.provider }),
     ).toThrow('AGENT_PRIVATE_KEY is not a valid secret key (the value is not shown).');
+  });
+
+  it('signs an entry pass message with its key, without reading or sending anything', async () => {
+    const chain = fakeChain();
+    const request = passRequest({
+      contract: CONTRACT,
+      ticket: '1-3',
+      issuedAtMs: 1_794_650_000_000,
+    });
+    const signed = await signer(chain.provider).signMessage(request);
+    expect(signed.publicKey).toBe(KEY.getPublicKey().toString());
+    const bytes = Uint8Array.from(Buffer.from(signed.signature, 'base64'));
+    expect(KEY.getPublicKey().verify(nep413Hash(request), bytes)).toBe(true);
+    expect(chain.sent).toEqual([]);
+    expect(chain.statusReads()).toBe(0);
   });
 });

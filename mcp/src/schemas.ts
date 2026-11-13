@@ -10,7 +10,7 @@ import {
 } from '@ticket-escrow/client';
 import { z } from 'zod';
 
-// Inputs and outputs of the ten tools. Every one is a strict object: an unknown argument is an
+// Inputs and outputs of the eleven tools. Every one is a strict object: an unknown argument is an
 // error, not something silently ignored. Amounts are yoctoNEAR decimal strings, as in the contract.
 
 export const TOOL_NAMES = [
@@ -24,6 +24,7 @@ export const TOOL_NAMES = [
   'transfer_ticket',
   'expire_event',
   'claim_refund',
+  'show_entry_pass',
 ] as const;
 
 export type ToolName = (typeof TOOL_NAMES)[number];
@@ -72,6 +73,7 @@ export const INPUT = {
   }),
   expire_event: z.strictObject({ event_id: eventId }),
   claim_refund: z.strictObject({ token_id: tokenId }),
+  show_entry_pass: z.strictObject({ token_id: tokenId }),
 } as const satisfies Record<ToolName, z.ZodType>;
 
 const CallSchema = z.strictObject({
@@ -174,6 +176,24 @@ export const OUTPUT = {
   transfer_ticket: WriteResultSchema,
   expire_event: WriteResultSchema,
   claim_refund: WriteResultSchema,
+  show_entry_pass: z.strictObject({
+    /** The signed pass (`EntryPass` in the client package). */
+    pass: z.strictObject({
+      v: z.literal(1),
+      contract: AccountIdSchema,
+      ticket: TokenIdSchema,
+      account: AccountIdSchema,
+      publicKey: z.string(),
+      signature: z.string(),
+      nonce: z.string(),
+      issuedAtMs: z.int().min(0),
+    }),
+    /** The pass as the door reads it (base64url), for a QR code or `scripts/pass.mjs verify`. */
+    encoded: z.string(),
+    /** `<SITE_URL>/door#p=<pass>`, or null when SITE_URL is not set. */
+    door_url: z.string().nullable(),
+    expires_at_ms: z.int().min(0),
+  }),
 } as const satisfies Record<ToolName, z.ZodType>;
 
 export type ToolInput<N extends ToolName> = z.output<(typeof INPUT)[N]>;
