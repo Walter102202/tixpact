@@ -333,6 +333,18 @@ pub fn ticket_receiver_wasm() -> Vec<u8> {
     WASM.get_or_init(|| fixture_wasm("ticket-receiver")).clone()
 }
 
+/// The wasm of the plain NEP-141 token in `fixtures/test-token`.
+pub fn test_token_wasm() -> Vec<u8> {
+    static WASM: OnceLock<Vec<u8>> = OnceLock::new();
+    WASM.get_or_init(|| fixture_wasm("test-token")).clone()
+}
+
+/// The wasm of the misbehaving NEP-141 token in `fixtures/hostile-token`.
+pub fn hostile_token_wasm() -> Vec<u8> {
+    static WASM: OnceLock<Vec<u8>> = OnceLock::new();
+    WASM.get_or_init(|| fixture_wasm("hostile-token")).clone()
+}
+
 fn fixture_wasm(name: &str) -> Vec<u8> {
     let manifest = format!(
         "{}/../fixtures/{name}/Cargo.toml",
@@ -779,4 +791,341 @@ pub fn events_named(result: &ExecutionFinalResult, name: &str) -> Vec<Value> {
         .filter_map(|text| near_sdk::serde_json::from_str::<Value>(text).ok())
         .filter(|event| event["event"] == name)
         .collect()
+}
+
+// Tokens (plan v2, "Currencies"; fixtures `test-token` and `hostile-token`).
+
+/// `fixtures/test-token` as a dollar: symbol `tUSD`, 6 decimals.
+pub const TUSD_ID: &str = "tusd.sandbox";
+/// `fixtures/test-token` with 24 decimals, so that its amounts are as large as NEAR's and a mix-up
+/// between the two currencies shows in every number.
+pub const TEUR_ID: &str = "teur.sandbox";
+/// `fixtures/hostile-token`, symbol `HOST`, 18 decimals.
+pub const HOSTILE_ID: &str = "hostile.sandbox";
+/// A `fixtures/hostile-token` that no escrow lists.
+pub const UNLISTED_ID: &str = "unlisted.sandbox";
+
+/// Gas of the buyer's `ft_transfer_call`, as the client attaches it (`buyTicketWithToken`), in
+/// Tgas.
+pub const FT_TRANSFER_CALL_TGAS: u64 = 100;
+/// Gas of a plain call to a token (`ft_transfer`, `storage_deposit`, `faucet`), in Tgas.
+pub const TOKEN_CALL_TGAS: u64 = 30;
+/// NEAR attached to `storage_deposit`: more than any token's minimum; the token sends the rest
+/// back to the payer.
+pub const REGISTRATION_DEPOSIT: u128 = NEAR / 100;
+
+/// A NEP-141 token contract deployed in the sandbox.
+pub struct Token<'a> {
+    pub chain: &'a TestChain,
+    pub id: AccountId,
+}
+
+impl TestChain {
+    /// Deploys `fixtures/test-token` to `id` as `new(name, symbol, decimals)`.
+    pub async fn test_token(&self, id: &str, symbol: &str, decimals: u8) -> TestResult<Token<'_>> {
+        let args =
+            json!({ "name": format!("Test {symbol}"), "symbol": symbol, "decimals": decimals });
+        let account = self
+            .deploy_with_init(id, 10, test_token_wasm(), "new", args)
+            .await?;
+        Ok(Token {
+            chain: self,
+            id: account.0,
+        })
+    }
+
+    /// Deploys `fixtures/hostile-token` to `id` as `new(symbol, decimals)`, in mode `normal`.
+    pub async fn hostile_token(
+        &self,
+        id: &str,
+        symbol: &str,
+        decimals: u8,
+    ) -> TestResult<Token<'_>> {
+        let args = json!({ "symbol": symbol, "decimals": decimals });
+        let account = self
+            .deploy_with_init(id, 10, hostile_token_wasm(), "new", args)
+            .await?;
+        Ok(Token {
+            chain: self,
+            id: account.0,
+        })
+    }
+
+    /// Creates `id` with `near` NEAR, deploys `wasm` to it and calls its init method.
+    pub async fn deploy_with_init(
+        &self,
+        id: &str,
+        near: u128,
+        wasm: Vec<u8>,
+        method: &str,
+        args: Value,
+    ) -> TestResult<Account> {
+        let account = self.accounts(&[id], near).await?.remove(0);
+        Contract::deploy(account.0.clone())
+            .use_code(wasm)
+            .with_init_call(method, args)?
+            .with_signer(self.signer.clone())
+            .send_to(&self.network)
+            .await?
+            .assert_success();
+        Ok(account)
+    }
+}
+
+impl Token<'_> {
+    /// A view of the token.
+    pub async fn view<T: DeserializeOwned + Send + Sync>(
+        &self,
+        method: &str,
+        args: Value,
+    ) -> TestResult<T> {
+        Ok(Contract(self.id.clone())
+            .call_function(method, args)
+            .read_only()
+            .fetch_from(&self.chain.network)
+            .await?
+            .data)
+    }
+
+    /// `ft_balance_of`, in the token's smallest unit.
+    pub async fn balance_of(&self, account_id: &AccountId) -> TestResult<u128> {
+        let balance: String = self
+            .view("ft_balance_of", json!({ "account_id": account_id }))
+            .await?;
+        Ok(balance.parse()?)
+    }
+
+    /// Whether `account_id` is registered with the token (`storage_balance_of` is not null).
+    pub async fn is_registered(&self, account_id: &AccountId) -> TestResult<bool> {
+        let balance: Value = self
+            .view("storage_balance_of", json!({ "account_id": account_id }))
+            .await?;
+        Ok(!balance.is_null())
+    }
+
+    /// `payer` registers `account_id` with the token (`storage_deposit`, registration only).
+    pub async fn register(&self, payer: &Account, account_id: &AccountId) -> TestResult<()> {
+        let args = json!({ "account_id": account_id, "registration_only": true });
+        let deposit = NearToken::from_yoctonear(REGISTRATION_DEPOSIT);
+        self.call(payer, "storage_deposit", args, deposit, TOKEN_CALL_TGAS)
+            .await?
+            .assert_success();
+        Ok(())
+    }
+
+    /// `account` calls the test token's faucet; returns the amount minted.
+    pub async fn faucet(&self, account: &Account) -> TestResult<u128> {
+        let minted: String = self
+            .call(account, "faucet", json!({}), NO_DEPOSIT, TOKEN_CALL_TGAS)
+            .await?
+            .assert_success()
+            .json()?;
+        Ok(minted.parse()?)
+    }
+
+    /// The hostile token credits `amount` to a registered account (the call is open to anyone).
+    pub async fn mint(
+        &self,
+        signer: &Account,
+        account_id: &AccountId,
+        amount: u128,
+    ) -> TestResult<()> {
+        let args = json!({ "account_id": account_id, "amount": amount.to_string() });
+        self.call(signer, "mint", args, NO_DEPOSIT, TOKEN_CALL_TGAS)
+            .await?
+            .assert_success();
+        Ok(())
+    }
+
+    /// Switches the hostile token to `normal`, `fail`, `garbage` or `long`.
+    pub async fn set_mode(&self, signer: &Account, mode: &str) -> TestResult<()> {
+        let args = json!({ "mode": mode });
+        self.call(signer, "set_mode", args, NO_DEPOSIT, TOKEN_CALL_TGAS)
+            .await?
+            .assert_success();
+        Ok(())
+    }
+
+    /// A plain `ft_transfer` of `amount` from `from` to `to`, with 1 yoctoNEAR.
+    pub async fn transfer(
+        &self,
+        from: &Account,
+        to: &AccountId,
+        amount: u128,
+    ) -> TestResult<ExecutionFinalResult> {
+        let args = json!({ "receiver_id": to, "amount": amount.to_string(), "memo": null });
+        self.call(from, "ft_transfer", args, ONE_YOCTO, TOKEN_CALL_TGAS)
+            .await
+    }
+
+    /// `ft_transfer_call` of `amount` from `from` to `receiver` with `msg`, 1 yoctoNEAR and the
+    /// client's gas. The transaction succeeds even when the receiver rejects the tokens: the
+    /// token's resolver then sends them back, and returns `"0"` as the amount used.
+    pub async fn transfer_call(
+        &self,
+        from: &Account,
+        receiver: &AccountId,
+        amount: u128,
+        msg: &str,
+    ) -> TestResult<ExecutionFinalResult> {
+        let args = json!({
+            "receiver_id": receiver,
+            "amount": amount.to_string(),
+            "memo": null,
+            "msg": msg,
+        });
+        self.call(
+            from,
+            "ft_transfer_call",
+            args,
+            ONE_YOCTO,
+            FT_TRANSFER_CALL_TGAS,
+        )
+        .await
+    }
+
+    /// The hostile token calls `ft_on_transfer(sender_id, amount, msg)` on `receiver` without
+    /// moving any token. The transaction fails with the receiver's failure.
+    pub async fn forge_on_transfer(
+        &self,
+        signer: &Account,
+        receiver: &AccountId,
+        sender_id: &AccountId,
+        amount: u128,
+        msg: &str,
+    ) -> TestResult<ExecutionFinalResult> {
+        let args = json!({
+            "receiver_id": receiver,
+            "sender_id": sender_id,
+            "amount": amount.to_string(),
+            "msg": msg,
+        });
+        self.call(signer, "call_on_transfer", args, NO_DEPOSIT, 300)
+            .await
+    }
+
+    /// Signs and sends one function call to the token; returns its outcome whether it failed or
+    /// not.
+    pub async fn call(
+        &self,
+        signer: &Account,
+        method: &str,
+        args: Value,
+        deposit: NearToken,
+        tgas: u64,
+    ) -> TestResult<ExecutionFinalResult> {
+        self.chain
+            .call(signer, &self.id, method, args, deposit, tgas)
+            .await
+    }
+}
+
+/// One token movement: a NEP-141 `ft_transfer` event logged by a receipt of the token that
+/// succeeded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TokenMove {
+    pub from: String,
+    pub to: String,
+    pub amount: u128,
+}
+
+/// Every token movement `token` logged in a transaction, in log order. A receipt that failed
+/// moved nothing, so its logs are skipped.
+pub fn token_moves(result: &ExecutionFinalResult, token: &AccountId) -> Vec<TokenMove> {
+    result
+        .receipt_outcomes()
+        .iter()
+        .filter(|outcome| &outcome.executor_id == token && outcome.is_success())
+        .flat_map(|outcome| outcome.logs.clone())
+        .filter_map(|line| {
+            let text = line.strip_prefix("EVENT_JSON:")?;
+            near_sdk::serde_json::from_str::<Value>(text).ok()
+        })
+        .filter(|event| event["standard"] == "nep141" && event["event"] == "ft_transfer")
+        .flat_map(|event| event["data"].as_array().cloned().unwrap_or_default())
+        .map(|data| TokenMove {
+            from: data["old_owner_id"].as_str().unwrap_or("").to_string(),
+            to: data["new_owner_id"].as_str().unwrap_or("").to_string(),
+            amount: data["amount"]
+                .as_str()
+                .and_then(|text| text.parse().ok())
+                .unwrap_or_else(|| panic!("ft_transfer event without an amount: {data}")),
+        })
+        .collect()
+}
+
+/// One function call found among a transaction's receipts.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Call {
+    pub receiver: String,
+    pub method: String,
+    pub args: Value,
+    pub deposit: u128,
+    pub succeeded: bool,
+}
+
+impl TestChain {
+    /// Every function call that `sender` made in a transaction's receipt tree, with whether its
+    /// receipt succeeded. The arguments are parsed as JSON (`null` when they are not JSON).
+    pub async fn calls_from(
+        &self,
+        result: &ExecutionFinalResult,
+        sender: &AccountId,
+    ) -> TestResult<Vec<Call>> {
+        use near_sdk::base64::Engine;
+        let mut calls = Vec::new();
+        for outcome in result.receipt_outcomes() {
+            let receipt = near_api::Transaction::receipt(outcome.transaction_hash)
+                .fetch_from(&self.network)
+                .await?;
+            let receipt = near_sdk::serde_json::to_value(&receipt)?;
+            if receipt["predecessor_id"] != sender.as_str() {
+                continue;
+            }
+            let actions = receipt["receipt"]["Action"]["actions"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            for action in actions {
+                let call = &action["FunctionCall"];
+                let Some(method) = call["method_name"].as_str() else {
+                    continue;
+                };
+                let args = call["args"]
+                    .as_str()
+                    .and_then(|text| {
+                        near_sdk::base64::engine::general_purpose::STANDARD
+                            .decode(text)
+                            .ok()
+                    })
+                    .and_then(|bytes| near_sdk::serde_json::from_slice(&bytes).ok())
+                    .unwrap_or(Value::Null);
+                calls.push(Call {
+                    receiver: receipt["receiver_id"].as_str().unwrap_or("").to_string(),
+                    method: method.to_string(),
+                    args,
+                    deposit: call["deposit"]
+                        .as_str()
+                        .and_then(|text| text.parse().ok())
+                        .unwrap_or_else(|| panic!("a function call without a deposit: {call}")),
+                    succeeded: outcome.is_success(),
+                });
+            }
+        }
+        Ok(calls)
+    }
+}
+
+/// The value a transaction's last receipt on `executor` returned, as raw bytes.
+pub fn value_returned_by(result: &ExecutionFinalResult, executor: &AccountId) -> Option<Vec<u8>> {
+    use near_api::types::transaction::result::ValueOrReceiptId;
+    result
+        .receipt_outcomes()
+        .iter()
+        .filter(|outcome| &outcome.executor_id == executor)
+        .filter_map(|outcome| match outcome.clone().into_result() {
+            Ok(ValueOrReceiptId::Value(value)) => value.raw_bytes().ok(),
+            _ => None,
+        })
+        .next_back()
 }

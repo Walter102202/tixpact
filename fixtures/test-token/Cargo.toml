@@ -1,0 +1,19 @@
+[package]
+name = "test-token"
+description = "A plain NEP-141 token with storage management and a faucet, for the sandbox tests and for testnet."
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = { workspace = true }
+near-contract-standards = { workspace = true }
+
+[lints]
+workspace = true
