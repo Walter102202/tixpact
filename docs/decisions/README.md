@@ -48,7 +48,7 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-12 | Token metadata is derived from the event, not stored per ticket | `2026-11-12-token-metadata-derived-from-the-event.md` |
 | 2026-11-12 | Error codes and behaviour for the cases the frozen interface does not name | `2026-11-12-codes-for-cases-the-interface-does-not-name.md` |
 | 2026-11-12 | The liquidity check runs after the reservation is written | `2026-11-12-liquidity-check-after-the-reservation.md` |
-| 2026-11-13 | `nft_transfer_call` needs 50 Tgas; `t13` holds the transfer open with a receiver that waits for `release` | `2026-11-13-transfer-call-minimum-gas-and-held-receiver.md` |
+| 2026-11-13 | `nft_transfer_call` has a minimum gas (50 Tgas then, 70 Tgas since the resolver record below); `t13` holds the transfer open with a receiver that waits for `release` | `2026-11-13-transfer-call-minimum-gas-and-held-receiver.md` |
 | 2026-11-12 | The agent's exposure counts money still in the contract plus purchases not yet visible; writes run one at a time | `2026-11-12-agent-exposure-and-one-write-at-a-time.md` |
 | 2026-11-12 | Agent writes return one of five statuses; the chain is checked before the policy | `2026-11-12-agent-write-results-and-checks.md` |
 | 2026-11-12 | The agent's configuration fails closed, and the policy also bounds gas and deposits | `2026-11-12-agent-config-fails-closed.md` |

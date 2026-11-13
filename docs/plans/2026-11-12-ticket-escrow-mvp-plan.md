@@ -340,7 +340,7 @@ Standard `ticket_escrow`, version `1.0.0`: `event_created`, `verification_accept
 
 ### Gas
 
-Client side, one source in `packages/client/src/actions.ts`: `create_event` 30 Tgas, `accept_verification` 30, `buy_ticket` 50, `cancel_event` 30, `attest_completed` 30, `expire_event` 30, `claim_refund` 100, `claim_payout` 100, `nft_transfer` 30, `nft_transfer_call` 150. Contract side, initial values that Task C4 replaces with measured ones: callback static gas 15 Tgas, resolver static gas 20 Tgas, `GAS_CLAIM_MIN` 60 Tgas.
+Client side, one source in `packages/client/src/actions.ts`: `create_event` 30 Tgas, `accept_verification` 30, `buy_ticket` 50, `cancel_event` 30, `attest_completed` 30, `expire_event` 30, `claim_refund` 100, `claim_payout` 100, `nft_transfer` 30, `nft_transfer_call` 150. Contract side, measured in Task C4 (`docs/gas.md`): callback static gas 15 Tgas, resolver static gas 40 Tgas, `GAS_CLAIM_MIN` 40 Tgas, `GAS_TRANSFER_CALL_MIN` 70 Tgas. (The initial values were 15, 20 and 60.)
 
 ---
 
