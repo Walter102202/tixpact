@@ -3,13 +3,16 @@ import {
   acceptVerification,
   attestCompleted,
   buyTicket,
+  buyTicketWithToken,
   type ContractCall,
   cancelEvent,
   claimPayout,
   claimRefund,
   createEvent,
   expireEvent,
+  faucet,
   GAS_TGAS,
+  registerWithToken,
   transferTicket,
 } from './actions.js';
 
@@ -131,5 +134,62 @@ describe('action builders', () => {
     const first = buyTicket(1, PRICE);
     (first.args as { event_id: number }).event_id = 2;
     expect(buyTicket(1, PRICE).args).toEqual({ event_id: 1 });
+  });
+});
+
+describe('token builders (interface v2)', () => {
+  const CONTRACT = 'ticket-escrow.testnet';
+  const TOKEN = 'tusd.testnet';
+  const tokenEvent = { event_id: 10, price: '10000000', currency: TOKEN };
+
+  it('buy a ticket with ft_transfer_call on the event token: exact price, the event id as message', () => {
+    expect(buyTicketWithToken(CONTRACT, tokenEvent)).toEqual({
+      receiverId: TOKEN,
+      methodName: 'ft_transfer_call',
+      args: { receiver_id: CONTRACT, amount: '10000000', memo: null, msg: '{"event_id":10}' },
+      deposit: '1',
+      gas: tgas(100),
+    });
+  });
+
+  it('refuse to buy an event priced in NEAR through a token', () => {
+    expect(() => buyTicketWithToken(CONTRACT, { ...tokenEvent, currency: null })).toThrow(
+      /priced in NEAR/,
+    );
+  });
+
+  it('register an account with a token, registration only, paying the given deposit', () => {
+    expect(registerWithToken(TOKEN, 'sofia.testnet', '1250000000000000000000')).toEqual({
+      receiverId: TOKEN,
+      methodName: 'storage_deposit',
+      args: { account_id: 'sofia.testnet', registration_only: true },
+      deposit: '1250000000000000000000',
+      gas: tgas(30),
+    });
+  });
+
+  it('ask the test token for its faucet with no deposit', () => {
+    expect(faucet(TOKEN)).toEqual({
+      receiverId: TOKEN,
+      methodName: 'faucet',
+      args: {},
+      deposit: '0',
+      gas: tgas(30),
+    });
+  });
+
+  it('refuse malformed accounts, amounts and event ids', () => {
+    expect(() => buyTicketWithToken('Not An Account', tokenEvent)).toThrow();
+    expect(() => buyTicketWithToken(CONTRACT, { ...tokenEvent, price: '10.5' })).toThrow();
+    expect(() => buyTicketWithToken(CONTRACT, { ...tokenEvent, event_id: 0 })).toThrow();
+    expect(() => buyTicketWithToken(CONTRACT, { ...tokenEvent, currency: 'Bad Token' })).toThrow();
+    expect(() => registerWithToken(TOKEN, 'sofia.testnet', '-1')).toThrow();
+    expect(() => registerWithToken(TOKEN, 'Sofia', '1')).toThrow();
+    expect(() => faucet('not a token')).toThrow();
+  });
+
+  it('leave the escrow calls without a receiver, so they still go to the contract', () => {
+    expect('receiverId' in buyTicket(1, PRICE)).toBe(false);
+    expect('receiverId' in claimRefund('1-3')).toBe(false);
   });
 });
