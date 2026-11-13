@@ -469,7 +469,7 @@ Needs Walter's go for three things: installing the Rust toolchain in his WSL, cr
 
 ## Track W — client package and web (`packages/client/`, `web/`)
 
-**Revision note.** Filled by the integrator at the end of Phase 0.
+**Revision note (2026-11-12, scaffold on `main`).** Worktree `.claude/worktrees/w`, branch `track/w`. Check command: `pnpm install --frozen-lockfile && pnpm lint && pnpm typecheck && pnpm test && pnpm build`; expected on the scaffold: lint checks 23 files, 1 test file with 2 tests, the web build writes `web/dist`. Already pinned by the scaffold: `zod` 4.6.7 and `near-api-js` 7.5.3 in `packages/client`; React 19.3.1, Vite 8.3.8, `@vitejs/plugin-react` 6.3.0, `@hot-labs/near-connect` 0.12.0 and `util` 0.12.5 in `web`. `packages/client/src/{brand,index}.ts` and `web/src/{main,App}.tsx` are placeholders to build on. Testing Library and jsdom are not installed: add them pinned in Task W1. No remote yet: commit locally.
 
 **Read first for this track:** the Frozen interface; the `near-api-js` and `near-dapp` skills; the Vite React template of `create-near-app` (`templates/frontend/vite-react`, file `src/providers/near-provider.tsx`) for the wallet wiring; Walter's `landing-estilo-hosli` skill for the default look of the landing page, and `frontend-design`.
 
