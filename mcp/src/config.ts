@@ -29,6 +29,8 @@ export interface AgentConfig {
   caps: Caps | null;
   /** Whether `AGENT_PRIVATE_KEY` is set. Without it every write tool is denied. */
   hasKey: boolean;
+  /** Where the web app is served (`SITE_URL`): `show_entry_pass` then gives the door link. */
+  siteUrl?: string | null;
 }
 
 export type Env = Readonly<Record<string, string | undefined>>;
@@ -130,7 +132,34 @@ export function loadConfig(env: Env): AgentConfig {
       ? null
       : { maxPriceYocto: maxPrice, maxExposureYocto: maxExposure };
 
-  return { network: 'testnet', contractId, rpcUrls, agentAccountId, caps, hasKey };
+  return {
+    network: 'testnet',
+    contractId,
+    rpcUrls,
+    agentAccountId,
+    caps,
+    hasKey,
+    siteUrl: site(env),
+  };
+}
+
+/** The web app's address, for door links: https, or http on this machine while developing. */
+function site(env: Env): string | null {
+  const raw = value(env, 'SITE_URL');
+  if (raw === undefined) return null;
+  let url: URL | null = null;
+  try {
+    url = new URL(raw);
+  } catch {
+    url = null;
+  }
+  const local = url?.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname);
+  if (url === null || !(url.protocol === 'https:' || local)) {
+    throw new ConfigError(
+      'SITE_URL must be an https URL (or http://localhost) where the web app is served.',
+    );
+  }
+  return raw;
 }
 
 /**

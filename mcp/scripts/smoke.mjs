@@ -16,7 +16,7 @@ import {
   StdioClientTransport,
 } from '@modelcontextprotocol/sdk/client/stdio.js';
 
-const EXPECTED_TOOLS = 10;
+const EXPECTED_TOOLS = 11;
 const PASSED_ON = [
   'NEAR_NETWORK',
   'CONTRACT_ID',
@@ -25,6 +25,7 @@ const PASSED_ON = [
   'AGENT_PRIVATE_KEY',
   'MAX_PRICE_YOCTO',
   'MAX_EXPOSURE_YOCTO',
+  'SITE_URL',
 ];
 
 const entry = fileURLToPath(new URL('../dist/bin/serve.js', import.meta.url));

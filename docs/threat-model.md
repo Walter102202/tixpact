@@ -80,6 +80,34 @@ A previous holder, the current holder, a buyer, the organizer, the verifier, a c
 |---|---|---|---|---|
 | K1 | Replace the code, or delete the account and keep its balance | The final deployment has no access keys, and the code has no owner, admin or upgrade method | R10 | `scripts/verify-deployment.mjs` (T23) |
 
+## Entry pass
+
+A pass moves no money, so it is outside the rules above; this section says what it proves and what it does not. A pass is a NEP-413 message signed by the holder's wallet: `Entry pass`, the contract, the ticket and the time it was signed, with the contract as the NEP-413 recipient and the time again in the first 8 bytes of the nonce. Nothing is sent to the chain or to a server. The door page (`/door`) and `node scripts/pass.mjs verify` run the same five checks (`checkPass`, `packages/client/src/pass.ts`), reading the chain at `final` at the moment of the scan.
+
+**What an admitted pass proves:** within the last five minutes, someone who controls a full-access key of the account named in the pass signed this message for this contract and this ticket; and right now that account holds the ticket, which is active and not refunded. It does not prove who is standing at the door.
+
+| # | Attack | What stops it | Check | Test (`packages/client/src/pass.test.ts`) |
+|---|---|---|---|---|
+| E1 | Change the ticket, the time or the nonce of a pass | The signature is verified over the message rebuilt from the pass, and the nonce must start with the time | `signature` | "fails the signature when the ticket in the message changes", "… the time of issue changes", "… the nonce changes", "… the signature changes" |
+| E2 | Show a pass made for a look-alike contract | The door rebuilds the message with its own contract as the recipient; a pass naming another contract fails | `signature` | "fails the signature when the recipient changes", "… names another contract than the door checks" |
+| E3 | Put another account's name on someone's pass | NEP-413 does not sign the account; the signing key must be a full-access key of the account named, read on chain | `key` | "fails the key, not the signature, when the account changes" |
+| E4 | Sell or give the ticket away, then still use a pass signed before | The holder is read at the scan, not at signing | `holder` | "holder: the ticket was transferred after the pass was signed" |
+| E5 | Use a ticket that was refunded or is being refunded | The ticket must be `Active` and its claim not `Refunded` | `ticket` | "ticket: the ticket was refunded", "ticket: a refund or a transfer to a contract is in flight" |
+| E6 | Sign with a key that was deleted, for example after a phone was lost | The access key is read at the scan; a deleted key fails | `key` | "key: the key was deleted after signing" |
+| E7 | Sign with a function-call key, which apps the holder signed into may hold | Only a full-access key speaks for the account (as NEP-413 says) | `key` | "key: a function-call key signed it" |
+| E8 | Replay an old pass | A pass admits for five minutes after signing, and one dated more than a minute ahead of the checking device is refused | `fresh` | "fresh: a pass six minutes old", "fresh: a pass dated two minutes ahead of this device", "fresh: the edges are inclusive" |
+| E9 | Scan while the RPC is down or answers garbage | A read that fails fails the checks that need it; the verdict is "Do not admit" | all | "a chain that cannot be read fails the checks it answers, and still returns all five" |
+
+The signature step accepts the known-answer vector signed by near-cli-rs 0.31.1, not by this code ("admits the pass when the chain agrees"), and the hash matches what near-api-js signs ("is the hash near-api-js signs for a NEP-413 message").
+
+What a pass does not stop:
+
+1. **A screenshot or link shared within five minutes.** Whoever shows it is admitted, on any device that has not seen it. On the device that admitted it first, the second scan reads "Already admitted on this device at …". Five minutes is the window.
+2. **No record of admissions shared between devices.** "Already admitted" lives in that browser's storage only. Two entrances with two devices could each admit the same ticket within the window, and clearing the browser's data forgets it. A shared record needs a server or a transaction at the door, which this design does not have.
+3. **The attendant's clock.** Freshness is judged by the checking device's clock. A clock far ahead turns valid passes into "expired"; a clock far behind accepts passes older than five minutes. The sentence a failed `fresh` check shows tells the attendant to check the clock.
+4. **A key deleted after the scan.** The checks hold at the moment of the scan, not after it.
+5. **A hostile copy of the door page, or a lying RPC endpoint.** Either can say "Admit" for anything. The attendant must use the real site; `scripts/pass.mjs verify` with an RPC of one's choice is an independent check (Limit 7 below).
+
 ## Limits
 
 What this design does not solve. The README repeats these in plain words.
@@ -94,4 +122,4 @@ What this design does not solve. The README repeats these in plain words.
 6. **Until the keys are deleted.** Before the final deployment the deployer's key can change the code. The proof page and `scripts/verify-deployment.mjs` show the key list so anyone can check it is empty.
 7. **The web is not the contract.** A hostile copy of the site could show false states. Every claim can be checked without the site: `scripts/direct-calls.sh` runs the whole flow from the command line, and each screen links to the explorer.
 8. **Not audited, testnet only.** The storage and gas constants are measured, not proven, and protocol parameters can change.
-9. **Out of scope.** Entry control at the venue, proof that a holder attended, resale price limits and identity checks.
+9. **Out of scope.** Proof that a holder attended, resale price limits and identity checks. Entry control is only the five-minute pass above ("Entry pass"), with its own limits.

@@ -16,6 +16,23 @@ export {
   TX_FIXTURES,
 } from './fixtures.js';
 export { CLAIM_LABELS, formatDateTime, formatNear, PHASE_LABELS, parseNear } from './format.js';
+export type { EntryPass, PassChain, PassCheck, PassRequest, PassRpc } from './pass.js';
+export {
+  checkPass,
+  createPassChain,
+  decodePass,
+  demoPassKey,
+  doorUrl,
+  encodePass,
+  nep413Hash,
+  PASS_SKEW_MS,
+  PASS_TTL_MS,
+  passMessage,
+  passNonce,
+  passRequest,
+  signedPass,
+  signPassWithKey,
+} from './pass.js';
 export type {
   AccountProof,
   CallFunctionParams,

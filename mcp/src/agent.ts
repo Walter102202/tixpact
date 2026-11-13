@@ -15,6 +15,7 @@ import {
 } from '@ticket-escrow/client';
 import { type AgentConfig, ConfigError } from './config.js';
 import { near, when } from './format.js';
+import { showEntryPass } from './pass.js';
 import { evaluate, exposureOf, isExposedClaim, type Policy } from './policy.js';
 import {
   MAX_PAGE,
@@ -57,6 +58,8 @@ export interface Agent {
   transferTicket(input: ToolInput<'transfer_ticket'>): Promise<WriteResult>;
   expireEvent(input: ToolInput<'expire_event'>): Promise<WriteResult>;
   claimRefund(input: ToolInput<'claim_refund'>): Promise<WriteResult>;
+  /** Signs an entry pass for a ticket the agent holds; signs no transaction (pass.ts). */
+  showEntryPass(input: ToolInput<'show_entry_pass'>): Promise<ToolOutput<'show_entry_pass'>>;
 }
 
 const NO_KEY =
@@ -631,5 +634,7 @@ export function createAgent(deps: AgentDeps): Agent {
         );
       });
     },
+
+    showEntryPass: (input) => showEntryPass(deps, input),
   };
 }

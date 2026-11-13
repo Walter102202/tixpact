@@ -10,6 +10,7 @@ import {
   formatWallet,
   formatWrite,
 } from './format.js';
+import { formatEntryPass } from './pass.js';
 import { type Redact, redactDeep } from './redact.js';
 import { INPUT, OUTPUT, TOOL_NAMES, type ToolName } from './schemas.js';
 
@@ -89,6 +90,13 @@ const TOOL_META: Record<ToolName, ToolMeta> = {
     readOnly: false,
     destructive: false,
   },
+  show_entry_pass: {
+    title: 'Show entry pass',
+    description:
+      "Sign a five-minute entry pass for a ticket the agent holds, to show at the door: a NEP-413 message signed with the agent's key, plus the door link when SITE_URL is set. It signs no transaction and sends nothing to the chain. Refused for a ticket the agent does not hold or that was refunded.",
+    readOnly: true,
+    destructive: false,
+  },
 };
 
 /** Generic in the name, so the SDK infers each tool's own argument type from its schema. */
@@ -112,7 +120,7 @@ function meta<N extends ToolName>(name: N) {
   };
 }
 
-/** Registers the ten tools, in `TOOL_NAMES` order, over one agent. */
+/** Registers the eleven tools, in `TOOL_NAMES` order, over one agent. */
 export function registerTools(
   server: McpServer,
   agent: Agent,
@@ -193,6 +201,12 @@ export function registerTools(
     guarded(async () => {
       const output = await agent.claimRefund(input);
       return result(formatWrite(output), output);
+    }),
+  );
+  server.registerTool('show_entry_pass', meta('show_entry_pass'), async (input) =>
+    guarded(async () => {
+      const output = await agent.showEntryPass(input);
+      return result(formatEntryPass(output), output);
     }),
   );
 }
