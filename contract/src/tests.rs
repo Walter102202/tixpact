@@ -1414,6 +1414,8 @@ struct TokenPayment {
     args: near_sdk::serde_json::Value,
     deposit: u128,
     gas: near_sdk::Gas,
+    /// The share of unused gas the token gets.
+    weight: u64,
     callback: String,
 }
 
@@ -1427,6 +1429,7 @@ fn token_payment() -> TokenPayment {
         args,
         attached_deposit,
         prepaid_gas,
+        gas_weight,
         ..
     } = &receipts[0].actions[0]
     else {
@@ -1446,6 +1449,7 @@ fn token_payment() -> TokenPayment {
         args: near_sdk::serde_json::from_slice(args).expect("JSON arguments"),
         deposit: attached_deposit.as_yoctonear(),
         gas: *prepaid_gas,
+        weight: gas_weight.0,
         callback: String::from_utf8(callback.clone()).expect("UTF-8"),
     }
 }
@@ -1462,6 +1466,7 @@ fn a_token_refund_is_an_ft_transfer_of_the_principal_with_one_yocto() {
     assert_eq!(payment.args, expected);
     assert_eq!(payment.deposit, 1);
     assert_eq!(payment.gas, GAS_FT_TRANSFER);
+    assert_eq!(payment.weight, 0, "the token gets exactly its static gas");
     assert_eq!(payment.callback, "on_refund_result");
 
     let ticket = contract
@@ -1533,6 +1538,7 @@ fn a_token_payout_goes_to_the_organizer_and_its_failure_restores_it() {
     assert_eq!(payment.args["receiver_id"], ORGANIZER);
     assert_eq!(payment.args["amount"], TOKEN_PRICE.to_string());
     assert_eq!((payment.deposit, payment.gas), (1, GAS_FT_TRANSFER));
+    assert_eq!(payment.weight, 0);
     assert_eq!(payment.callback, "on_payout_result");
     assert_eq!(contract.total_held, 0);
 

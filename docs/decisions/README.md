@@ -75,3 +75,4 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | The ticket's metadata is derived when read: the web's claim words, a title cut at 26 characters, escaped text, an image under 2 KB | `2026-11-13-the-ticket-draws-its-state.md` |
 | 2026-11-13 | Token payments go through the v1 reserve-first path with `ft_transfer`; `ft_on_transfer` checks its caller first; a token claim needs 60 Tgas; a listed token is trusted | `2026-11-13-token-payments-share-the-settlement-path.md` |
 | 2026-11-13 | A payment whose receipt succeeded settles whatever the token answers: callbacks read the answer bounded at 0 bytes and restore only on a confirmed failure | `2026-11-13-a-payment-that-went-through-settles.md` |
+| 2026-11-13 | A token's `ft_transfer` gets exactly 20 Tgas (no share of unused gas, which bounds its answer); a token claim needs 60 Tgas | `2026-11-13-the-token-gets-exactly-its-static-gas.md` |
