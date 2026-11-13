@@ -72,3 +72,4 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | The landing states the problem and plays the refund: motion decided at mount, sticky floating header, fixed event columns | `2026-11-13-web-landing-problem-and-motion.md` |
 | 2026-11-13 | The release goes to a clean account, `ticket-escrow.testnet`, with the same wasm; its key is deleted only with Walter present | `2026-11-13-the-release-goes-to-a-clean-account.md` |
 | 2026-11-13 | The token list given to `new` is checked strictly (`ERR_LIMIT` over 4, `ERR_INVALID_TERMS` otherwise); the currency is stored once, in the event | `2026-11-13-token-list-checks-at-new.md` |
+| 2026-11-13 | The ticket's metadata is derived when read: the web's claim words, a title cut at 26 characters, escaped text, an image under 2 KB | `2026-11-13-the-ticket-draws-its-state.md` |

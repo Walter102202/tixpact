@@ -29,6 +29,19 @@ pub struct TokenSpec {
     pub decimals: u8,
 }
 
+/// The unit an amount is written in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Unit<'a> {
+    pub symbol: &'a str,
+    pub decimals: u8,
+}
+
+/// NEAR, counted in yoctoNEAR.
+pub const NEAR: Unit<'static> = Unit {
+    symbol: "NEAR",
+    decimals: 24,
+};
+
 /// Checks the token list given to `new`. Changes nothing.
 pub fn validate_tokens(tokens: &[TokenSpec]) {
     ensure(
@@ -75,5 +88,25 @@ impl Contract {
         self.currencies
             .iter()
             .find(|token| &token.account_id == account_id)
+    }
+
+    /// The unit amounts of `currency` are written in: NEAR for `None`, the listed token
+    /// otherwise. `create_event` accepts no other currency, so the last case cannot happen; if
+    /// it did, the amount would be written in smallest units next to the token account, which is
+    /// still true.
+    pub(crate) fn unit_of<'a>(&'a self, currency: Option<&'a AccountId>) -> Unit<'a> {
+        match currency {
+            None => NEAR,
+            Some(account_id) => self.token_spec(account_id).map_or(
+                Unit {
+                    symbol: account_id.as_str(),
+                    decimals: 0,
+                },
+                |token| Unit {
+                    symbol: &token.symbol,
+                    decimals: token.decimals,
+                },
+            ),
+        }
     }
 }

@@ -1472,7 +1472,9 @@ async fn t32_metadata_follows_the_state() -> TestResult {
             Some(TUSD_ID)
         )
     );
-    assert!(refundable.svg.contains("Refundable"), "{}", refundable.svg);
+    // The drawing names each claim with the web's word (`Claimable`, `Sending`, ...): lane C2's
+    // reading of "the claim word" (`docs/decisions/2026-11-13-the-ticket-draws-its-state.md`).
+    assert!(refundable.svg.contains("Claimable"), "{}", refundable.svg);
     assert_ne!(refundable.svg, reserved.svg);
 
     // Refunded.
@@ -1519,11 +1521,7 @@ async fn t32_metadata_follows_the_state() -> TestResult {
             Some(TEUR_ID)
         )
     );
-    assert!(
-        on_its_way.svg.contains("RefundPending"),
-        "{}",
-        on_its_way.svg
-    );
+    assert!(on_its_way.svg.contains("Sending"), "{}", on_its_way.svg);
 
     // ReleasedToOrganizer.
     chain.advance_to(times[1]).await?;
@@ -1549,7 +1547,7 @@ async fn t32_metadata_follows_the_state() -> TestResult {
         )
     );
     assert!(
-        released.svg.contains("ReleasedToOrganizer"),
+        released.svg.contains("Released to the organizer"),
         "{}",
         released.svg
     );
