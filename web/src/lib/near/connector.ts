@@ -1,5 +1,6 @@
 import { NearConnector } from '@hot-labs/near-connect';
 import type { SentTx, WalletPort } from './wallet';
+import { toConnectorAction, txHashFromOutcome } from './walletOutcome';
 
 // The live wallet: NEAR Connect 0.12.0 without the function-call-key plugin (plan, Track W).
 // Every payable call goes through the wallet's own approval.
@@ -48,27 +49,13 @@ export function createNearConnectWallet({ contractId, rpcUrls }: ConnectorOption
       const signerId = accountId;
       if (signerId === null) throw new Error('Sign in first.');
       const wallet = await connector.wallet();
-      const outcome = await wallet.signAndSendTransaction({
+      const outcome: unknown = await wallet.signAndSendTransaction({
         signerId,
         receiverId: contractId,
-        actions: [
-          {
-            type: 'FunctionCall',
-            params: {
-              methodName: call.methodName,
-              args: call.args,
-              gas: call.gas,
-              deposit: call.deposit,
-            },
-          },
-        ],
+        actions: [toConnectorAction(call)],
       });
       // The wallet's outcome is not proof of anything; only its hash is used, to re-read the chain.
-      const txHash = outcome.transaction_outcome?.id;
-      if (typeof txHash !== 'string' || txHash === '') {
-        throw new Error('The wallet did not return a transaction hash.');
-      }
-      return { txHash, signerId };
+      return { txHash: txHashFromOutcome(outcome), signerId };
     },
   };
 }

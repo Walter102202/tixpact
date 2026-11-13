@@ -5,7 +5,7 @@ import { useWallet } from '../../lib/near/useWallet';
 import { Link } from '../../lib/router';
 import { TxStatus } from '../../ui/TxStatus';
 import type { EventData } from './EventPage';
-import { buyBlockedReason, near } from './eventCopy';
+import { buyBlockedReason, nearExact } from './eventCopy';
 
 export function BuyPanel({
   data,
@@ -21,13 +21,15 @@ export function BuyPanel({
   const tx = useTx();
   const reasonId = useId();
   const reason = buyBlockedReason(event);
-  const label = `Buy for ${near(event.price)}`;
+  const label = `Buy for ${nearExact(event.price)}`;
 
   function buy() {
     void tx.run(actions.buyTicket(event.event_id, event.price), {
       before: data,
       read: reread,
       apply,
+      // What a purchase changes; the view's clock (now_ms) moves on every block.
+      key: (d) => [d.event.sold, d.accounting],
     });
   }
 
@@ -61,8 +63,8 @@ export function BuyPanel({
           {label}
         </button>
         <p className="muted">
-          {near(event.price)} goes to the contract, not to the organizer, and stays reserved for
-          whoever holds the ticket.
+          {nearExact(event.price)} goes to the contract, not to the organizer, and stays reserved
+          for whoever holds the ticket.
         </p>
       </>
     );
@@ -75,19 +77,25 @@ export function BuyPanel({
         tx={tx}
         failureTitle="The payment did not complete."
         failureNote="A rejected purchase returns the deposit to your account."
-        success={(result) => (
-          <Bought tokenId={typeof result.value === 'string' ? result.value : null} />
+        success={(result, signerId) => (
+          <Bought
+            tokenId={typeof result.value === 'string' ? result.value : null}
+            holder={signerId}
+          />
         )}
       />
     </section>
   );
 }
 
-function Bought({ tokenId }: { tokenId: string | null }) {
+/** Names the account that signed, captured at the click, not whoever is signed in now. */
+function Bought({ tokenId, holder }: { tokenId: string | null; holder: string }) {
   if (tokenId === null) return <p>The purchase went through.</p>;
   return (
     <>
-      <p>You hold ticket {tokenId}.</p>
+      <p>
+        {holder} holds ticket {tokenId}.
+      </p>
       <Link to={`/tickets/${tokenId}`}>Open ticket {tokenId}</Link>
     </>
   );

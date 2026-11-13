@@ -93,7 +93,13 @@ function VerifyDetails({
   function send(action: VerifierAction, call: ContractCall) {
     setConfirming(null);
     setSent(action);
-    void tx.run(call, { before: data, read: reread, apply });
+    void tx.run(call, {
+      before: data,
+      read: reread,
+      apply,
+      // What a verifier decision changes; the view's clock (now_ms) moves on every block.
+      key: ({ event: e }) => [e.verifier_accepted, e.outcome, e.outcome_reason, e.evidence_ref],
+    });
   }
 
   /** Checks the optional reference and opens the confirmation step. */

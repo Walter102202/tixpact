@@ -1,4 +1,5 @@
-import { AccountIdSchema, type Config, type EventTerms, parseNear } from '@ticket-escrow/client';
+import { type Config, type EventTerms, parseNear } from '@ticket-escrow/client';
+import { testnetAccountError } from '../../lib/accounts';
 import { tooLong } from '../../lib/text';
 
 export const FIELDS = [
@@ -84,8 +85,9 @@ export function checkTerms(
   }
 
   const verifier = values['Verifier account'].trim();
-  if (!AccountIdSchema.safeParse(verifier).success) {
-    errors['Verifier account'] = 'That is not a valid NEAR account id.';
+  const invalidVerifier = testnetAccountError(verifier);
+  if (invalidVerifier !== null) {
+    errors['Verifier account'] = invalidVerifier;
   } else if (verifier === organizer) {
     errors['Verifier account'] = 'The verifier must be another account, not you.';
   }

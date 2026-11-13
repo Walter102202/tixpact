@@ -13,7 +13,7 @@ import { useLoad } from '../../lib/useLoad';
 import { useServices } from '../../services';
 import { LoadState } from '../../ui/LoadState';
 import { TxStatus } from '../../ui/TxStatus';
-import { near } from '../events/eventCopy';
+import { near, nearExact } from '../events/eventCopy';
 
 interface OrganizedEvent {
   event: EventView;
@@ -101,10 +101,16 @@ function OrganizedRow({
         className="btn"
         onClick={() => {
           setAsked(available.toString());
-          void tx.run(actions.claimPayout(event.event_id), { before: row, read: reread, apply });
+          void tx.run(actions.claimPayout(event.event_id), {
+            before: row,
+            read: reread,
+            apply,
+            // What a payout changes; the event view's clock (now_ms) moves on every block.
+            key: (r) => r.accounting,
+          });
         }}
       >
-        Collect {near(available.toString())} to {organizer}
+        Collect {nearExact(available.toString())} to {organizer}
       </button>
     );
   } else if (event.outcome === 'Unresolved') {

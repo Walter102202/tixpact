@@ -1,5 +1,6 @@
 import {
   actions,
+  CLAIM_LABELS,
   canClaimRefund,
   type EventView,
   formatDateTime,
@@ -8,6 +9,7 @@ import {
   type TicketHistory,
   type TicketView,
   TokenIdSchema,
+  type TxResult,
 } from '@ticket-escrow/client';
 import { useState } from 'react';
 import { useTx } from '../../lib/near/useTx';
@@ -86,7 +88,8 @@ function moneyFact(ticket: TicketView): string {
     case 'Refunded':
       return 'Refunded';
     case 'ReleasedToOrganizer':
-      return 'Paid to the organizer';
+      // Released is not paid: the organizer may not have collected yet (R11).
+      return CLAIM_LABELS.ReleasedToOrganizer;
   }
 }
 
@@ -153,16 +156,17 @@ function TicketDetails({ data, reread, apply }: { data: TicketData } & Reread) {
             signedIn={accountId !== null}
             busy={busy}
             tx={claimTx}
-            refresh={{ before: data, read: reread, apply }}
+            refresh={{ before: data, read: reread, apply, key: ticketKey }}
           />
           <TxStatus
             tx={claimTx}
             failureTitle="The payment did not complete."
             failureNote="The state above was read again from the contract."
+            failureDetail={callbackFailure}
             succeeded={moneyMoved}
-            success={() => (
+            success={(_, signerId) => (
               <p>
-                Refunded {near(ticket.principal)} to {ticket.owner_id}.
+                Refunded {near(ticket.principal)} to {signerId}.
               </p>
             )}
           />
@@ -177,6 +181,7 @@ function TicketDetails({ data, reread, apply }: { data: TicketData } & Reread) {
                   before: data,
                   read: reread,
                   apply,
+                  key: ticketKey,
                 });
               }}
             />
@@ -194,6 +199,27 @@ function TicketDetails({ data, reread, apply }: { data: TicketData } & Reread) {
         </section>
       </div>
     </article>
+  );
+}
+
+/** What a claim or a transfer changes; the event view's clock (now_ms) moves on every block. */
+const ticketKey = ({ ticket }: TicketData) => [
+  ticket.owner_id,
+  ticket.status,
+  ticket.claim,
+  ticket.pending_operation_id,
+];
+
+/**
+ * After a failed callback the transfer ran (it is the earlier receipt, and it did not fail), but
+ * the contract could not record it: the ticket stays RefundPending for good (t11).
+ */
+function callbackFailure(result: TxResult, signerId: string) {
+  if (result.failedReceipt?.step !== 'callback') return null;
+  return (
+    <p>
+      The transfer to {signerId} ran, but the contract could not record it. The ticket stays locked.
+    </p>
   );
 }
 
@@ -229,15 +255,17 @@ function StateText({ data, time }: { data: TicketData; time: (ms: number) => str
       return <p>{amount} is reserved for this ticket.</p>;
     case 'RefundPending': {
       const recipient = operation?.recipient_id ?? ticket.owner_id;
+      const amount = near(operation?.amount ?? ticket.principal);
       return (
         <>
           <p>
-            {near(operation?.amount ?? ticket.principal)} is on its way to {recipient}
-            {operation ? `, since ${time(operation.started_at_ms)}` : ''}.
+            A refund of {amount} to {recipient}{' '}
+            {operation ? `started on ${time(operation.started_at_ms)}` : 'is open'}.
           </p>
+          {/* No promise of a later confirmation: after a failed callback none comes (t11). */}
           <p className="muted">
-            The contract marks the ticket as paid once the transfer is confirmed. Until then the
-            ticket is locked, so it cannot be paid twice.
+            The contract has not recorded how it ended. Until it does, the ticket stays locked, so
+            it cannot be paid twice.
           </p>
         </>
       );

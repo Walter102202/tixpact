@@ -55,7 +55,8 @@ export function createFixtureWallet(accountId: string | null = FIXTURE_ACCOUNT):
     async answer(call) {
       const tx = RECORDED[call.methodName];
       if (!tx) throw new Error(`Demo mode has no recorded ${call.methodName} transaction.`);
-      return { txHash: tx.hash, signerId: tx.signerId };
+      // Signed by whoever is signed in, as with a real wallet; the recording only lends its hash.
+      return { txHash: tx.hash, signerId: current ?? tx.signerId };
     },
     getAccountId: () => current,
     subscribe(listener) {

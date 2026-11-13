@@ -91,6 +91,12 @@ describe('/organizer: create an event', () => {
       'The verifier must be another account, not you.',
     ],
     [
+      'the verifier is not a testnet account',
+      { 'Verifier account': 'teatro.testne' },
+      'Verifier account',
+      'Testnet accounts end in .testnet.',
+    ],
+    [
       'the price is 0',
       { 'Price in NEAR': '0' },
       'Price in NEAR',

@@ -11,7 +11,10 @@ import {
  * `Reserved` ticket whose event is past the deadline (canClaimRefund).
  */
 export function claimWord(ticket: TicketView, event: EventView): string {
-  return canClaimRefund(ticket, event) ? CLAIM_LABELS.Refundable : CLAIM_LABELS[ticket.claim];
+  if (canClaimRefund(ticket, event)) return CLAIM_LABELS.Refundable;
+  // Refundable but locked (a transfer to a contract is pending): the money is there, the claim is not.
+  if (ticket.claim === 'Refundable') return CLAIM_LABELS.Reserved;
+  return CLAIM_LABELS[ticket.claim];
 }
 
 /** One line per history entry; the account is whoever the entry is about. */

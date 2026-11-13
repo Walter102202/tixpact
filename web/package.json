@@ -16,7 +16,8 @@
     "@ticket-escrow/client": "workspace:*",
     "near-api-js": "7.5.3",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@testing-library/dom": "10.4.2",

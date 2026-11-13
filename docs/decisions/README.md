@@ -53,3 +53,4 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-12 | The exact millisecond of each time boundary is proven by a unit test | `2026-11-12-exact-time-boundaries-in-unit-tests.md` |
 | 2026-11-12 | Token metadata is derived from the event, not stored per ticket | `2026-11-12-token-metadata-derived-from-the-event.md` |
 | 2026-11-12 | Error codes and behaviour for the cases the frozen interface does not name | `2026-11-12-codes-for-cases-the-interface-does-not-name.md` |
+| 2026-11-13 | After a transaction the page compares only what it changed, and an unknown result holds every action | `2026-11-13-web-review-fixes-for-w1-and-w2.md` |

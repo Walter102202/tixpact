@@ -1,5 +1,5 @@
-import { AccountIdSchema } from '@ticket-escrow/client';
 import { type FormEvent, useId, useState } from 'react';
+import { testnetAccountError } from '../../lib/accounts';
 import { near } from '../events/eventCopy';
 import type { TicketData } from './TicketPage';
 import { transferBlockedReason } from './ticketCopy';
@@ -31,8 +31,9 @@ export function TransferPanel({
     formEvent.preventDefault();
     const account = input.trim();
     setTarget(null);
-    if (!AccountIdSchema.safeParse(account).success) {
-      setError('That is not a valid NEAR account id.');
+    const invalid = testnetAccountError(account);
+    if (invalid !== null) {
+      setError(invalid);
     } else if (account === ticket.owner_id) {
       setError('That account already holds this ticket.');
     } else {
@@ -90,7 +91,15 @@ export function TransferPanel({
             <strong>You will lose the right to the refund.</strong> From then on only {target} can
             claim {near(ticket.principal)}, and the transfer cannot be undone.
           </p>
-          <button type="button" className="btn" onClick={() => onSend(target)}>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              // Cleared on send: any later transfer starts again from review.
+              setTarget(null);
+              onSend(target);
+            }}
+          >
             Transfer ticket {ticket.token_id} to {target}
           </button>
         </section>

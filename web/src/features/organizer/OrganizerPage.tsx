@@ -7,7 +7,7 @@ import { useLoad } from '../../lib/useLoad';
 import { useServices } from '../../services';
 import { LoadState } from '../../ui/LoadState';
 import { TxStatus } from '../../ui/TxStatus';
-import { near } from '../events/eventCopy';
+import { near, nearExact } from '../events/eventCopy';
 import { OrganizerEvents } from './OrganizerEvents';
 import { checkTerms, EMPTY_FORM, type Field, type FormValues, parseCapacity } from './terms';
 
@@ -173,7 +173,7 @@ function CreateEventForm({
           <button type="submit" className="btn" disabled={waitingForQuote}>
             {budget === null
               ? 'Create the event'
-              : `Create the event and pay ${near(budget)} to the contract`}
+              : `Create the event and pay ${nearExact(budget)} to the contract`}
           </button>
         )}
       </form>

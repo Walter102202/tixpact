@@ -1,7 +1,7 @@
 import { actions, type TicketView } from '@ticket-escrow/client';
 import type { Refresh, TxControl } from '../../lib/near/useTx';
 import { useWallet } from '../../lib/near/useWallet';
-import { near } from '../events/eventCopy';
+import { nearExact } from '../events/eventCopy';
 import type { TicketData } from './TicketPage';
 
 /**
@@ -48,7 +48,7 @@ export function ClaimPanel({
         className="btn"
         onClick={() => void tx.run(actions.claimRefund(ticket.token_id), refresh)}
       >
-        Claim {near(ticket.principal)} to {ticket.owner_id}
+        Claim {nearExact(ticket.principal)} to {ticket.owner_id}
       </button>
       <p className="muted">
         Your wallet shows a 1 yoctoNEAR deposit: the contract requires it so that only the holder's
