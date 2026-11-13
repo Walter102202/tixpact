@@ -1,11 +1,4 @@
-import {
-  baseDecode,
-  FailoverRpcError,
-  KeyPairSigner,
-  type KeyPairString,
-  PublicKey,
-} from 'near-api-js';
-import { AccessKeyDoesNotExistError, AccountDoesNotExistError } from 'near-api-js/rpc-errors';
+import { baseDecode, KeyPairSigner, type KeyPairString, PublicKey } from 'near-api-js';
 import { describe, expect, it } from 'vitest';
 import { createFixtureReader } from './fixtures.js';
 import {
@@ -619,55 +612,79 @@ describe('createPassChain', () => {
   const ticket = anaTicket();
   const reader = { getTicket: async (id: string) => (id === '5-1' ? ticket : null) };
 
-  function rpcAnswering(answer: () => Promise<unknown>) {
+  const KEY = 'ed25519:DYoE7CvF7PtSBrCdmu96Y8yZPsWhnYYt3vP2ygTXH79S';
+  const OTHER = 'ed25519:FnPCCZAmxbUcdzkyA43qrGtq7xR7Lwrzdwmr1AEqQ3Bm';
+  const limitedKey = {
+    nonce: 1,
+    permission: { FunctionCall: { allowance: null, receiver_id: CONTRACT, method_names: [] } },
+  };
+  const entry = (
+    public_key: string,
+    access_key: unknown = { nonce: 1, permission: 'FullAccess' },
+  ) => ({ public_key, access_key });
+
+  /** An RPC whose key-list pages are given in order; it records every read and never throws. */
+  function rpcListing(...pages: Array<{ keys: unknown[]; last_key?: string | null }>) {
     const asked: unknown[] = [];
     return {
       asked,
       rpc: {
-        async viewAccessKey(params: unknown) {
+        async viewAccessKeyList(params: unknown) {
           asked.push(params);
-          return answer();
+          const page = pages[asked.length - 1];
+          if (page === undefined) throw new Error('read past the last page');
+          return { block_hash: 'h', block_height: 1, ...page };
         },
       },
     };
   }
 
-  it('reads the key at final and tells a full-access key from a function-call key', async () => {
-    const full = rpcAnswering(async () => ({ nonce: 1n, permission: 'FullAccess' }));
+  it('reads the key list at final and tells a full-access key from a function-call key', async () => {
+    const full = rpcListing({ keys: [entry(OTHER), entry(KEY)], last_key: null });
     const chain = createPassChain(reader, full.rpc);
-    expect(await chain.accessKey(ANA, 'ed25519:k')).toBe('full');
-    expect(full.asked).toEqual([
-      { accountId: ANA, publicKey: 'ed25519:k', finalityQuery: { finality: 'final' } },
-    ]);
-    const limited = rpcAnswering(async () => ({
-      nonce: 1n,
-      permission: { FunctionCall: { allowance: null, receiver_id: CONTRACT, method_names: [] } },
-    }));
-    expect(await createPassChain(reader, limited.rpc).accessKey(ANA, 'ed25519:k')).toBe(
-      'function-call',
-    );
+    expect(await chain.accessKey(ANA, KEY)).toBe('full');
+    expect(full.asked).toEqual([{ accountId: ANA, finalityQuery: { finality: 'final' } }]);
+    const limited = rpcListing({ keys: [entry(KEY, limitedKey)] });
+    expect(await createPassChain(reader, limited.rpc).accessKey(ANA, KEY)).toBe('function-call');
     expect(await chain.ticket('5-1')).toEqual(ticket);
   });
 
-  it('reads a missing key or account as missing, and anything else as a failure', async () => {
-    const key = PublicKey.fromString(demoPassKey(ANA).getPublicKey().toString());
-    const missingKey = rpcAnswering(async () => {
-      throw new FailoverRpcError(1, [new AccessKeyDoesNotExistError(key, 'block', 1)]);
-    });
-    expect(await createPassChain(reader, missingKey.rpc).accessKey(ANA, 'ed25519:k')).toBe(
-      'missing',
+  it('reads a missing key as missing in exactly one read, with no error on the way', async () => {
+    const other = rpcListing({ keys: [entry(OTHER)], last_key: null });
+    expect(await createPassChain(reader, other.rpc).accessKey(ANA, KEY)).toBe('missing');
+    expect(other.asked).toHaveLength(1);
+    // An account that does not exist: testnet answers an empty list (both endpoints, 2026-11-13).
+    const noAccount = rpcListing({ keys: [], last_key: null });
+    expect(await createPassChain(reader, noAccount.rpc).accessKey(ANA, KEY)).toBe('missing');
+    expect(noAccount.asked).toHaveLength(1);
+  });
+
+  it('follows the pages of a long key list', async () => {
+    const paged = rpcListing(
+      { keys: [entry(OTHER)], last_key: OTHER },
+      { keys: [entry(KEY, limitedKey)], last_key: null },
     );
-    const missingAccount = rpcAnswering(async () => {
-      throw new AccountDoesNotExistError(ANA, 'block', 1);
+    expect(await createPassChain(reader, paged.rpc).accessKey(ANA, KEY)).toBe('function-call');
+    expect(paged.asked).toEqual([
+      { accountId: ANA, finalityQuery: { finality: 'final' } },
+      { accountId: ANA, finalityQuery: { finality: 'final' }, afterKey: OTHER },
+    ]);
+  });
+
+  it('rejects when the list cannot be read, so the door says the chain could not be read', async () => {
+    const down = {
+      viewAccessKeyList: async () => {
+        throw new Error('fetch failed');
+      },
+    };
+    await expect(createPassChain(reader, down).accessKey(ANA, KEY)).rejects.toThrow('fetch failed');
+    const garbage = { viewAccessKeyList: async () => ({ keys: 'none' }) };
+    await expect(createPassChain(reader, garbage).accessKey(ANA, KEY)).rejects.toThrow();
+    const result = await checkPass(anaPass(), CONTRACT, createPassChain(reader, down), ISSUED);
+    expect(result.checks[1]).toEqual({
+      id: 'key',
+      ok: false,
+      detail: 'The chain could not be read, so this was not checked. Try again.',
     });
-    expect(await createPassChain(reader, missingAccount.rpc).accessKey(ANA, 'ed25519:k')).toBe(
-      'missing',
-    );
-    const down = rpcAnswering(async () => {
-      throw new Error('fetch failed');
-    });
-    await expect(createPassChain(reader, down.rpc).accessKey(ANA, 'ed25519:k')).rejects.toThrow(
-      'fetch failed',
-    );
   });
 });
