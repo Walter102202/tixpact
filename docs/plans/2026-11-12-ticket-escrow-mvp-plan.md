@@ -318,7 +318,7 @@ Enums:
 - `outcome`: `Unresolved`, `Completed`, `Refundable`. `outcome_reason`: `Attested`, `Cancelled`, `Expired`.
 - `phase` (derived from time, for display): `AwaitingVerifier`, `OnSale`, `SoldOut`, `InProgress`, `AwaitingAttestation`, `Expirable`, `Completed`, `Refundable`. An event never accepted by `starts_at_ms` shows `InProgress` onward like any other and simply has no tickets.
 - Ticket `status` (stored): `Active`, `TransferPending`, `RefundPending`, `Refunded`.
-- Ticket `claim` (derived): `Reserved` (event unresolved), `Refundable` (event refundable, status `Active`), `RefundPending`, `Refunded`, `ReleasedToOrganizer` (event completed).
+- Ticket `claim` (derived): `Reserved` (event unresolved), `Refundable` (event refundable, status `Active` or `TransferPending`), `RefundPending`, `Refunded`, `ReleasedToOrganizer` (event completed). A ticket locked by a transfer to a contract keeps the claim of its event and shows the lock in `status`, so a client offers the refund only when `claim` allows it and `status` is `Active` (decision `2026-11-12-codes-for-cases-the-interface-does-not-name.md`).
 - Operation `kind`: `Refund`, `Payout`. History `kind`: `Purchased`, `Transferred`, `TransferReturned`, `RefundRequested`, `RefundSettled`, `RefundFailed`. The history keeps the first entry and the latest fifteen; `dropped` counts the rest.
 
 Accounting identity, true after every call and every callback:
@@ -508,10 +508,10 @@ Needs Walter's go for three things: installing the Rust toolchain in his WSL, cr
 - `format.ts`: `formatNear(yocto: string, maxDecimals = 4): string` and `parseNear(text: string): string` with `bigint` only; `formatDateTime(ms, timeZone)`.
 - `fixtures.ts`: one fixture set per phase and claim state, plus `createFixtureReader()` implementing `Reader`.
 
-- [ ] Write failing tests: schemas accept the plan's JSON examples and reject a number where an amount string is expected; `formatNear('1500000000000000000000000') === '1.5'`, `parseNear('1.5')` returns the same string, `parseNear('0.1') + parseNear('0.2')` as `bigint` equals `parseNear('0.3')`; `parseContractError` on `Smart contract panicked: ERR_TICKET_LOCKED: …` returns that code; every fixture passes its schema; `trackTransaction` on a recorded status with a failed callback receipt returns `ok: false` with that receipt.
-- [ ] Run `pnpm --filter @ticket-escrow/client test`. Expected: fail.
-- [ ] Implement, verifying each `near-api-js` name against the installed declarations (`JsonRpcProvider`, `FailoverRpcProvider`, `callFunction`, `viewAccount`, `viewAccessKeyList`, `viewTransactionStatusWithReceipts`).
-- [ ] Run. Expected: pass. Commit `feat(client): typed reader, action builders and transaction tracking`, tick, push, and tell the integrator: W0 is merged first so Track M can start.
+- [x] Write failing tests: schemas accept the plan's JSON examples and reject a number where an amount string is expected; `formatNear('1500000000000000000000000') === '1.5'`, `parseNear('1.5')` returns the same string, `parseNear('0.1') + parseNear('0.2')` as `bigint` equals `parseNear('0.3')`; `parseContractError` on `Smart contract panicked: ERR_TICKET_LOCKED: …` returns that code; every fixture passes its schema; `trackTransaction` on a recorded status with a failed callback receipt returns `ok: false` with that receipt.
+- [x] Run `pnpm --filter @ticket-escrow/client test`. Expected: fail.
+- [x] Implement, verifying each `near-api-js` name against the installed declarations (`JsonRpcProvider`, `FailoverRpcProvider`, `callFunction`, `viewAccount`, `viewAccessKeyList`, `viewTransactionStatusWithReceipts`).
+- [x] Run. Expected: pass. Commit `feat(client): typed reader, action builders and transaction tracking`, tick, push, and tell the integrator: W0 is merged first so Track M can start.
 
 ### Task W1: shell, wallet, landing, event page with purchase
 
@@ -549,7 +549,7 @@ Needs Walter's go for three things: installing the Rust toolchain in his WSL, cr
 
 Starts when W0 is on `main`. Enters the `agents` track of the hackathon only if G3 shows it working on testnet.
 
-**Revision note.** Filled by the integrator when W0 is merged.
+**Revision note (2026-11-13, W0 merged).** Worktree `.claude/worktrees/m`, branch `track/m`, created from the `main` commit "docs(plan): fill the Track M revision note". Check command: `pnpm install --frozen-lockfile && pnpm lint && pnpm typecheck && pnpm test && pnpm build`; expected on that commit: lint checks 37 files, 8 test files with 72 tests pass (all in `packages/client`; `mcp` has none yet). `mcp/package.json` already pins `@modelcontextprotocol/sdk` 1.32.2, `near-api-js` 7.5.3, `zod` 4.6.7 and the workspace client; `mcp/src/index.ts` is an empty placeholder. What the client exports, with exact signatures, is listed in `C:\dev\near-project-reports\track-w.md` under "Notes for the next task" (two blocks: W0 and the W0 fix); use `createFixtureReader()` as the fake chain and `actions.*` for every call the agent builds. Never edit `packages/client`: write what you need under "Needs the integrator". Testnet: the agent's account is `te-d1-agent.testnet` (10 NEAR from the faucet; key in the WSL keychain file `~/.near-credentials/testnet/te-d1-agent.testnet.json`, never copied anywhere and never printed). Everything that touches testnet (spike S4, the smoke script with a key) waits until the integrator says the contract is deployed and gives its account id; until then build and test against the fixture reader and a recording signer.
 
 **Read first for this track:** the Frozen interface; `packages/client/src`; `C:\dev\dealingwith-si\apps\backend\src\mcp\{server,tools,format}.ts` and `C:\dev\dealingwith-si\apps\backend\src\modules\policies\evaluate.ts` as the model for tool registration, the two-view results and ordered policy checks; `C:\dev\dealingwith-si\docs\mcp.md` as the model for the guide.
 
@@ -590,15 +590,15 @@ Starts when W0 is on `main`. Enters the `agents` track of the hackathon only if 
 
 ### Task I1: testnet deployment and the scenario script (after G1)
 
-- [ ] Create a development contract account with the faucet, deploy the C1+C2 build, call `new`. Record the commands and the account in `docs/toolchain.md`.
-- [ ] `scripts/demo-scenario.mjs`: with four keychain accounts (organizer, verifier, Ana, Luis) it creates an event with windows of a few minutes, accepts, Ana buys, transfers to Luis, the organizer tries to collect and is rejected, time passes, a fifth account expires the event, Ana's claim is rejected, Luis claims. It writes `docs/proof.md`: one row per step with the claim it proves, the transaction link and the observed result. A second run covers the completed path.
+- [x] Create a development contract account with the faucet, deploy the C1+C2 build, call `new`. Record the commands and the account in `docs/toolchain.md`.
+- [x] `scripts/demo-scenario.mjs`: with four keychain accounts (organizer, verifier, Ana, Luis) it creates an event with windows of a few minutes, accepts, Ana buys, transfers to Luis, the organizer tries to collect and is rejected, time passes, a fifth account expires the event, Ana's claim is rejected, Luis claims. It writes `docs/proof.md`: one row per step with the claim it proves, the transaction link and the observed result. A second run covers the completed path.
 - [ ] Walter creates the Meteor testnet accounts; run spike S3 with him.
 
 ### Task I2: the documents a judge reads (by G4)
 
 - [ ] `README.md`, written for a machine reader first: what it is in two sentences; the problem with three sourced facts; how each is solved; "Try it" as numbered "do X, see Y" steps (open the hosted demo; run `./scripts/gate.sh` and see the test names pass; run the read-only deployment check); the claims table (claim → test name → transaction in `docs/proof.md`); what NEAR does here, concretely; "What is real and what is simulated" (testnet funds, demo accounts played by us, a verifier that is one account, short demo windows); trust limits; architecture and interface; AI and third-party disclosure; license.
-- [ ] `docs/design.md`: the rules, state machines, accounting and decisions in English, derived from the spec without its market and naming sections.
-- [ ] `scripts/direct-calls.sh` (T20) and a "If the website is down" section in the README.
+- [x] `docs/design.md`: the rules, state machines, accounting and decisions in English, derived from the spec without its market and naming sections.
+- [ ] `scripts/direct-calls.sh` (T20, done and run on testnet 2026-11-12) and a "If the website is down" section in the README (pending with the README).
 - [ ] Hosted web on Vercel or Cloudflare Pages (Walter's account), kept up until 2026-11-25.
 
 ### Task I3: hardening and the final deployment (Saturday morning)
