@@ -27,6 +27,7 @@ import { EntryPassOffer } from '../pass/EntryPassOffer';
 import { passPagePath } from '../pass/passFlow';
 import { refusedByToken, SettlementRefused } from '../tokens/SettlementRefused';
 import { ClaimPanel } from './ClaimPanel';
+import { TicketPicture } from './TicketPicture';
 import { TransferPanel } from './TransferPanel';
 import { claimWord, historyText } from './ticketCopy';
 
@@ -147,6 +148,7 @@ function TicketDetails({ data, reread, apply }: { data: TicketData } & Reread) {
             <dt>Confirmation deadline</dt>
             <dd>{time(event.resolution_deadline_ms)}</dd>
           </dl>
+          <TicketPicture ticket={ticket} />
           <section className="pass-section" aria-labelledby="pass-heading">
             <h2 id="pass-heading">Entry pass</h2>
             <EntryPassOffer ticket={ticket} onSigned={(pass) => navigate(passPagePath(pass))} />

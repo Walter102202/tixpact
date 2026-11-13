@@ -4,6 +4,14 @@
 export type { ContractCall, ContractMethod, ExternalCall } from './actions.js';
 export * as actions from './actions.js';
 export { APP_NAME, PROMISE_TEXT } from './brand.js';
+export type { TicketDisplay } from './display.js';
+export {
+  drawTicket,
+  mediaMatchesHash,
+  SVG_MEDIA_PREFIX,
+  ticketDisplayFor,
+  ticketDisplayOf,
+} from './display.js';
 export type { ContractError, ErrorCode } from './errors.js';
 export { ERROR_CODES, ERROR_MESSAGES, parseContractError } from './errors.js';
 export type { FixtureData, RecordedTx } from './fixtures.js';

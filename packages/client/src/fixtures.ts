@@ -1,4 +1,5 @@
-import { parseNear } from './format.js';
+import { ticketDisplayFor } from './display.js';
+import { parseNear, unitOf } from './format.js';
 import { type AccountProof, groupVerifierOf, type Reader } from './reader.js';
 import {
   type AccountingView,
@@ -641,6 +642,23 @@ export function createFixtureReader(data: FixtureData = FIXTURES): Reader {
       };
     },
     readGroupVerifier: async (accountId) => groupVerifierOf(data.policies?.[accountId]),
+    // Drawn from the fixture data as the contract draws it from its own (`display.ts`).
+    ticketDisplay: async (tokenId) => {
+      const ticket = orNull(
+        TicketViewSchema,
+        data.tickets.find((t) => t.token_id === tokenId),
+      );
+      if (ticket === null) return null;
+      const event = parsed(
+        EventViewSchema,
+        data.events.find((e) => e.event_id === ticket.event_id),
+      );
+      return ticketDisplayFor(
+        event,
+        ticket,
+        unitOf(parsed(ConfigSchema, data.config), ticket.currency),
+      );
+    },
   };
 }
 
