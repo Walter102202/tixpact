@@ -77,3 +77,4 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | The agent buys only in NEAR (its caps are in NEAR) and reads, claims and checks every currency | `2026-11-13-agent-buys-in-near-and-reads-every-currency.md` |
 | 2026-11-13 | The web writes every amount in its event's currency, judges a token purchase from its receipts and checks token registration before money moves | `2026-11-13-web-prices-in-a-token.md` |
 | 2026-11-13 | The organizer picks a currency, a payout in a token checks registration, and the proof compares each currency on its own | `2026-11-13-web-organizer-and-proof-per-currency.md` |
+| 2026-11-13 | After a token transaction, the web says what happened to whom: a refused refund or payout in plain words, one result per account, test money named as such, the price on the create button | `2026-11-13-web-token-results-after-review.md` |

@@ -142,6 +142,9 @@ describe('/proof with events priced in a token', () => {
     expect(screen.getByText('The balance covers both.')).toBeTruthy();
     const section = screen.getByRole('region', { name: 'In tUSD' });
     expect(within(section).getByText(TUSD).textContent).toBe(TUSD);
+    expect(section.textContent).toContain(
+      `Events priced in tUSD keep their money at the token ${TUSD}, a test dollar with no value.`,
+    );
     // Events 10, 11 and 12: 20 + 50 reserved, 25 to collect, 25 being refunded (already owed).
     expect(fact('tUSD balance of the contract')).toBe('120 tUSD');
     expect(fact('tUSD reserved for ticket holders')).toBe('70 tUSD');

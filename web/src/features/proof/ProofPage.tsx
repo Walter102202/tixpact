@@ -4,6 +4,7 @@ import { readAllPages } from '../../lib/pages';
 import { useLoad } from '../../lib/useLoad';
 import { useServices } from '../../services';
 import { AccountLink } from '../../ui/AccountLink';
+import { TEST_DOLLAR, useIsTestToken } from '../../ui/CurrencyFact';
 import { LoadState } from '../../ui/LoadState';
 
 /** What the contract holds in one token next to what it owes in it, in the token's smallest unit. */
@@ -153,6 +154,7 @@ function ProofFacts({
 function TokenFacts({ holding }: { holding: TokenHolding }) {
   const { token, unit, balance, reserved, available } = holding;
   const covers = BigInt(balance) >= BigInt(reserved) + BigInt(available);
+  const test = useIsTestToken(token);
   const headingId = `proof-${token}`;
   return (
     <section className="proof-token" aria-labelledby={headingId}>
@@ -160,7 +162,8 @@ function TokenFacts({ holding }: { holding: TokenHolding }) {
         In {unit.symbol}
       </h2>
       <p className="muted">
-        Events priced in {unit.symbol} keep their money at the token <AccountLink id={token} />.
+        Events priced in {unit.symbol} keep their money at the token <AccountLink id={token} />
+        {test && `, ${TEST_DOLLAR}`}.
       </p>
       <dl className="facts">
         <dt>{unit.symbol} balance of the contract</dt>

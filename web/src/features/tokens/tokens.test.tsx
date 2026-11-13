@@ -76,6 +76,11 @@ describe('an event priced in tUSD', () => {
     await openEvent(10);
     expect(fact('Price')).toBe('10 tUSD');
     expect(fact('Reserved in the contract')).toBe('20 tUSD');
+    expect(fact('Paid in')).toBe(`tUSD, the token ${TUSD}, a test dollar with no value`);
+  });
+
+  it('names a token without a test faucet by its symbol and account only', async () => {
+    await openEvent(10, services('luis.testnet', { faucets: [] }));
     expect(fact('Paid in')).toBe(`tUSD, the token ${TUSD}`);
   });
 
@@ -255,6 +260,35 @@ describe('buying with tUSD', () => {
     await openEvent(10, services(null));
     expect(screen.getByRole('button', { name: 'Sign in to buy' })).toBeTruthy();
     expect(screen.queryByText(/balance/)).toBeNull();
+  });
+
+  it('after a purchase, reads the balance until the node shows it moved', async () => {
+    let afterBuy = false;
+    // A node that is behind shows the old balance twice more.
+    let staleReads = 2;
+    const fixtures = createFixtureReader(FIXTURES_WITH_TOKENS);
+    const reader: Reader = {
+      ...fixtures,
+      tokenBalance: async (token, account) => {
+        if (!afterBuy || staleReads > 0) {
+          if (afterBuy) staleReads -= 1;
+          return fixtures.tokenBalance(token, account);
+        }
+        return '30000000';
+      },
+    };
+    const wallet = createFixtureWallet('luis.testnet');
+    const recorded = wallet.answer;
+    wallet.answer = async (call) => {
+      afterBuy = true;
+      return recorded(call);
+    };
+    await openEvent(10, services('luis.testnet', { reader, wallet, fixtureMode: false }));
+    await screen.findByText('Your balance: 40 tUSD');
+    fireEvent.click(screen.getByRole('button', { name: 'Buy for 10 tUSD' }));
+    await screen.findByText('luis.testnet holds ticket 10-3.');
+    expect(await screen.findByText('Your balance: 30 tUSD')).toBeTruthy();
+    expect(staleReads).toBe(0);
   });
 
   it('reads the balance again after a purchase', async () => {
@@ -503,6 +537,6 @@ describe('the verifier page of a tUSD event', () => {
     renderAt('/verify/10', services('teatro.testnet'));
     await screen.findByRole('heading', { level: 1, name: 'Indie showcase' });
     expect(fact('Price')).toBe('10 tUSD');
-    expect(fact('Paid in')).toBe(`tUSD, the token ${TUSD}`);
+    expect(fact('Paid in')).toBe(`tUSD, the token ${TUSD}, a test dollar with no value`);
   });
 });

@@ -1,12 +1,13 @@
-import { actions, type Config, type EventTerms, unitOf } from '@ticket-escrow/client';
+import { actions, type Config, type EventTerms, parseAmount, unitOf } from '@ticket-escrow/client';
 import { type FormEvent, Fragment, useCallback, useId, useState } from 'react';
 import { isNamedAccount, missingAccountMessage } from '../../lib/accounts';
-import { NEAR_UNIT } from '../../lib/money';
+import { moneyExact, NEAR_UNIT } from '../../lib/money';
 import { type Refresh, useTx } from '../../lib/near/useTx';
 import { useWallet } from '../../lib/near/useWallet';
 import { Link } from '../../lib/router';
 import { useLoad } from '../../lib/useLoad';
 import { useServices } from '../../services';
+import { TEST_DOLLAR } from '../../ui/CurrencyFact';
 import { LoadState } from '../../ui/LoadState';
 import { TxStatus } from '../../ui/TxStatus';
 import { nearExact } from '../events/eventCopy';
@@ -132,6 +133,10 @@ function CreateEventForm({
     unit,
   });
   const verifier = check.errors['Verifier account'] ? null : values['Verifier account'].trim();
+  // The price as it will be sent, in the chosen currency: a change of currency after typing "10"
+  // makes it 10 tUSD, and the button says so.
+  const typedPrice = check.errors.Price ? null : parseAmount(values.Price.trim(), unit);
+  const priced = typedPrice === null ? '' : ` at ${moneyExact(typedPrice, unit)} a ticket`;
 
   // A mistyped named verifier would lock the budget in an event nobody can accept, or hand the
   // role to whoever registers that name: check it exists before the button works.
@@ -279,8 +284,8 @@ function CreateEventForm({
               aria-describedby={disabledBecause}
             >
               {budget === null
-                ? 'Create the event'
-                : `Create the event and pay ${nearExact(budget)} to the contract`}
+                ? `Create the event${priced}`
+                : `Create the event${priced} and pay ${nearExact(budget)} of storage`}
             </button>
             {waiting !== null && (
               <p id={`${formId}-waiting`} className="muted">
@@ -335,6 +340,7 @@ function CurrencyPicker({
   onChange: (currency: string | null) => void;
 }) {
   const id = useId();
+  const { faucets } = useServices();
   return (
     <div className="field currency-field">
       <label htmlFor={id}>Currency</label>
@@ -349,7 +355,9 @@ function CurrencyPicker({
         <option value="">NEAR</option>
         {config.tokens.map((token) => (
           <option key={token.account_id} value={token.account_id}>
-            {token.symbol} (the token {token.account_id})
+            {`${token.symbol} (the token ${token.account_id}${
+              faucets.includes(token.account_id) ? `, ${TEST_DOLLAR}` : ''
+            })`}
           </option>
         ))}
       </select>

@@ -7,7 +7,7 @@ import {
   type TxResult,
   type Unit,
 } from '@ticket-escrow/client';
-import { type ReactNode, useEffect, useId } from 'react';
+import { type ReactNode, useEffect, useId, useRef } from 'react';
 import { money, moneyExact } from '../../lib/money';
 import { type Refresh, type TxControl, useTx } from '../../lib/near/useTx';
 import { useWallet } from '../../lib/near/useWallet';
@@ -106,7 +106,11 @@ function TokenBuy({ data, reread, apply, token }: BuyProps & { token: string }) 
   const { event, unit } = data;
   const { contractId, faucets } = useServices();
   const { accountId, signIn } = useWallet();
-  const { load: funds, refresh: fundsRefresh } = useTokenAccount(token, accountId, true);
+  const {
+    load: funds,
+    refresh: fundsRefresh,
+    readAgainAfter: rereadFunds,
+  } = useTokenAccount(token, accountId, true);
   const tx = useTx();
   const registerTx = useTx();
   const faucetTx = useTx();
@@ -116,14 +120,18 @@ function TokenBuy({ data, reread, apply, token }: BuyProps & { token: string }) 
   const price = moneyExact(event.price, unit);
   const label = `Buy for ${price}`;
 
-  // A finished purchase moved the buyer's balance, or gave it back: read it again.
-  const finished = tx.view.kind === 'done';
-  const { reload } = funds;
+  // The balance at the click. A purchase moved it: read until the node shows the new one, as the
+  // faucet does. A purchase that did not happen gave it back, or never took it: one read.
+  const fundsAtBuy = useRef<TokenAccount | null>(null);
+  const finished = tx.view.kind === 'done' ? tx.view.result : null;
   useEffect(() => {
-    if (finished) reload();
-  }, [finished, reload]);
+    if (finished === null) return;
+    const bought = purchaseResult(finished, contractId).bought;
+    void rereadFunds(bought ? fundsAtBuy.current : null);
+  }, [finished, contractId, rereadFunds]);
 
   function buy() {
+    fundsAtBuy.current = funds.state.status === 'ready' ? funds.state.data : null;
     void tx.run(actions.buyTicketWithToken(contractId, event), {
       before: data,
       read: reread,

@@ -27,7 +27,10 @@ export interface AppServices {
   rereadOptions?: ReadUntilChangedOptions;
   /** The clock new terms are checked against; the chain's clock judges them again. */
   now?: () => number;
-  /** Tokens with a test faucet (`faucet()`), which the buy panel may offer. */
+  /**
+   * Tokens with a test faucet (`faucet()`): test money, which the buy panel may offer and every
+   * screen calls "a test dollar with no value".
+   */
   faucets: readonly string[];
 }
 
