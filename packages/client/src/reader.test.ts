@@ -323,7 +323,34 @@ function daoPolicy(
   };
 }
 
+/** `get_policy` of ticket-jury.sputnikv2.testnet (Sputnik DAO 2.3.1), as the chain answered it. */
+const TICKET_JURY_POLICY = {
+  bounty_bond: '1000000000000000000000000',
+  bounty_forgiveness_period: '86400000000000',
+  default_vote_policy: { quorum: '0', threshold: [1, 2], weight_kind: 'RoleWeight' },
+  proposal_bond: '1000000000000000000000000',
+  proposal_period: '604800000000000',
+  roles: [
+    { kind: 'Everyone', name: 'all', permissions: ['*:AddProposal'], vote_policy: {} },
+    {
+      kind: {
+        Group: ['te-d1-venue.testnet', 'te-d1-verifier.testnet', 'te-d1-auditor.testnet'],
+      },
+      name: 'council',
+      permissions: ['*:Finalize', '*:AddProposal', '*:VoteApprove', '*:VoteReject', '*:VoteRemove'],
+      vote_policy: {},
+    },
+  ],
+};
+
 describe('readGroupVerifier', () => {
+  it("reads the real policy of the group-verifier proof's DAO: 3 members, 2 needed", () => {
+    expect(groupVerifierOf(TICKET_JURY_POLICY)).toEqual({
+      members: ['te-d1-venue.testnet', 'te-d1-verifier.testnet', 'te-d1-auditor.testnet'],
+      needed: 2,
+    });
+  });
+
   async function read(policy: unknown) {
     const { rpc, calls } = fakeRpc({ get_policy: policy });
     const group = await createReader({ contractId: CONTRACT, rpc }).readGroupVerifier?.(
@@ -398,18 +425,26 @@ describe('readGroupVerifier', () => {
         needed: 2,
       });
     }
-    // Another group that cannot approve calls, and an Everyone role that can (the tally skips it).
+    // Another group that cannot approve calls is ignored.
     const withOthers = daoPolicy();
-    withOthers.roles.push(
-      {
-        name: 'community',
-        kind: { Group: ['d.testnet'] },
-        permissions: ['*:AddProposal'],
-        vote_policy: {},
-      } as never,
-      { name: 'open', kind: 'Everyone', permissions: ['*:VoteApprove'], vote_policy: {} },
-    );
+    withOthers.roles.push({
+      name: 'community',
+      kind: { Group: ['d.testnet'] },
+      permissions: ['*:AddProposal'],
+      vote_policy: {},
+    } as never);
     expect(groupVerifierOf(withOthers)).toEqual({ members: COUNCIL, needed: 2 });
+    // A role of another kind that can approve calls gives null, Everyone included.
+    for (const kind of ['Everyone', { Member: '1' }]) {
+      const open = daoPolicy();
+      open.roles.push({
+        name: 'open',
+        kind,
+        permissions: ['call:VoteApprove'],
+        vote_policy: {},
+      } as never);
+      expect(groupVerifierOf(open), JSON.stringify(kind)).toBeNull();
+    }
     for (const permission of ['transfer:VoteApprove', '*:VoteReject', 'call:AddProposal']) {
       expect(
         groupVerifierOf(daoPolicy({ council: { permissions: [permission] } })),

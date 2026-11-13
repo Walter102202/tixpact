@@ -313,18 +313,19 @@ const APPROVES_CALLS = new Set(['*:*', 'call:*', '*:VoteApprove', 'call:VoteAppr
 const GroupKindSchema = z.object({ Group: z.array(AccountIdSchema).min(1) });
 
 /**
- * The group that decides a DAO's function calls, or null. It answers only when exactly one role
- * that counts in the contract's tally (every kind but `Everyone`, which the tally skips) may approve
- * function calls, that role is a `Group`, and its vote policy for calls (its own `call` entry, else
- * the default) weighs by role. `needed` is what the contract computes:
+ * The group that decides a DAO's function calls, or null. It answers only when exactly one role of
+ * any kind may approve function calls, that role is a `Group`, and its vote policy for calls (its
+ * own `call` entry, else the default) weighs by role. An `Everyone` role that may approve also
+ * gives null, although the contract's tally skips it: the line never says a group decides while
+ * another role holds the permission. `needed` is what the contract computes:
  * `max(quorum, min(n, floor(n * num / den) + 1))` for a ratio, `max(quorum, min(n, weight))` for a
  * weight. A policy that can never reach its threshold is null.
  */
 export function groupVerifierOf(policy: unknown): GroupVerifier | null {
   const parsed = PolicySchema.safeParse(policy);
   if (!parsed.success) return null;
-  const approvers = parsed.data.roles.filter(
-    (role) => role.kind !== 'Everyone' && role.permissions.some((p) => APPROVES_CALLS.has(p)),
+  const approvers = parsed.data.roles.filter((role) =>
+    role.permissions.some((p) => APPROVES_CALLS.has(p)),
   );
   const [role] = approvers;
   if (approvers.length !== 1 || role === undefined) return null;
