@@ -21,8 +21,25 @@ async fn deploys_and_reports_config() -> testresult::TestResult<()> {
 
     assert_eq!(config["version"], "1.0.0");
     assert_eq!(config["max_capacity"], 100);
-    assert_eq!(config["storage_per_event"], "0");
     assert_eq!(config["fault_injection"], false);
+
+    // The quote for one ticket is the event's own storage plus one ticket's.
+    let per_event: u128 = config["storage_per_event"].as_str().unwrap_or("").parse()?;
+    let per_ticket: u128 = config["storage_per_ticket"]
+        .as_str()
+        .unwrap_or("")
+        .parse()?;
+    let quote: String = contract
+        .call_function(
+            "quote_event_budget",
+            near_sdk::serde_json::json!({ "capacity": 1 }),
+        )
+        .read_only()
+        .fetch_from(&chain.network)
+        .await?
+        .data;
+    assert!(per_event > 0 && per_ticket > 0);
+    assert_eq!(quote.parse::<u128>()?, per_event + per_ticket);
 
     Ok(())
 }

@@ -7,16 +7,31 @@
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
+use near_api::types::transaction::result::ExecutionFinalResult;
 use near_api::types::{PublicKey, Reference};
-use near_api::{Account, AccountId, Contract, NearToken, NetworkConfig, Signer};
+use near_api::{Account, AccountId, Chain, Contract, NearGas, NearToken, NetworkConfig, Signer};
 use near_sandbox::Sandbox;
 use near_sandbox::config::{
     DEFAULT_GENESIS_ACCOUNT_PRIVATE_KEY, DEFAULT_GENESIS_ACCOUNT_PUBLIC_KEY,
 };
+use near_sdk::serde::de::DeserializeOwned;
+use near_sdk::serde_json::{Value, json};
 use testresult::TestResult;
 
 /// Account the contract under test is deployed to.
 pub const ESCROW_ID: &str = "escrow.sandbox";
+/// The deposit of every 1-yocto method.
+pub const ONE_YOCTO: NearToken = NearToken::from_yoctonear(1);
+/// No deposit.
+pub const NO_DEPOSIT: NearToken = NearToken::from_yoctonear(0);
+/// One NEAR in yoctoNEAR.
+pub const NEAR: u128 = 1_000_000_000_000_000_000_000_000;
+/// A ticket price used across the tests: 1.5 NEAR.
+pub const PRICE: u128 = 1_500_000_000_000_000_000_000_000;
+/// Gas attached to every call unless a test needs another amount, in Tgas.
+pub const TGAS: u64 = 100;
+/// The gas fees of one call stay far below this, so balance checks use it as their bound.
+pub const GAS_FEE_BOUND: u128 = NEAR / 100;
 
 /// A local sandbox node, the way to reach it and the one key that signs for every test account.
 pub struct TestChain {
@@ -76,6 +91,59 @@ impl TestChain {
         Ok(account.as_contract())
     }
 
+    /// The time of the latest block, in Unix milliseconds.
+    pub async fn now_ms(&self) -> TestResult<u64> {
+        let block = Chain::block().fetch_from(&self.network).await?;
+        Ok(block.header.timestamp / 1_000_000)
+    }
+
+    /// Produces blocks until the latest block time is at least `target_ms`.
+    ///
+    /// A fast-forwarded block moves the clock by roughly 0.3 s, so this asks for a few blocks at
+    /// a time and reads the clock again instead of assuming a rate.
+    pub async fn advance_to(&self, target_ms: u64) -> TestResult<()> {
+        loop {
+            let now_ms = self.now_ms().await?;
+            if now_ms >= target_ms {
+                return Ok(());
+            }
+            let blocks = ((target_ms - now_ms) / 400).clamp(1, 150);
+            self.sandbox.fast_forward(blocks).await?;
+        }
+    }
+
+    /// The block time at which the first receipt of a transaction ran, in Unix milliseconds.
+    pub async fn executed_at_ms(&self, result: &ExecutionFinalResult) -> TestResult<u64> {
+        let outcome = result
+            .receipt_outcomes()
+            .first()
+            .ok_or("the transaction produced no receipt")?;
+        let block = Chain::block()
+            .at(Reference::AtBlockHash(outcome.block_hash))
+            .fetch_from(&self.network)
+            .await?;
+        Ok(block.header.timestamp / 1_000_000)
+    }
+
+    /// The NEAR balance of an account, in yoctoNEAR.
+    pub async fn balance(&self, account_id: &AccountId) -> TestResult<u128> {
+        let balance = Account(account_id.clone())
+            .tokens()
+            .near_balance()
+            .fetch_from(&self.network)
+            .await?;
+        Ok(balance.total.as_yoctonear())
+    }
+
+    /// Deploys the escrow at [`ESCROW_ID`] and returns it with its call helpers.
+    pub async fn escrow(&self) -> TestResult<Escrow<'_>> {
+        let contract = self.deploy_escrow().await?;
+        Ok(Escrow {
+            chain: self,
+            contract,
+        })
+    }
+
     async fn wait_until_final(&self, account_id: &AccountId) -> TestResult<()> {
         let public_key: PublicKey = DEFAULT_GENESIS_ACCOUNT_PUBLIC_KEY.parse()?;
         for _ in 0..200 {
@@ -102,4 +170,233 @@ pub fn escrow_wasm() -> Vec<u8> {
         std::fs::read(path).expect("the built wasm is readable")
     })
     .clone()
+}
+
+/// The people of the story, each with 20 NEAR.
+pub struct Cast {
+    pub organizer: Account,
+    pub verifier: Account,
+    pub ana: Account,
+    pub luis: Account,
+    /// Somebody with no role in the event.
+    pub mallory: Account,
+}
+
+impl TestChain {
+    /// Creates the cast's accounts.
+    pub async fn cast(&self) -> TestResult<Cast> {
+        let ids = [
+            "org.sandbox",
+            "teatro.sandbox",
+            "ana.sandbox",
+            "luis.sandbox",
+            "mallory.sandbox",
+        ];
+        let mut accounts = self.accounts(&ids, 20).await?.into_iter();
+        let mut next = || accounts.next().ok_or("an account is missing");
+        Ok(Cast {
+            organizer: next()?,
+            verifier: next()?,
+            ana: next()?,
+            luis: next()?,
+            mallory: next()?,
+        })
+    }
+
+    /// Start, end and deadline at the given offsets from the latest block time, in seconds.
+    pub async fn times_from_now(&self, offsets_s: [u64; 3]) -> TestResult<[u64; 3]> {
+        let now_ms = self.now_ms().await?;
+        Ok(offsets_s.map(|offset| now_ms + offset * 1_000))
+    }
+}
+
+/// The escrow under test and the chain it runs on.
+pub struct Escrow<'a> {
+    pub chain: &'a TestChain,
+    pub contract: Contract,
+}
+
+impl Escrow<'_> {
+    /// The escrow's account id.
+    pub fn id(&self) -> AccountId {
+        self.contract.0.clone()
+    }
+
+    /// Signs and sends one function call; returns its outcome whether it failed or not.
+    pub async fn call(
+        &self,
+        signer: &Account,
+        method: &str,
+        args: Value,
+        deposit: NearToken,
+        tgas: u64,
+    ) -> TestResult<ExecutionFinalResult> {
+        let result = self
+            .contract
+            .call_function(method, args)
+            .transaction()
+            .deposit(deposit)
+            .gas(NearGas::from_tgas(tgas))
+            .with_signer(signer.0.clone(), self.chain.signer.clone())
+            .send_to(&self.chain.network)
+            .await?;
+        Ok(result
+            .into_full()
+            .ok_or("send_to returned before the transaction ran")?)
+    }
+
+    /// Calls a view method.
+    pub async fn view<T: DeserializeOwned + Send + Sync>(
+        &self,
+        method: &str,
+        args: Value,
+    ) -> TestResult<T> {
+        Ok(self
+            .contract
+            .call_function(method, args)
+            .read_only()
+            .fetch_from(&self.chain.network)
+            .await?
+            .data)
+    }
+
+    /// `quote_event_budget(capacity)`, in yoctoNEAR.
+    pub async fn quote(&self, capacity: u32) -> TestResult<u128> {
+        let quote: String = self
+            .view("quote_event_budget", json!({ "capacity": capacity }))
+            .await?;
+        Ok(quote.parse()?)
+    }
+
+    /// Creates an event with exactly the quote as deposit and returns its id.
+    pub async fn create_event(&self, organizer: &Account, terms: Value) -> TestResult<u32> {
+        let capacity = u32::try_from(terms["capacity"].as_u64().ok_or("terms without capacity")?)?;
+        let deposit = NearToken::from_yoctonear(self.quote(capacity).await?);
+        let args = json!({ "terms": terms });
+        let result = self
+            .call(organizer, "create_event", args, deposit, TGAS)
+            .await?;
+        Ok(result.assert_success().json()?)
+    }
+
+    /// The verifier accepts the event's terms hash, as read from `get_event`.
+    pub async fn accept(&self, verifier: &Account, event_id: u32) -> TestResult<()> {
+        let hash = self.event(event_id).await?["terms_hash"].clone();
+        let args = json!({ "event_id": event_id, "terms_hash": hash });
+        self.call(verifier, "accept_verification", args, ONE_YOCTO, TGAS)
+            .await?
+            .assert_success();
+        Ok(())
+    }
+
+    /// Buys a ticket for exactly `price` and returns its token id.
+    pub async fn buy(&self, buyer: &Account, event_id: u32, price: u128) -> TestResult<String> {
+        let deposit = NearToken::from_yoctonear(price);
+        let args = json!({ "event_id": event_id });
+        let result = self.call(buyer, "buy_ticket", args, deposit, TGAS).await?;
+        Ok(result.assert_success().json()?)
+    }
+
+    /// A plain `nft_transfer`, sent as `from`.
+    pub async fn transfer(
+        &self,
+        from: &Account,
+        to: &AccountId,
+        token_id: &str,
+    ) -> TestResult<ExecutionFinalResult> {
+        let args =
+            json!({ "receiver_id": to, "token_id": token_id, "approval_id": null, "memo": null });
+        self.call(from, "nft_transfer", args, ONE_YOCTO, TGAS).await
+    }
+
+    pub async fn event(&self, event_id: u32) -> TestResult<Value> {
+        self.view("get_event", json!({ "event_id": event_id }))
+            .await
+    }
+
+    pub async fn ticket(&self, token_id: &str) -> TestResult<Value> {
+        self.view("get_ticket", json!({ "token_id": token_id }))
+            .await
+    }
+
+    /// The event's ledger, after checking the accounting identity on it.
+    pub async fn accounting(&self, event_id: u32) -> TestResult<Value> {
+        let view: Value = self
+            .view("get_accounting", json!({ "event_id": event_id }))
+            .await?;
+        assert_identity(&view);
+        Ok(view)
+    }
+}
+
+/// Event terms with the given start, end and deadline. Title, venue and price are the defaults.
+pub fn terms(verifier: &Account, times: [u64; 3], capacity: u32) -> Value {
+    json!({
+        "title": "Jazz night",
+        "venue": "Teatro Municipal",
+        "starts_at_ms": times[0],
+        "ends_at_ms": times[1],
+        "resolution_deadline_ms": times[2],
+        "price": PRICE.to_string(),
+        "capacity": capacity,
+        "verifier_id": verifier.0,
+    })
+}
+
+/// A yoctoNEAR amount field of a view.
+#[track_caller]
+pub fn amount(view: &Value, field: &str) -> u128 {
+    view[field]
+        .as_str()
+        .and_then(|text| text.parse().ok())
+        .unwrap_or_else(|| panic!("{field} is not a decimal amount string: {view}"))
+}
+
+/// Asserts the accounting identity on an `AccountingView`.
+#[track_caller]
+pub fn assert_identity(view: &Value) {
+    let parts = [
+        "principal_reserved",
+        "organizer_available",
+        "refund_pending",
+        "organizer_pending",
+        "refunds_settled",
+        "organizer_settled",
+    ];
+    let sum: u128 = parts.iter().map(|field| amount(view, field)).sum();
+    assert_eq!(
+        sum,
+        amount(view, "principal_received"),
+        "accounting identity broken: {view}"
+    );
+}
+
+/// The failure of a transaction as text, or `None` if it succeeded.
+pub fn failure_text(result: &ExecutionFinalResult) -> Option<String> {
+    match result.clone().into_result() {
+        Ok(_) => None,
+        Err(failure) => Some(failure.to_string()),
+    }
+}
+
+/// Asserts that a transaction failed with a contract panic that starts with `code`.
+#[track_caller]
+pub fn assert_fails_with(result: &ExecutionFinalResult, code: &str) {
+    let text = failure_text(result)
+        .unwrap_or_else(|| panic!("expected {code}, but the transaction succeeded"));
+    assert!(
+        text.contains(&format!("Smart contract panicked: {code}: ")),
+        "expected {code}, got: {text}"
+    );
+}
+
+/// The `EVENT_JSON` logs of a transaction whose `event` field is `name`.
+pub fn events_named(result: &ExecutionFinalResult, name: &str) -> Vec<Value> {
+    result
+        .logs()
+        .iter()
+        .filter_map(|line| line.strip_prefix("EVENT_JSON:"))
+        .filter_map(|text| near_sdk::serde_json::from_str::<Value>(text).ok())
+        .filter(|event| event["event"] == name)
+        .collect()
 }

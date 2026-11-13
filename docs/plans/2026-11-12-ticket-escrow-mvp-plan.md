@@ -430,11 +430,11 @@ Needs Walter's go for three things: installing the Rust toolchain in his WSL, cr
 
 **Interfaces.** Produces every method of the frozen interface except `claim_refund`, `claim_payout`, the two callbacks and `get_operation`; `quote_event_budget` uses provisional constants.
 
-- [ ] Write the failing tests `t01`, `t02`, `t04`, `t05`, `t06`, `t15`, `t17`, `t21` and the Review Focus 4 test `create_event_rejects_bad_terms` (verifier equal to organizer, price `0`, capacity `0` and `101`, start in the past, title of 121 bytes).
-- [ ] Run the contract check command. Expected: the new tests fail to compile or fail.
-- [ ] Implement. Notes the signatures do not decide: validate before any state change; `terms_hash` as defined above; `buy_ticket` mints with `internal_mint_with_refund(.., None)` and emits `NftMint`; the accounting identity is asserted by a `debug_assert!` helper called at the end of every state-changing method and checked in every test through `get_accounting`.
-- [ ] Run the check command. Expected: all listed tests pass.
-- [ ] Commit `feat(contract): event rules, purchases and per-event accounting`, tick, push.
+- [x] Write the failing tests `t01`, `t02`, `t04`, `t05`, `t06`, `t15`, `t17`, `t21` and the Review Focus 4 test `create_event_rejects_bad_terms` (verifier equal to organizer, price `0`, capacity `0` and `101`, start in the past, title of 121 bytes).
+- [x] Run the contract check command. Expected: the new tests fail to compile or fail.
+- [x] Implement. Notes the signatures do not decide: validate before any state change; `terms_hash` as defined above; `buy_ticket` mints with `internal_mint_with_refund(.., None)` and emits `NftMint`; the accounting identity is asserted by a `debug_assert!` helper called at the end of every state-changing method and checked in every test through `get_accounting`.
+- [x] Run the check command. Expected: all listed tests pass.
+- [x] Commit `feat(contract): event rules, purchases and per-event accounting`, tick, push.
 
 ### Task C2: settlement
 
