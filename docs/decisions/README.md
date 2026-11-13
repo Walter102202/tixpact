@@ -74,3 +74,4 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | Client v2: token calls name their receiver, terms default to NEAR, token reads are `Reader` methods, views require `currency` | `2026-11-13-client-v2-interface-additions.md` |
 | 2026-11-13 | A purchase is judged by the `ticket_purchased` event of a receipt that succeeded, from the contract when its id is given | `2026-11-13-client-v2-purchase-verdict-from-logged-events.md` |
 | 2026-11-13 | `FIXTURES` stays the NEAR chain; `FIXTURES_WITH_TOKENS` adds three tUSD events, one per outcome | `2026-11-13-client-v2-fixtures-keep-near-set-and-add-a-token-set.md` |
+| 2026-11-13 | The agent buys only in NEAR (its caps are in NEAR) and reads, claims and checks every currency | `2026-11-13-agent-buys-in-near-and-reads-every-currency.md` |

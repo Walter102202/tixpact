@@ -1,11 +1,13 @@
 import {
   CLAIM_LABELS,
   type EventView,
+  formatAmount,
   formatDateTime,
   formatNear,
   PHASE_LABELS,
   PROMISE_TEXT,
   type TicketView,
+  type TokenSpec,
 } from '@ticket-escrow/client';
 import { FailoverRpcError } from 'near-api-js';
 import type { ToolOutput, WriteResult } from './schemas.js';
@@ -15,6 +17,27 @@ import type { ToolOutput, WriteResult } from './schemas.js';
 // zone that means the same to every agent.
 
 export const near = (yocto: string) => `${formatNear(yocto, 24)} NEAR`;
+
+/**
+ * An amount in its own currency, exact: NEAR for `null`, otherwise the token's symbol and decimals
+ * from `tokens` (`Config.tokens`). A token the contract does not list cannot price an event; if one
+ * shows up anyway, the amount is written in its smallest unit rather than with a guessed unit.
+ */
+export function money(
+  amount: string,
+  currency: string | null,
+  tokens: readonly TokenSpec[],
+): string {
+  if (currency === null) return near(amount);
+  const token = tokens.find((t) => t.account_id === currency);
+  return token === undefined
+    ? `${amount} in the smallest unit of ${currency}`
+    : formatAmount(amount, token);
+}
+
+/** The symbol of a currency, for sentences: NEAR, or the token's symbol, or its account. */
+const symbolOf = (currency: string | null, tokens: readonly TokenSpec[]) =>
+  currency === null ? 'NEAR' : (tokens.find((t) => t.account_id === currency)?.symbol ?? currency);
 
 /** Said once in every result that shows text the organizer or the verifier wrote. */
 export const QUOTED_NOTE =
@@ -67,19 +90,19 @@ function outcomeLine(event: EventView): string {
   }
 }
 
-function eventSummary(event: EventView): string {
+function eventSummary(event: EventView, tokens: readonly TokenSpec[]): string {
   // Accepting the terms is not confirming the event: the outcome is in the phase and in get_event.
   const confirm = event.verifier_accepted
     ? `verifier ${event.verifier_id} accepted the terms`
     : `waiting for ${event.verifier_id} to accept the terms`;
-  return `- Event ${event.event_id}, ${quoted(event.title)}: ${PHASE_LABELS[event.phase]}, ${near(event.price)} per ticket, ${event.sold} of ${event.capacity} sold, starts ${when(event.starts_at_ms)}, ${confirm}`;
+  return `- Event ${event.event_id}, ${quoted(event.title)}: ${PHASE_LABELS[event.phase]}, ${money(event.price, event.currency, tokens)} per ticket, ${event.sold} of ${event.capacity} sold, starts ${when(event.starts_at_ms)}, ${confirm}`;
 }
 
 export function formatEvents(output: ToolOutput<'list_events'>, fromIndex: number): string {
   if (output.events.length === 0) {
     return fromIndex === 0 ? 'No events yet.' : `No events from position ${fromIndex}.`;
   }
-  const lines = ['# Events', '', ...output.events.map(eventSummary)];
+  const lines = ['# Events', '', ...output.events.map((e) => eventSummary(e, output.tokens))];
   if (output.next_from_index !== null) {
     lines.push('', `More may follow: call list_events with from_index ${output.next_from_index}.`);
   }
@@ -91,31 +114,44 @@ export function formatEvents(output: ToolOutput<'list_events'>, fromIndex: numbe
   return lines.join('\n');
 }
 
-export function formatEvent({ event, accounting }: ToolOutput<'get_event'>): string {
+export function formatEvent({ event, accounting, tokens }: ToolOutput<'get_event'>): string {
+  const price = (amount: string) => money(amount, event.currency, tokens);
   const lines = [
     `# Event ${event.event_id}: ${quoted(event.title)} (${PHASE_LABELS[event.phase]})`,
     '',
     `Venue: ${quoted(event.venue)}`,
-    `Price: ${near(event.price)} per ticket; ${event.sold} of ${event.capacity} sold.`,
+    `Price: ${price(event.price)} per ticket; ${event.sold} of ${event.capacity} sold.`,
+  ];
+  if (event.currency !== null) {
+    const symbol = symbolOf(event.currency, tokens);
+    lines.push(
+      `Currency: ${symbol}, the token ${event.currency}. Its price, its refunds and the organizer's payout are in ${symbol}. This agent buys only events priced in NEAR: its caps are in NEAR.`,
+    );
+  }
+  lines.push(
     `Starts: ${when(event.starts_at_ms)}. Ends: ${when(event.ends_at_ms)}.`,
     `Organizer: ${event.organizer_id}`,
     verifierLine(event),
     `Deadline for the confirmation: ${when(event.resolution_deadline_ms)}.`,
     `What triggers a refund: the organizer or ${event.verifier_id} cancels before the deadline, or the deadline passes without ${event.verifier_id} confirming. Then whoever holds a ticket can claim its price back, and after the deadline anyone can switch the event to refunds (expire_event).`,
     outcomeLine(event),
-  ];
+  );
   if (accounting !== null) {
     lines.push(
-      `Reserved in the contract for this event's tickets: ${near(accounting.principal_reserved)}.`,
+      `Reserved in the contract for this event's tickets: ${price(accounting.principal_reserved)}.`,
     );
   }
   lines.push('', PROMISE_TEXT, '', QUOTED_NOTE);
   return lines.join('\n');
 }
 
-function claimSentence(ticket: TicketView, event: EventView | null): string {
+function claimSentence(
+  ticket: TicketView,
+  event: EventView | null,
+  tokens: readonly TokenSpec[],
+): string {
   const word = CLAIM_LABELS[ticket.claim];
-  const price = near(ticket.principal);
+  const price = money(ticket.principal, ticket.currency, tokens);
   switch (ticket.claim) {
     case 'Reserved':
       return event !== null &&
@@ -134,7 +170,7 @@ function claimSentence(ticket: TicketView, event: EventView | null): string {
   }
 }
 
-export function formatTicket({ ticket, event, history }: ToolOutput<'get_ticket'>): string {
+export function formatTicket({ ticket, event, history, tokens }: ToolOutput<'get_ticket'>): string {
   const lines = [
     `# Ticket ${ticket.token_id}`,
     '',
@@ -142,8 +178,8 @@ export function formatTicket({ ticket, event, history }: ToolOutput<'get_ticket'
       ? `Event ${ticket.event_id}`
       : `Event ${event.event_id}: ${quoted(event.title)} (${PHASE_LABELS[event.phase]})`,
     `Holder: ${ticket.owner_id}. The holder owns the right to the refund.`,
-    `Principal: ${near(ticket.principal)}.`,
-    `Claim: ${claimSentence(ticket, event)}`,
+    `Principal: ${money(ticket.principal, ticket.currency, tokens)}.`,
+    `Claim: ${claimSentence(ticket, event, tokens)}`,
   ];
   if (history !== null) {
     lines.push('', 'History:');
@@ -161,7 +197,7 @@ export function formatMyTickets(output: ToolOutput<'list_my_tickets'>): string {
   if (output.tickets.length === 0) lines.push('No tickets.');
   for (const ticket of output.tickets) {
     lines.push(
-      `- Ticket ${ticket.token_id} (event ${ticket.event_id}): ${near(ticket.principal)}, ${CLAIM_LABELS[ticket.claim]}`,
+      `- Ticket ${ticket.token_id} (event ${ticket.event_id}): ${money(ticket.principal, ticket.currency, output.tokens)}, ${CLAIM_LABELS[ticket.claim]}`,
     );
   }
   const inFlight = BigInt(output.in_flight);
@@ -172,6 +208,9 @@ export function formatMyTickets(output: ToolOutput<'list_my_tickets'>): string {
       ? `Exposure counted by the cap: ${near(output.exposure)} (tickets whose price is still in the contract).`
       : `Exposure counted by the cap: ${near(output.exposure)} (${near(listed.toString())} in tickets listed, ${near(output.in_flight)} in purchases signed but not visible yet).`,
   );
+  if (output.tickets.some((t) => t.currency !== null)) {
+    lines.push('Tickets priced in a token are not counted: the caps are in NEAR.');
+  }
   return lines.join('\n');
 }
 
@@ -201,10 +240,14 @@ export function formatContractProof(proof: ToolOutput<'verify_contract'>): strin
     `Code hash: ${proof.code_hash}`,
     keys,
     `Balance: ${near(proof.balance)}.`,
-    `Owed to ticket holders and organizers: ${near(proof.held)} (reserved principal ${near(proof.reserved_principal)}, across ${proof.events_counted} events).`,
+    `Owed to ticket holders and organizers: ${near(proof.held)} (reserved principal ${near(proof.reserved_principal)}, across ${proof.near_events} events priced in NEAR).`,
     proof.balance_covers_held
       ? 'The balance covers what the contract owes.'
       : 'The balance does NOT cover what the contract owes.',
+    ...proof.tokens_held.map(
+      (t) =>
+        `${t.symbol} (${t.account_id}): the contract holds ${formatAmount(t.balance, t)} and owes ${formatAmount(t.held, t)} across ${t.events} events. ${t.balance_covers_held ? 'The balance covers it.' : 'The balance does NOT cover it.'}`,
+    ),
     `Read at block ${proof.block_height}.`,
   ].join('\n');
 }
