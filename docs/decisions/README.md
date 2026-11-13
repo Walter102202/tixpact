@@ -34,3 +34,8 @@ Newest first. Add one line per record.
 
 | Date | Decision | File |
 |---|---|---|
+| 2026-11-12 | The promise sentence and the phase and claim words live in the client package | [2026-11-12-shared-words-live-in-client.md](2026-11-12-shared-words-live-in-client.md) |
+| 2026-11-12 | Each RPC endpoint gets three attempts before the next one is tried | [2026-11-12-rpc-retries-before-failover.md](2026-11-12-rpc-retries-before-failover.md) |
+| 2026-11-12 | Amounts round toward zero; times use a 24-hour clock with the zone name | [2026-11-12-amount-and-time-display.md](2026-11-12-amount-and-time-display.md) |
+| 2026-11-12 | View schemas drop unknown fields; what we send is strict | [2026-11-12-view-schemas-tolerate-extra-fields.md](2026-11-12-view-schemas-tolerate-extra-fields.md) |
+| 2026-11-12 | A transaction is judged on its final status, and any failed receipt makes it a failure | [2026-11-12-tx-tracking-judged-at-final.md](2026-11-12-tx-tracking-judged-at-final.md) |
