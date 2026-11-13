@@ -83,6 +83,20 @@ export interface Reader {
    * never reads as "missing". Optional, so readers written before it stay valid.
    */
   accountExists?(accountId: string): Promise<boolean>;
+  /** `ft_balance_of` on a NEP-141 token: the account's balance in the token's smallest unit. */
+  tokenBalance(token: string, accountId: string): Promise<string>;
+  /**
+   * Whether `accountId` is registered with a NEP-141 token (`storage_balance_of` is not null), and
+   * the token's minimum registration deposit in yoctoNEAR (`storage_balance_bounds().min`).
+   */
+  tokenRegistration(token: string, accountId: string): Promise<TokenRegistration>;
+}
+
+/** An account's standing with a NEP-141 token, for `actions.registerWithToken`. */
+export interface TokenRegistration {
+  registered: boolean;
+  /** yoctoNEAR. */
+  minDeposit: string;
 }
 
 export type ReaderOptions =
@@ -147,6 +161,11 @@ const AccountStateSchema = z.object({
   block_height: z.int().min(0),
 });
 
+/** NEP-145 `storage_balance_of`: null when the account is not registered. */
+const StorageBalanceSchema = z.object({ total: YoctoSchema, available: YoctoSchema }).nullable();
+/** NEP-145 `storage_balance_bounds`. */
+const StorageBoundsSchema = z.object({ min: YoctoSchema, max: YoctoSchema.nullable() });
+
 const AccessKeyPageSchema = z.object({
   keys: z.array(z.unknown()),
   last_key: z.string().nullish(),
@@ -173,14 +192,17 @@ export function createReader(options: ReaderOptions): Reader {
   const { contractId } = options;
   const rpc: ReaderRpc = 'rpc' in options ? options.rpc : createRpc(options.rpcUrls);
 
-  async function view<S extends z.ZodType>(
+  async function viewOn<S extends z.ZodType>(
+    contract: string,
     method: string,
     args: Record<string, unknown>,
     schema: S,
   ): Promise<z.output<S>> {
-    const raw = await rpc.callFunction({ contractId, method, args, blockQuery: FINAL });
-    return parse(method, schema, raw);
+    const raw = await rpc.callFunction({ contractId: contract, method, args, blockQuery: FINAL });
+    return parse(contract === contractId ? method : `${method} on ${contract}`, schema, raw);
   }
+  const view = <S extends z.ZodType>(method: string, args: Record<string, unknown>, schema: S) =>
+    viewOn(contractId, method, args, schema);
 
   return {
     contractId,
@@ -234,6 +256,17 @@ export function createReader(options: ReaderOptions): Reader {
         accessKeys,
         blockHeight: account.block_height,
       };
+    },
+
+    tokenBalance: (token, accountId) =>
+      viewOn(token, 'ft_balance_of', { account_id: accountId }, YoctoSchema),
+
+    async tokenRegistration(token, accountId) {
+      const [balance, bounds] = await Promise.all([
+        viewOn(token, 'storage_balance_of', { account_id: accountId }, StorageBalanceSchema),
+        viewOn(token, 'storage_balance_bounds', {}, StorageBoundsSchema),
+      ]);
+      return { registered: balance !== null, minDeposit: bounds.min };
     },
 
     async accountExists(accountId) {

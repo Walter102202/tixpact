@@ -69,19 +69,20 @@ const near = (yocto: bigint | string) => `${formatNear(yocto.toString(), 24)} NE
 /** Exact Tgas: formatNear divides by 10^24, so gas units scaled by 10^12 come out in Tgas. */
 const tgas = (gas: bigint) => formatNear((gas * TGAS).toString(), 24);
 
-/**
- * The principal of the tickets whose money is still held by the contract: reserved, claimable, or
- * on its way back. Refunded tickets returned their money; released ones paid for an event that took
- * place. Returns yoctoNEAR.
- */
 /** Whether a ticket in this claim state still has its price inside the contract for its holder. */
 export function isExposedClaim(claim: Claim): boolean {
   return EXPOSED.has(claim);
 }
 
+/**
+ * The principal of the NEAR tickets whose money is still held by the contract: reserved, claimable,
+ * or on its way back. Refunded tickets returned their money; released ones paid for an event that
+ * took place. Tickets priced in a token are not counted: the caps are in NEAR, and the agent never
+ * buys in a token. Returns yoctoNEAR.
+ */
 export function exposureOf(tickets: readonly TicketView[]): string {
   return tickets
-    .filter((ticket) => isExposedClaim(ticket.claim))
+    .filter((ticket) => ticket.currency === null && isExposedClaim(ticket.claim))
     .reduce((sum, ticket) => sum + BigInt(ticket.principal), 0n)
     .toString();
 }

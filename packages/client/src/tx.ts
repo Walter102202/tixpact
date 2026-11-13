@@ -37,13 +37,34 @@ export interface FailedReceipt {
   error: ContractError;
 }
 
+/** A NEP-297 event (`EVENT_JSON:` log) written by a receipt that succeeded. */
+export interface ContractEvent {
+  /** The account whose receipt wrote the log. */
+  executorId: string;
+  receiptId: string;
+  standard: string;
+  version: string;
+  event: string;
+  data: unknown;
+}
+
 export interface TxResult {
   ok: boolean;
   /** The first failed receipt, in the order the node lists them. */
   failedReceipt?: FailedReceipt;
   /** The decoded return value of the transaction, when it has one. */
   value?: unknown;
+  /**
+   * The NEP-297 events of every receipt that succeeded, in the node's order. Always set by
+   * `summarizeTransaction` and `trackTransaction`; a log of a failed receipt is never here.
+   */
+  events?: ContractEvent[];
 }
+
+/** How a purchase ended: the ticket bought, or nothing bought and the contract's code when it gave one. */
+export type PurchaseResult =
+  | { bought: true; tokenId: string }
+  | { bought: false; code: string | null };
 
 export interface TrackOptions {
   /** Requests per stage before giving up. Default 20. */
@@ -234,6 +255,20 @@ export function summarizeTransaction(status: TxStatus): TxResult {
  */
 export function moneyMoved(result: TxResult): boolean {
   return result.ok && result.value === true;
+}
+
+/**
+ * Whether a purchase bought a ticket, for `buy_ticket` (NEAR) and for `ft_transfer_call` on a token
+ * alike. A token purchase succeeds as a transaction even when the contract rejected it, because the
+ * token refunds the buyer in its resolver: so the verdict comes from the receipts. Bought when a
+ * receipt that succeeded logged `ticket_purchased` of standard `ticket_escrow` (its `token_id` is the
+ * ticket); with `contractId`, only that contract's log counts. Otherwise not bought, with the `ERR_`
+ * code of the failed receipt, or null when there is none.
+ */
+export function purchaseResult(outcome: TxResult, contractId?: string): PurchaseResult {
+  void outcome;
+  void contractId;
+  throw new Error('purchaseResult is not implemented yet (lane K2, task K1)');
 }
 
 export interface ReadUntilChangedOptions {

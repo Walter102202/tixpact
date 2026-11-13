@@ -474,7 +474,8 @@ export function createAgent(deps: AgentDeps): Agent {
           events.slice(start, start + READ_BATCH).map((e) => reader.getAccounting(e.event_id)),
         );
         for (const row of rows) {
-          if (row === null) continue;
+          // The balance read is NEAR; a token event's amounts are in its token.
+          if (row === null || row.currency !== null) continue;
           reserved += BigInt(row.principal_reserved);
           held += BigInt(row.principal_reserved) + BigInt(row.organizer_available);
         }

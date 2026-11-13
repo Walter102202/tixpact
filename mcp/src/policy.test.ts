@@ -139,6 +139,7 @@ describe('exposureOf', () => {
     status: claim === 'RefundPending' ? 'RefundPending' : 'Active',
     claim,
     pending_operation_id: null,
+    currency: null,
   });
 
   it('counts the principal still inside the contract: reserved, claimable or being sent', () => {
