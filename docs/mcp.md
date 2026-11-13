@@ -309,5 +309,38 @@ It starts the built server as a child process over stdio, exactly as an MCP clie
 
 ## Verification
 
-- 2026-11-13, offline: `pnpm --filter @ticket-escrow/mcp test` runs the tools through the SDK's in-memory client and server pair on the fixture chain with a recording signer, the policy, the configuration, the signer against a fake provider, the start-up network check and the watcher (104 tests). The built server over stdio, through the smoke script against an RPC that refuses connections, listed the ten tools and reported the failed read as a tool error.
-- Testnet: pending the deployed contract (spike S4 and the smoke run with a key).
+- 2026-11-13, offline: `pnpm --filter @ticket-escrow/mcp test` runs the tools through the SDK's in-memory client and server pair on the fixture chain with a recording signer, the policy, the configuration, the signer against a fake provider, the start-up network check and the watcher (105 tests). The built server over stdio, through the smoke script against an RPC that refuses connections, listed the ten tools and reported the failed read as a tool error.
+- 2026-11-13, testnet, contract `te-d2-escrow.testnet` (the C1 build), default endpoints:
+  - Read-only smoke (`CONTRACT_ID=te-d2-escrow.testnet pnpm --filter @ticket-escrow/mcp smoke`), output as printed:
+
+    ```text
+    ticket-escrow-agent on testnet: contract te-d2-escrow.testnet, read-only (no key configured).
+    Tools (10): list_events, get_event, get_ticket, list_my_tickets, get_wallet, verify_contract, buy_ticket, transfer_ticket, expire_event, claim_refund
+
+    ## list_events {}
+    # Events
+
+    - Event 1, Jazz night: Refunds open, 0.5 NEAR per ticket, 1 of 5 sold, starts Nov 13, 2026, 02:36 UTC, confirmed by te-d1-verifier.testnet
+    - Event 2, CLI check: Deadline passed, 0.5 NEAR per ticket, 0 of 1 sold, starts Nov 13, 2026, 02:49 UTC, awaiting te-d1-verifier.testnet
+    - Event 3, Direct calls: Refunds open, 0.5 NEAR per ticket, 1 of 1 sold, starts Nov 13, 2026, 02:50 UTC, confirmed by te-d1-verifier.testnet
+
+    Call get_event with an event id for who confirms it, its deadline and its refunds.
+
+    ## verify_contract {}
+    # Contract te-d2-escrow.testnet
+
+    Code hash: 5mUYYyDFEukP1TGwHEHmJQu91mRcNnJvEXqa6adtonxF
+    1 access keys: this deployment can still be changed.
+    Balance: 11.217828432123220500000003 NEAR.
+    Owed to ticket holders and organizers: 1 NEAR (reserved principal 1 NEAR, across 3 events).
+    The balance covers what the contract owes.
+    Read at block 277453202.
+
+    No AGENT_PRIVATE_KEY: read-only run, nothing bought.
+
+    Smoke passed.
+    ```
+
+    That run printed "1 access keys"; the text now says "1 access key". The development deployment still has its key; the final one has none (plan, R10).
+  - With the key of `te-d1-agent.testnet` and caps 2 NEAR per ticket and 5 NEAR of exposure: both endpoints answered chain `testnet` at start, so signing was on. `get_wallet` returned `"balance": "10000000000000000000000000", "can_sign": true, "signing_off_reason": null, "exposure": "0", "headroom": "5000000000000000000000000"`; `list_my_tickets` returned no tickets; one watcher round logged `Nothing to claim: 0 tickets held, none claimable now.`
+- Testnet purchase (spike S4 and the smoke run with a key): pending an event on sale.

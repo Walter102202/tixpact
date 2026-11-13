@@ -347,6 +347,15 @@ describe('read tools', () => {
     });
     expect(result.text).toContain('0 access keys: nobody can change this contract');
   });
+
+  it('verify_contract says a deployment with keys can still be changed, in plain words', async () => {
+    const withKeys = (accessKeys: number) =>
+      createFixtureReader({ ...DATA, accountProof: { ...DATA.accountProof, accessKeys } });
+    const one = await call(await connect(deps(null, { reader: withKeys(1) })), 'verify_contract');
+    expect(one.text).toContain('1 access key: this deployment can still be changed.');
+    const two = await call(await connect(deps(null, { reader: withKeys(2) })), 'verify_contract');
+    expect(two.text).toContain('2 access keys: this deployment can still be changed.');
+  });
 });
 
 describe('buy_ticket', () => {

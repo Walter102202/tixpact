@@ -173,7 +173,7 @@ export function formatContractProof(proof: ToolOutput<'verify_contract'>): strin
   const keys =
     proof.access_keys === 0
       ? '0 access keys: nobody can change this contract.'
-      : `${proof.access_keys} access keys: this deployment can still be changed.`;
+      : `${proof.access_keys} access ${proof.access_keys === 1 ? 'key' : 'keys'}: this deployment can still be changed.`;
   return [
     `# Contract ${proof.contract_id}`,
     '',
