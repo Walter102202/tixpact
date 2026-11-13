@@ -307,36 +307,37 @@ const PolicySchema = z.object({
   default_vote_policy: z.unknown(),
 });
 
-/** Permissions that let a role vote to approve a function call (the label of `FunctionCall` is "call"). */
-const APPROVES_CALLS = new Set(['*:*', 'call:*', '*:VoteApprove', 'call:VoteApprove']);
+/**
+ * Proposal labels that decide function calls or can change who decides them (`proposals.rs`,
+ * `to_policy_label`): a member who can pass any of these alone can rewrite the rules, then call.
+ * Every other label that starts with `policy` found in the policy is added.
+ */
+const RULE_LABELS = [
+  'call',
+  'config',
+  'add_member_to_role',
+  'remove_member_from_role',
+  'upgrade_self',
+  'upgrade_remote',
+  'policy',
+  'policy_add_or_update_role',
+  'policy_remove_role',
+  'policy_update_default_vote_policy',
+  'policy_update_parameters',
+];
+
+/** Whether these permissions let a role vote to approve a proposal with this label. */
+const canApprove = (permissions: string[], label: string) =>
+  permissions.some(
+    (p) =>
+      p === '*:*' || p === `${label}:*` || p === '*:VoteApprove' || p === `${label}:VoteApprove`,
+  );
 
 const GroupKindSchema = z.object({ Group: z.array(AccountIdSchema).min(1) });
 
-/**
- * The group that decides a DAO's function calls, or null. It answers only when exactly one role of
- * any kind may approve function calls, that role is a `Group`, and its vote policy for calls (its
- * own `call` entry, else the default) weighs by role. An `Everyone` role that may approve also
- * gives null, although the contract's tally skips it: the line never says a group decides while
- * another role holds the permission. `needed` is what the contract computes:
- * `max(quorum, min(n, floor(n * num / den) + 1))` for a ratio, `max(quorum, min(n, weight))` for a
- * weight. A policy that can never reach its threshold is null.
- */
-export function groupVerifierOf(policy: unknown): GroupVerifier | null {
-  const parsed = PolicySchema.safeParse(policy);
-  if (!parsed.success) return null;
-  const approvers = parsed.data.roles.filter((role) =>
-    role.permissions.some((p) => APPROVES_CALLS.has(p)),
-  );
-  const [role] = approvers;
-  if (approvers.length !== 1 || role === undefined) return null;
-  const group = GroupKindSchema.safeParse(role.kind);
-  if (!group.success) return null;
-  const vote = VotePolicySchema.safeParse(role.vote_policy.call ?? parsed.data.default_vote_policy);
-  if (!vote.success || vote.data.weight_kind !== 'RoleWeight') return null;
-
-  const members = [...new Set(group.data.Group)];
-  const n = BigInt(members.length);
-  const { threshold, quorum } = vote.data;
+/** Votes a proposal needs under this policy, as the contract computes it, for a group of `n`. */
+function votesNeeded(vote: z.infer<typeof VotePolicySchema>, n: bigint): bigint {
+  const { threshold, quorum } = vote;
   // BigInt throughout: a weight is a U128 and a ratio's terms are u64.
   let needed =
     typeof threshold === 'string'
@@ -344,6 +345,57 @@ export function groupVerifierOf(policy: unknown): GroupVerifier | null {
       : (n * BigInt(threshold[0])) / BigInt(threshold[1]) + 1n;
   if (needed > n) needed = n;
   if (BigInt(quorum) > needed) needed = BigInt(quorum);
-  if (needed < 1n || needed > n) return null;
-  return { members, needed: Number(needed) };
+  return needed;
+}
+
+/**
+ * The group that decides a DAO's function calls and its rules, or null. Labels considered:
+ * `RULE_LABELS` and every `policy…` label in the policy. Every role that may approve any of them
+ * (`*:*`, `<label>:*`, `*:VoteApprove`, `<label>:VoteApprove`) is an approver, `Everyone` included
+ * (the contract's tally skips it, but the line never says a group decides while another role holds
+ * the permission). It answers only when there is exactly one approver, it is a `Group`, it may
+ * approve `call`, and its vote policy for each label it may approve (its own entry for the label,
+ * else the default) weighs by role. `needed` is the fewest votes that pass any of those labels:
+ * `max(quorum, min(n, floor(n * num / den) + 1))` for a ratio, `max(quorum, min(n, weight))` for a
+ * weight. A label whose threshold exceeds the group can never pass and is left out; if that label
+ * is `call`, or a threshold is 0, the answer is null.
+ */
+export function groupVerifierOf(policy: unknown): GroupVerifier | null {
+  const parsed = PolicySchema.safeParse(policy);
+  if (!parsed.success) return null;
+  const { roles, default_vote_policy } = parsed.data;
+  const labels = new Set(RULE_LABELS);
+  for (const role of roles) {
+    for (const label of [
+      ...role.permissions.map((p) => p.split(':')[0] ?? ''),
+      ...Object.keys(role.vote_policy),
+    ]) {
+      if (label.startsWith('policy')) labels.add(label);
+    }
+  }
+
+  const approvers = roles.filter((role) =>
+    [...labels].some((label) => canApprove(role.permissions, label)),
+  );
+  const [role] = approvers;
+  if (approvers.length !== 1 || role === undefined) return null;
+  const group = GroupKindSchema.safeParse(role.kind);
+  if (!group.success || !canApprove(role.permissions, 'call')) return null;
+
+  const members = [...new Set(group.data.Group)];
+  const n = BigInt(members.length);
+  let fewest: bigint | null = null;
+  for (const label of labels) {
+    if (!canApprove(role.permissions, label)) continue;
+    const vote = VotePolicySchema.safeParse(role.vote_policy[label] ?? default_vote_policy);
+    if (!vote.success || vote.data.weight_kind !== 'RoleWeight') return null;
+    const needed = votesNeeded(vote.data, n);
+    if (needed < 1n) return null;
+    if (needed > n) {
+      if (label === 'call') return null;
+      continue;
+    }
+    if (fewest === null || needed < fewest) fewest = needed;
+  }
+  return fewest === null ? null : { members, needed: Number(fewest) };
 }

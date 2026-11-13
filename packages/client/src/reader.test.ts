@@ -395,15 +395,78 @@ describe('readGroupVerifier', () => {
     expect(ratio([1, 2], ['a.testnet', 'b.testnet'])).toBe(2);
   });
 
-  it("uses the role's own policy for function calls before the default one", async () => {
+  it("uses the role's own policy for a label before the default one", async () => {
     const { group } = await read(
       daoPolicy({
         council: {
+          permissions: ['call:VoteApprove'],
           vote_policy: { call: { weight_kind: 'RoleWeight', quorum: '0', threshold: [1, 1] } },
         },
       }),
     );
     expect(group?.needed).toBe(3);
+  });
+
+  describe('counts every label that can change who decides calls', () => {
+    const byOne = { weight_kind: 'RoleWeight', quorum: '0', threshold: '1' };
+
+    it('one member alone can change the policy: needed is 1, not 2', () => {
+      for (const label of ['policy', 'policy_add_or_update_role', 'policy_update_parameters']) {
+        const policy = daoPolicy({
+          council: { permissions: ['*:*'], vote_policy: { [label]: byOne } },
+        });
+        expect(groupVerifierOf(policy), label).toEqual({ members: COUNCIL, needed: 1 });
+      }
+    });
+
+    it('one member alone can add or remove members, or upgrade the contract: needed is 1', () => {
+      for (const label of [
+        'add_member_to_role',
+        'remove_member_from_role',
+        'upgrade_self',
+        'upgrade_remote',
+        'config',
+      ]) {
+        const policy = daoPolicy({ council: { vote_policy: { [label]: byOne } } });
+        expect(groupVerifierOf(policy), label).toEqual({ members: COUNCIL, needed: 1 });
+      }
+    });
+
+    it('another group that can approve a policy change, an upgrade or a new member gives null', () => {
+      for (const permission of [
+        'policy:VoteApprove',
+        'policy_remove_role:*',
+        'upgrade_self:VoteApprove',
+        'add_member_to_role:VoteApprove',
+      ]) {
+        const policy = daoPolicy();
+        policy.roles.push({
+          name: 'board',
+          kind: { Group: ['a.testnet'] },
+          permissions: [permission],
+          vote_policy: {},
+        } as never);
+        expect(groupVerifierOf(policy), permission).toBeNull();
+      }
+    });
+
+    it('a label that weighs by token gives null; a label that can never pass is left out', () => {
+      const tokenWeight = { weight_kind: 'TokenWeight', quorum: '0', threshold: [1, 2] };
+      expect(
+        groupVerifierOf(daoPolicy({ council: { vote_policy: { policy: tokenWeight } } })),
+      ).toBeNull();
+      const never = { weight_kind: 'RoleWeight', quorum: '9', threshold: [1, 2] };
+      expect(
+        groupVerifierOf(daoPolicy({ council: { vote_policy: { upgrade_self: never } } })),
+      ).toEqual({ members: COUNCIL, needed: 2 });
+      expect(groupVerifierOf(daoPolicy({ council: { vote_policy: { call: never } } }))).toBeNull();
+    });
+
+    it('a group that cannot approve calls is not described, even if it decides the policy', () => {
+      expect(
+        groupVerifierOf(daoPolicy({ council: { permissions: ['policy:VoteApprove'] } })),
+      ).toBeNull();
+    });
   });
 
   it('counts the quorum and a fixed weight as the contract does', async () => {
