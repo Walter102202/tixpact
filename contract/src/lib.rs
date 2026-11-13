@@ -4,11 +4,41 @@
 //! the ticket; the organizer is paid only after the verifier agreed in advance confirms the event;
 //! once the deadline passes without that confirmation, anyone can switch the event to refunds.
 //!
-//! This file is the Phase 0 scaffold: initialization and the configuration view. Track C builds the
-//! rules on top of it (plan: `docs/plans/2026-11-12-ticket-escrow-mvp-plan.md`, "Frozen interface").
+//! The rules (R1–R11), methods, JSON shapes and error codes are the plan's "Frozen interface (v1)"
+//! (`docs/plans/2026-11-12-ticket-escrow-mvp-plan.md`). Where each part lives:
+//!
+//! - `events.rs`: `create_event`, `accept_verification`, `cancel_event`, `attest_completed`,
+//!   `expire_event`.
+//! - `tickets.rs`: `buy_ticket` and the NEP-171 token surface (`nft_transfer`, `nft_token`,
+//!   enumeration, metadata).
+//! - `views.rs`: `get_config`, `quote_event_budget`, `get_event`, `list_events`,
+//!   `get_accounting`, `get_ticket`, `list_tickets_for_owner`, `get_ticket_history`.
+//! - `accounting.rs`: the per-event ledger and the storage budget.
+//! - `errors.rs`, `log.rs`: error codes and NEP-297 events.
+//!
+//! The contract has no owner, no admin method and no upgrade method (R10).
 
-use near_sdk::json_types::U128;
-use near_sdk::{PanicOnDefault, near};
+mod accounting;
+mod errors;
+mod events;
+mod log;
+mod tickets;
+mod views;
+
+use near_contract_standards::non_fungible_token::{NonFungibleToken, TokenId};
+use near_sdk::store::{LookupMap, Vector};
+use near_sdk::{PanicOnDefault, env, near};
+
+pub use crate::accounting::Ledger;
+pub use crate::errors::Code;
+pub use crate::events::{EventTerms, Outcome, OutcomeReason};
+pub use crate::tickets::{HistoryEntry, HistoryKind, TicketStatus};
+pub use crate::views::{
+    AccountingView, Claim, Config, EventView, Phase, TicketHistory, TicketView,
+};
+
+use crate::events::EventRecord;
+use crate::tickets::Ticket;
 
 /// Most tickets one event can sell.
 pub const MAX_CAPACITY: u32 = 100;
@@ -27,31 +57,29 @@ pub const MAX_MSG_BYTES: u32 = 1024;
 /// Entries kept in a ticket's history: the first one and the latest fifteen.
 pub const HISTORY_CAP: u32 = 16;
 
-/// Limits and build facts of this deployment, as returned by [`Contract::get_config`].
-#[near(serializers = [json])]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Config {
-    pub version: String,
-    pub max_capacity: u32,
-    pub max_page: u32,
-    pub max_title_bytes: u32,
-    pub max_venue_bytes: u32,
-    pub max_ref_bytes: u32,
-    pub max_memo_bytes: u32,
-    pub max_msg_bytes: u32,
-    pub history_cap: u32,
-    /// Storage an event prepays for itself, in yoctoNEAR. Provisional until Task C4 measures it.
-    pub storage_per_event: U128,
-    /// Storage an event prepays per ticket of capacity, in yoctoNEAR. Provisional until Task C4.
-    pub storage_per_ticket: U128,
-    /// True only in test builds made with the `fault-injection` feature.
-    pub fault_injection: bool,
+/// Storage prefixes. Single ASCII bytes, so they never collide with the standard's per-owner
+/// sets, whose prefixes start with a zero byte.
+mod prefix {
+    pub const TOKEN_OWNERS: &[u8; 1] = b"o";
+    pub const TOKENS_PER_OWNER: &[u8; 1] = b"p";
+    pub const EVENTS: &[u8; 1] = b"e";
+    pub const TICKETS: &[u8; 1] = b"t";
 }
 
-/// The contract has no owner, no admin method and no upgrade method.
+/// The whole state. Every amount it holds for someone is in one event's ledger.
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
-pub struct Contract {}
+pub struct Contract {
+    /// NEP-171 token storage: the only record of who holds each ticket. No token metadata is
+    /// stored (it is derived from the event) and approvals are disabled.
+    pub(crate) tokens: NonFungibleToken,
+    /// Events by `event_id - 1`.
+    pub(crate) events: Vector<EventRecord>,
+    /// Ticket records by token id.
+    pub(crate) tickets: LookupMap<TokenId, Ticket>,
+    /// Sum over all events of `principal_reserved + organizer_available`, in yoctoNEAR.
+    pub(crate) total_held: u128,
+}
 
 #[near]
 impl Contract {
@@ -59,40 +87,20 @@ impl Contract {
     /// put in charge.
     #[init]
     pub fn new() -> Self {
-        Self {}
-    }
-
-    /// Limits and build facts of this deployment.
-    pub fn get_config(&self) -> Config {
-        Config {
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            max_capacity: MAX_CAPACITY,
-            max_page: MAX_PAGE,
-            max_title_bytes: MAX_TITLE_BYTES,
-            max_venue_bytes: MAX_VENUE_BYTES,
-            max_ref_bytes: MAX_REF_BYTES,
-            max_memo_bytes: MAX_MEMO_BYTES,
-            max_msg_bytes: MAX_MSG_BYTES,
-            history_cap: HISTORY_CAP,
-            storage_per_event: U128(0),
-            storage_per_ticket: U128(0),
-            fault_injection: cfg!(feature = "fault-injection"),
+        Self {
+            tokens: NonFungibleToken::new(
+                prefix::TOKEN_OWNERS,
+                env::current_account_id(),
+                None::<Vec<u8>>,
+                Some(prefix::TOKENS_PER_OWNER),
+                None::<Vec<u8>>,
+            ),
+            events: Vector::new(prefix::EVENTS),
+            tickets: LookupMap::new(prefix::TICKETS),
+            total_held: 0,
         }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn config_reports_the_frozen_limits() {
-        let config = Contract::new().get_config();
-
-        assert_eq!(config.version, "1.0.0");
-        assert_eq!(config.max_capacity, 100);
-        assert_eq!(config.max_page, 50);
-        assert_eq!(config.history_cap, 16);
-        assert!(!config.fault_injection);
-    }
-}
+mod tests;
