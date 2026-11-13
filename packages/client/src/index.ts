@@ -19,6 +19,7 @@ export { CLAIM_LABELS, formatDateTime, formatNear, PHASE_LABELS, parseNear } fro
 export type { EntryPass, PassChain, PassCheck, PassRequest, PassRpc } from './pass.js';
 export {
   checkPass,
+  createFixturePassChain,
   createPassChain,
   decodePass,
   demoPassKey,

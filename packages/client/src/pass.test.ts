@@ -7,8 +7,10 @@ import {
 } from 'near-api-js';
 import { AccessKeyDoesNotExistError, AccountDoesNotExistError } from 'near-api-js/rpc-errors';
 import { describe, expect, it } from 'vitest';
+import { createFixtureReader } from './fixtures.js';
 import {
   checkPass,
+  createFixturePassChain,
   createPassChain,
   decodePass,
   demoPassKey,
@@ -495,6 +497,22 @@ describe('signedPass', () => {
     const b = passRequest({ contract: CONTRACT, ticket: '5-1', issuedAtMs: ISSUED });
     expect(Buffer.from(a.nonce).equals(Buffer.from(b.nonce))).toBe(false);
     expect([...a.nonce.slice(0, 8)]).toEqual([...b.nonce.slice(0, 8)]);
+  });
+});
+
+describe('createFixturePassChain', () => {
+  it("lists each demo account's built-in key as its full-access key, and no other key", async () => {
+    const chain = createFixturePassChain(createFixtureReader());
+    expect(await chain.accessKey(ANA, demoPassKey(ANA).getPublicKey().toString())).toBe('full');
+    expect(await chain.accessKey(LUIS, demoPassKey(ANA).getPublicKey().toString())).toBe('missing');
+    expect(await chain.ticket('1-3')).toMatchObject({ owner_id: LUIS });
+  });
+
+  it('runs the demo end to end: a demo account signs, the fixture chain admits', async () => {
+    const chain = createFixturePassChain(createFixtureReader());
+    const request = passRequest({ contract: CONTRACT, ticket: '1-3', issuedAtMs: ISSUED });
+    const pass = signPassWithKey(request, LUIS, demoPassKey(LUIS));
+    expect((await checkPass(pass, CONTRACT, chain, ISSUED)).admitted).toBe(true);
   });
 });
 

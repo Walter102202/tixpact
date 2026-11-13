@@ -153,12 +153,12 @@ Files: `packages/client/src/pass.ts`, `pass.test.ts`, export from `index.ts`; `s
 
 Files: `web/src/features/pass/`, `web/src/lib/router.tsx`, `web/src/lib/near/` (message signing), the ticket page, tests.
 
-- [ ] The ticket page offers "Show entry pass" to the signed-in holder of an `Active` ticket that is not refunded. Anyone else reads: `Only the holder can show the entry pass for this ticket.`
-- [ ] The wallet signs the message through near-connect's `signMessage` (read its types in `node_modules` and in `C:\dev\near-project-reports\sources\`; Meteor and Intear are the two wallets). The account in the answer must be the connected one. A wallet that cannot sign messages gets a sentence, not an error.
-- [ ] The pass view: a QR code of `<origin>/door#p=<pass>`, the ticket and holder, a countdown to expiry, "Sign a new pass" once expired, and a link that opens the door check in a new tab. The pass travels in the URL fragment so it reaches no server. One small QR dependency without dependencies of its own is allowed (list it for the README).
-- [ ] `/door`: with a pass in the URL it runs `checkPass` against the chain and shows one verdict, large: `Admit` with the ticket and holder, or `Do not admit` with the failing sentences, and the five checks below. Without a pass it explains itself and takes a pasted link. A valid pass can be marked as admitted; the same ticket shown again on this device reads `Already admitted on this device at 21:03`. Kept in `localStorage`, wrapped in try/catch.
-- [ ] Demo mode (no `VITE_CONTRACT_ID`): demo accounts sign with built-in demo keys that the fixture chain lists as their full-access keys, so both pages work end to end and are marked as demo data like the rest.
-- [ ] Tests: holder and non-holder, expiry and re-sign, a pass that turns invalid after the ticket is transferred, the door's verdicts, the second scan.
+- [x] The ticket page offers "Show entry pass" to the signed-in holder of an `Active` ticket that is not refunded. Anyone else reads: `Only the holder can show the entry pass for this ticket.`
+- [x] The wallet signs the message through near-connect's `signMessage` (read its types in `node_modules` and in `C:\dev\near-project-reports\sources\`; Meteor and Intear are the two wallets). The account in the answer must be the connected one. A wallet that cannot sign messages gets a sentence, not an error.
+- [x] The pass view: a QR code of `<origin>/door#p=<pass>`, the ticket and holder, a countdown to expiry, "Sign a new pass" once expired, and a link that opens the door check in a new tab. The pass travels in the URL fragment so it reaches no server. One small QR dependency without dependencies of its own is allowed (list it for the README).
+- [x] `/door`: with a pass in the URL it runs `checkPass` against the chain and shows one verdict, large: `Admit` with the ticket and holder, or `Do not admit` with the failing sentences, and the five checks below. Without a pass it explains itself and takes a pasted link. A valid pass can be marked as admitted; the same ticket shown again on this device reads `Already admitted on this device at 21:03`. Kept in `localStorage`, wrapped in try/catch.
+- [x] Demo mode (no `VITE_CONTRACT_ID`): demo accounts sign with built-in demo keys that the fixture chain lists as their full-access keys, so both pages work end to end and are marked as demo data like the rest.
+- [x] Tests: holder and non-holder, expiry and re-sign, a pass that turns invalid after the ticket is transferred, the door's verdicts, the second scan.
 
 ### Task P3: an event page that says its verifier is a group
 

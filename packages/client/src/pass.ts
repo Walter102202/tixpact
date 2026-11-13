@@ -429,6 +429,20 @@ function saysMissing(error: unknown): boolean {
   );
 }
 
+/**
+ * The demo chain (fixture mode): every account's only full-access key is its built-in demo key
+ * (`demoPassKey`), and tickets come from the fixture reader. Demo passes work end to end.
+ */
+export function createFixturePassChain(reader: {
+  getTicket(tokenId: string): Promise<TicketView | null>;
+}): PassChain {
+  return {
+    accessKey: async (accountId, publicKey) =>
+      demoPassKey(accountId).getPublicKey().toString() === publicKey ? 'full' : 'missing',
+    ticket: (tokenId) => reader.getTicket(tokenId),
+  };
+}
+
 /** The live chain for `checkPass`: the access key and the ticket, both read at `final`. */
 export function createPassChain(
   reader: { getTicket(tokenId: string): Promise<TicketView | null> },

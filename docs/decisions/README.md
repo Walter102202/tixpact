@@ -74,3 +74,4 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | A changed account in an entry pass fails the `key` check, not `signature`: NEP-413 does not sign the account | `2026-11-13-entry-pass-account-bound-by-the-key-check.md` |
 | 2026-11-13 | The entry pass hash uses `@noble/hashes` 2.4.0, declared by the client package (already in the lockfile through near-api-js) | `2026-11-13-entry-pass-sha256-from-noble-hashes.md` |
 | 2026-11-13 | The agent's `show_entry_pass` refuses tickets the door would refuse, and is read-only; `scripts/pass.mjs request` builds the CLI command | `2026-11-13-agent-entry-pass-tool.md` |
+| 2026-11-13 | The web's entry pass: one click to sign, the pass in the URL fragment, the door's verdict ("Admit", "Do not admit", "Already admitted") per device; QR by `uqr` 0.1.3 | `2026-11-13-web-entry-pass-pages.md` |

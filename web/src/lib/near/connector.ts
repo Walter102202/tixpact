@@ -1,5 +1,11 @@
-import { NearConnector } from '@hot-labs/near-connect';
-import type { SentTx, WalletPort } from './wallet';
+import { NearConnector, type NearWalletBase } from '@hot-labs/near-connect';
+import {
+  type MessageRequest,
+  MessageSigningUnsupported,
+  type SentTx,
+  type SignedMessage,
+  type WalletPort,
+} from './wallet';
 import { toConnectorAction, txHashFromOutcome } from './walletOutcome';
 
 // The live wallet: NEAR Connect 0.12.0 without the function-call-key plugin (plan, Track W).
@@ -33,6 +39,28 @@ export function limitWallets(connector: NearConnector, ids: readonly string[]): 
         allowed.has(wallet.manifest.id),
       ),
   });
+}
+
+/**
+ * Asks a near-connect wallet to sign a NEP-413 message for `signerId`. A wallet whose manifest
+ * does not list `signMessage` is refused before it opens, so the page can say so in a sentence.
+ */
+export async function signMessageWith(
+  wallet: Pick<NearWalletBase, 'manifest' | 'signMessage'>,
+  signerId: string,
+  { message, nonce, recipient }: MessageRequest,
+): Promise<SignedMessage> {
+  if (!wallet.manifest.features.signMessage) {
+    throw new MessageSigningUnsupported(`${wallet.manifest.name} cannot sign messages.`);
+  }
+  const signed = await wallet.signMessage({
+    message,
+    nonce,
+    recipient,
+    network: 'testnet',
+    signerId,
+  });
+  return { accountId: signed.accountId, publicKey: signed.publicKey, signature: signed.signature };
 }
 
 export function createNearConnectWallet({ contractId, rpcUrls }: ConnectorOptions): WalletPort {
@@ -82,6 +110,11 @@ export function createNearConnectWallet({ contractId, rpcUrls }: ConnectorOption
       });
       // The wallet's outcome is not proof of anything; only its hash is used, to re-read the chain.
       return { txHash: txHashFromOutcome(outcome), signerId };
+    },
+    async signMessage(request): Promise<SignedMessage> {
+      const signerId = accountId;
+      if (signerId === null) throw new Error('Sign in first.');
+      return signMessageWith(await connector.wallet(), signerId, request);
     },
   };
 }
