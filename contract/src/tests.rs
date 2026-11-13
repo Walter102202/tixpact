@@ -840,6 +840,22 @@ fn storage_constants_are_the_measured_worst_case_plus_twenty_percent() {
     );
     event += created_in_token;
 
+    // A ticket bought with the token stores exactly what a ticket bought with NEAR stores (neither
+    // the ticket nor its operation keeps the currency), so `storage_per_ticket` covers both.
+    let hash_12 = contract.get_event(12).expect("event exists").terms_hash;
+    let _ = bytes_added(&mut contract, &verifier, 1, 1_000_000, |c| {
+        c.accept_verification(12, hash_12)
+    });
+    let token = longest_token().account_id;
+    let token_buy = bytes_added(&mut contract, &token, 0, 1_500_000, |c| {
+        let kept = c.ft_on_transfer(long("buyer-y"), U128(PRICE), "{\"event_id\":12}".into());
+        assert_eq!(kept, U128(0));
+    });
+    assert_eq!(
+        token_buy, short_buy,
+        "a token ticket stores what a NEAR ticket stores"
+    );
+
     eprintln!("measured worst case: event {event} bytes, ticket {ticket_worst} bytes");
     assert_eq!(
         accounting::STORAGE_BYTES_PER_EVENT,
