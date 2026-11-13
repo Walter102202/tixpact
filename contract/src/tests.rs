@@ -1134,6 +1134,23 @@ fn the_drawn_ticket_is_small_and_escaped_in_the_worst_case() {
     assert!(largest * 2 <= display::MAX_SVG_BYTES, "{largest} bytes");
 }
 
+/// XML forbids U+FFFE and U+FFFF anywhere, like most control characters, so the drawn ticket turns
+/// them into spaces; a strict parser would refuse to draw the picture otherwise.
+#[test]
+fn the_drawn_ticket_has_no_character_xml_forbids() {
+    let contract = contract_with_a_sold_ticket();
+    let mut event = contract.load_event(1);
+    let ticket = contract.load_ticket(&"1-1".to_string());
+    event.title = "Gala\u{FFFF}\u{FFFE}\u{0}\u{7}night".to_string();
+    let svg = svg_of(&event, &ticket, crate::currency::NEAR);
+    assert!(svg.contains(">Gala    night<"), "{svg}");
+    assert!(
+        !svg.chars()
+            .any(|c| c.is_control() || matches!(c, '\u{FFFE}' | '\u{FFFF}')),
+        "{svg}"
+    );
+}
+
 /// The drawn ticket of `ticket` in `event`, decoded.
 fn svg_of(event: &EventRecord, ticket: &Ticket, unit: crate::currency::Unit<'_>) -> String {
     decode_svg(
@@ -1428,6 +1445,40 @@ fn contract_with_a_pending_token_refund() -> Contract {
     contract
 }
 
+/// On a NEAR payment the callback is the only function call, so it gets `GAS_FOR_CALLBACK` and all
+/// the unused gas (what it does not burn is refunded). The `fault-injection` build alone keeps 0.
+#[test]
+fn a_near_refund_callback_gets_its_static_gas_and_the_unused_gas() {
+    use crate::settlement::CALLBACK_GAS_WEIGHT;
+    use near_sdk::mock::MockAction;
+    assert_eq!(CALLBACK_GAS_WEIGHT, near_sdk::GasWeight::default().0);
+    let mut contract = contract_with_a_sold_ticket();
+    call_as(ORGANIZER, 1, 1_600_000);
+    contract.cancel_event(1, None);
+    call_with_gas(ANA, 1, 1_700_000, 100);
+    let _ = contract.claim_refund("1-1".to_string());
+    let receipts = near_sdk::test_utils::get_created_receipts();
+    assert_eq!(receipts.len(), 2, "a payment and its callback");
+    assert!(matches!(
+        receipts[0].actions[0],
+        MockAction::Transfer { .. }
+    ));
+    let MockAction::FunctionCallWeight {
+        method_name,
+        prepaid_gas,
+        gas_weight,
+        ..
+    } = &receipts[1].actions[0]
+    else {
+        panic!("the callback is a function call")
+    };
+    assert_eq!(method_name.as_slice(), b"on_refund_result");
+    assert_eq!(
+        (*prepaid_gas, gas_weight.0),
+        (GAS_FOR_CALLBACK, CALLBACK_GAS_WEIGHT)
+    );
+}
+
 /// The function call that pays a token, as the last call created it, and the callback after it.
 struct TokenPayment {
     token: String,
@@ -1438,6 +1489,9 @@ struct TokenPayment {
     /// The share of unused gas the token gets.
     weight: u64,
     callback: String,
+    /// The callback's static gas and its share of unused gas.
+    callback_gas: near_sdk::Gas,
+    callback_weight: u64,
 }
 
 /// The receipts the last call created: the payment, then the callback on the escrow.
@@ -1458,6 +1512,8 @@ fn token_payment() -> TokenPayment {
     };
     let MockAction::FunctionCallWeight {
         method_name: callback,
+        prepaid_gas: callback_gas,
+        gas_weight: callback_weight,
         ..
     } = &receipts[1].actions[0]
     else {
@@ -1472,6 +1528,8 @@ fn token_payment() -> TokenPayment {
         gas: *prepaid_gas,
         weight: gas_weight.0,
         callback: String::from_utf8(callback.clone()).expect("UTF-8"),
+        callback_gas: *callback_gas,
+        callback_weight: callback_weight.0,
     }
 }
 
@@ -1494,6 +1552,11 @@ fn a_token_refund_is_an_ft_transfer_of_the_principal_with_one_yocto() {
     );
     assert!(payment.weight > 0);
     assert_eq!(payment.callback, "on_refund_result");
+    assert_eq!(
+        (payment.callback_gas, payment.callback_weight),
+        (GAS_FOR_CALLBACK, payment.weight),
+        "the callback gets GAS_FOR_CALLBACK and the same share of unused gas as the token"
+    );
 
     let ticket = contract
         .get_ticket("1-1".to_string())
@@ -1566,6 +1629,10 @@ fn a_token_payout_goes_to_the_organizer_and_its_failure_restores_it() {
     assert_eq!((payment.deposit, payment.gas), (1, GAS_FT_TRANSFER));
     assert_eq!(payment.weight, near_sdk::GasWeight::default().0);
     assert_eq!(payment.callback, "on_payout_result");
+    assert_eq!(
+        (payment.callback_gas, payment.callback_weight),
+        (GAS_FOR_CALLBACK, near_sdk::GasWeight::default().0)
+    );
     assert_eq!(contract.total_held, 0);
 
     as_callback();
