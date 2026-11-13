@@ -517,9 +517,9 @@ Needs Walter's go for three things: installing the Rust toolchain in his WSL, cr
 
 **Files:** `web/src/{main,App}.tsx`, `web/src/lib/near/{connector,useWallet,useTx}.ts`, `web/src/features/events/*`, `web/src/styles/*`, tests beside the code.
 
-- [ ] Failing tests (Testing Library, fixture mode): `/` lists the fixture events with price, verifier and phase; `/events/1` shows price, the reserved amount, "Confirmed by" account or "Awaiting verifier", start, end, deadline in the viewer's time zone with the UTC offset written out (`docs/decisions/2026-11-12-times-shown-in-the-viewers-zone.md`) and the promise text; the buy button reads "Buy for 1.5 NEAR" and is disabled with the reason outside `OnSale`; a rejected wallet popup leaves the page unchanged with a dismissible notice.
-- [ ] Implement the shell (header with account, network badge "testnet"), the wallet hook, the transaction hook built on `trackTransaction`, the two routes.
-- [ ] Run lint, typecheck, test, build. Expected: green. Commit `feat(web): event pages and ticket purchase`, tick, push.
+- [x] Failing tests (Testing Library, fixture mode): `/` lists the fixture events with price, verifier and phase; `/events/1` shows price, the reserved amount, "Confirmed by" account or "Awaiting verifier", start, end, deadline in the viewer's time zone with the UTC offset written out (`docs/decisions/2026-11-12-times-shown-in-the-viewers-zone.md`) and the promise text; the buy button reads "Buy for 1.5 NEAR" and is disabled with the reason outside `OnSale`; a rejected wallet popup leaves the page unchanged with a dismissible notice.
+- [x] Implement the shell (header with account, network badge "testnet"), the wallet hook, the transaction hook built on `trackTransaction`, the two routes.
+- [x] Run lint, typecheck, test, build. Expected: green. Commit `feat(web): event pages and ticket purchase`, tick, push.
 
 ### Task W2: my tickets, ticket page, transfer, refund
 

@@ -60,6 +60,7 @@ describe('trackTransaction on recorded statuses', () => {
     expect(result.failedReceipt).toEqual({
       receiptId: tx.failedReceiptId,
       executorId: FIXTURE_CONTRACT_ID,
+      step: 'callback',
       error: { code: 'UNKNOWN', message: 'The call ran out of gas before it finished.' },
     });
     expect(stages).toEqual(['sending', 'executed', 'final']);
@@ -71,6 +72,7 @@ describe('trackTransaction on recorded statuses', () => {
     expect(result.ok).toBe(false);
     expect(result.failedReceipt?.receiptId).toBe(tx.failedReceiptId);
     expect(result.failedReceipt?.executorId).toBe('vanishing-holder.testnet');
+    expect(result.failedReceipt?.step).toBe('other');
     expect(result.failedReceipt?.error.message).toBe(
       'Account vanishing-holder.testnet does not exist.',
     );
@@ -94,6 +96,7 @@ describe('trackTransaction on recorded statuses', () => {
     const { result } = await track(rpc, tx.hash, tx.signerId);
     expect(result.ok).toBe(false);
     expect(result.failedReceipt?.receiptId).toBe(tx.failedReceiptId);
+    expect(result.failedReceipt?.step).toBe('contract');
     expect(result.failedReceipt?.error).toEqual({
       code: 'ERR_SOLD_OUT',
       message: ERROR_MESSAGES.ERR_SOLD_OUT,
@@ -241,6 +244,7 @@ describe('a transaction is ok only when every outcome succeeded', () => {
       failedReceipt: {
         receiptId: settled.hash,
         executorId: 'luis.testnet',
+        step: 'transaction',
         error: { code: 'UNKNOWN', message: 'The account does not have enough NEAR for this.' },
       },
     });

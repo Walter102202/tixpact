@@ -44,3 +44,6 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-12 | A cancellation's reason is stored in `evidence_ref` | `2026-11-12-cancel-reason-shares-evidence-ref.md` |
 | 2026-11-12 | Times are shown in the viewer's time zone, with the offset written out | `2026-11-12-times-shown-in-the-viewers-zone.md` |
 | 2026-11-12 | The web offers the refund claim as soon as the deadline has passed | `2026-11-12-claim-shown-when-event-is-expirable.md` |
+| 2026-11-12 | The web uses a 60-line history router instead of a routing library | `2026-11-12-web-routes-without-a-router-library.md` |
+| 2026-11-12 | Without a contract id the web runs on demo data, and says so on every page | `2026-11-12-web-demo-data-without-a-contract-id.md` |
+| 2026-11-12 | Web test pins, the `process` replacement and the wallet-error wording | `2026-11-12-web-build-pins-and-the-process-shim.md` |

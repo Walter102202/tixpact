@@ -22,8 +22,16 @@ export interface TxStatusRpc {
   }): Promise<unknown>;
 }
 
+/**
+ * Where the failure happened: `transaction` (rejected before it ran), `contract` (the called
+ * method), `callback` (a later receipt on the same contract), `other` (a receipt on another
+ * account: in this product, a transfer to the payee).
+ */
+export type FailedStep = 'transaction' | 'contract' | 'callback' | 'other';
+
 export interface FailedReceipt {
   receiptId: string;
+  step: FailedStep;
   /** Account the failed receipt ran on: the contract for a call or callback, the payee for a transfer. */
   executorId: string;
   error: ContractError;
@@ -187,12 +195,22 @@ const succeeded = (status: ExecutionStatus) =>
  */
 export function summarizeTransaction(status: TxStatus): TxResult {
   const outcomes = [status.transaction_outcome, ...status.receipts_outcome];
+  const calledAccount = status.receipts_outcome[0]?.outcome.executor_id;
   let failedReceipt: FailedReceipt | undefined;
-  for (const { id, outcome } of outcomes) {
+  for (const [index, { id, outcome }] of outcomes.entries()) {
     const failure = failureOf(outcome.status);
     if (failure !== undefined) {
+      const step: FailedStep =
+        index === 0
+          ? 'transaction'
+          : index === 1
+            ? 'contract'
+            : outcome.executor_id === calledAccount
+              ? 'callback'
+              : 'other';
       failedReceipt = {
         receiptId: id,
+        step,
         executorId: outcome.executor_id,
         error: parseContractError(failure),
       };

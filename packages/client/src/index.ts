@@ -30,6 +30,7 @@ export { createReader, createRpc } from './reader.js';
 export * from './schemas.js';
 export type {
   FailedReceipt,
+  FailedStep,
   ReadUntilChangedOptions,
   TrackOptions,
   TxResult,

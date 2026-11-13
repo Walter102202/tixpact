@@ -1,6 +1,31 @@
+import { createReader, createRpc } from '@ticket-escrow/client';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import { readConfig } from './config';
+import { createNearConnectWallet } from './lib/near/connector';
+import { type AppServices, createFixtureServices, viewerTimeZone } from './services';
+import './styles/tokens.css';
+import './styles/app.css';
+
+function liveServices(contractId: string, rpcUrls: string[]): AppServices {
+  const rpc = createRpc(rpcUrls);
+  return {
+    network: 'testnet',
+    contractId,
+    fixtureMode: false,
+    reader: createReader({ contractId, rpc }),
+    txRpc: rpc,
+    wallet: createNearConnectWallet({ contractId, rpcUrls }),
+    timeZone: viewerTimeZone(),
+  };
+}
+
+const config = readConfig(import.meta.env);
+const services =
+  config.fixtureMode || config.contractId === null
+    ? createFixtureServices()
+    : liveServices(config.contractId, config.rpcUrls);
 
 const root = document.getElementById('root');
 if (!root) {
@@ -9,6 +34,6 @@ if (!root) {
 
 createRoot(root).render(
   <StrictMode>
-    <App />
+    <App services={services} />
   </StrictMode>,
 );
