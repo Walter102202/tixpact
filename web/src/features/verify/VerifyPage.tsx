@@ -6,7 +6,7 @@ import {
   formatDateTime,
   PHASE_LABELS,
 } from '@ticket-escrow/client';
-import { type ReactNode, useId, useState } from 'react';
+import { type ReactNode, useEffect, useId, useState } from 'react';
 import { useTx } from '../../lib/near/useTx';
 import { useWallet } from '../../lib/near/useWallet';
 import { Link } from '../../lib/router';
@@ -55,6 +55,13 @@ export function VerifyPage({ id }: { id: string }) {
   );
 }
 
+/** A decision checked at the first click: the second click sends exactly this. */
+interface Pending {
+  action: 'attest' | 'cancel';
+  ref: string | null;
+  accountId: string;
+}
+
 const SUCCESS: Record<VerifierAction, string> = {
   accept: 'You accepted the terms. Tickets can now be sold.',
   attest: 'Confirmed. The organizer can now collect the ticket money.',
@@ -78,8 +85,11 @@ function VerifyDetails({
   const [evidence, setEvidence] = useState('');
   const [reason, setReason] = useState('');
   const [inputError, setInputError] = useState<Partial<Record<VerifierAction, string>>>({});
-  const [confirming, setConfirming] = useState<'attest' | 'cancel' | null>(null);
+  const [pending, setPending] = useState<Pending | null>(null);
   const [sent, setSent] = useState<VerifierAction | null>(null);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a change of account closes the box.
+  useEffect(() => setPending(null), [accountId]);
 
   const blockers = verifierBlockers(event, accountId, time);
   const succeeded = tx.view.kind === 'done' && tx.view.result.ok;
@@ -92,7 +102,7 @@ function VerifyDetails({
         : blockers[action];
 
   function send(action: VerifierAction, call: ContractCall) {
-    setConfirming(null);
+    setPending(null);
     setSent(action);
     void tx.run(call, {
       before: data,
@@ -103,15 +113,22 @@ function VerifyDetails({
     });
   }
 
-  /** Checks the optional reference and opens the confirmation step. */
+  /** Checks the optional reference and opens the confirmation step with what was checked. */
   function ask(action: 'attest' | 'cancel') {
+    if (accountId === null) return;
     const value = (action === 'attest' ? evidence : reason).trim();
     const error = tooLong(action === 'attest' ? 'evidence' : 'reason', value, config.max_ref_bytes);
     setInputError(error ? { [action]: error } : {});
-    setConfirming(error ? null : action);
+    setPending(error ? null : { action, ref: value === '' ? null : value, accountId });
   }
 
-  const ref = (value: string) => (value.trim() === '' ? null : value.trim());
+  /** The checked decision, while its box may be shown: same account, and still allowed. */
+  const confirming = (action: 'attest' | 'cancel'): Pending | null =>
+    pending?.action === action && pending.accountId === accountId && blocked(action) === null
+      ? pending
+      : null;
+  const attest = confirming('attest');
+  const cancel = confirming('cancel');
 
   return (
     <article className="page verify-page">
@@ -181,24 +198,25 @@ function VerifyDetails({
                 label="Evidence (optional)"
                 value={evidence}
                 onChange={setEvidence}
-                disabled={blocked('attest') !== null}
+                disabled={blocked('attest') !== null || attest !== null}
                 error={inputError.attest}
               />
             }
             onClick={() => ask('attest')}
           />
-          {confirming === 'attest' && (
+          {attest && (
             <section className="confirm" aria-label="Confirm the attestation">
               <p>
                 Confirm that {event.title} took place? Then the organizer can collect the ticket
                 money, and no holder can claim a refund. This cannot be undone.
               </p>
+              <KeptRef label="Evidence" value={attest.ref} />
               <div className="confirm-actions">
                 <button
                   type="button"
                   className="btn"
                   onClick={() =>
-                    send('attest', actions.attestCompleted(event.event_id, ref(evidence)))
+                    send('attest', actions.attestCompleted(event.event_id, attest.ref))
                   }
                 >
                   Yes, it took place
@@ -206,7 +224,7 @@ function VerifyDetails({
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  onClick={() => setConfirming(null)}
+                  onClick={() => setPending(null)}
                 >
                   Go back
                 </button>
@@ -223,30 +241,31 @@ function VerifyDetails({
                 label="Reason (optional)"
                 value={reason}
                 onChange={setReason}
-                disabled={blocked('cancel') !== null}
+                disabled={blocked('cancel') !== null || cancel !== null}
                 error={inputError.cancel}
               />
             }
             onClick={() => ask('cancel')}
           />
-          {confirming === 'cancel' && (
+          {cancel && (
             <section className="confirm" aria-label="Confirm the cancellation">
               <p>
                 Cancel {event.title} for good? Every holder can claim their price back. This cannot
                 be undone.
               </p>
+              <KeptRef label="Reason" value={cancel.ref} />
               <div className="confirm-actions">
                 <button
                   type="button"
                   className="btn"
-                  onClick={() => send('cancel', actions.cancelEvent(event.event_id, ref(reason)))}
+                  onClick={() => send('cancel', actions.cancelEvent(event.event_id, cancel.ref))}
                 >
                   Yes, declare it cancelled
                 </button>
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  onClick={() => setConfirming(null)}
+                  onClick={() => setPending(null)}
                 >
                   Keep the event
                 </button>
@@ -263,6 +282,17 @@ function VerifyDetails({
         </section>
       </div>
     </article>
+  );
+}
+
+/** The reference the decision stores for good, shown before the second click. */
+function KeptRef({ label, value }: { label: 'Evidence' | 'Reason'; value: string | null }) {
+  return value === null ? (
+    <p className="muted">No {label.toLowerCase()} is kept on chain.</p>
+  ) : (
+    <p>
+      {label} kept on chain: <span className="reference">{value}</span>
+    </p>
   );
 }
 

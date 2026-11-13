@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from '@testing-library/react';
+import { act, fireEvent, screen, within } from '@testing-library/react';
 import { actions, FIXTURES, formatDateTime } from '@ticket-escrow/client';
 import { describe, expect, it } from 'vitest';
 import { createFixtureWallet } from '../../lib/near/wallet';
@@ -164,6 +164,51 @@ describe('/verify/:id actions', () => {
       await screen.findByText('Confirmed. The organizer can now collect the ticket money.'),
     ).toBeTruthy();
     expect(services.wallet.sent).toEqual([actions.attestCompleted(5, null)]);
+  });
+
+  it('sends the reason that was checked, shows it in the box, and locks the field meanwhile', async () => {
+    const { services } = await openVerify(1);
+    const field = () => screen.getByLabelText('Reason (optional)') as HTMLInputElement;
+    fireEvent.change(field(), { target: { value: 'Storm warning' } });
+    fireEvent.click(button('Declare cancelled'));
+    const confirm = screen.getByRole('region', { name: 'Confirm the cancellation' });
+    expect(confirm.textContent).toContain('Reason kept on chain: Storm warning');
+    expect(field().disabled).toBe(true);
+    // A paste after the check, over the contract's limit, must not be what is sent.
+    fireEvent.change(field(), { target: { value: 'x'.repeat(300) } });
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Yes, declare it cancelled' }));
+    await screen.findByText('Cancelled. Every holder can now claim their price back.');
+    expect(services.wallet.sent).toEqual([actions.cancelEvent(1, 'Storm warning')]);
+  });
+
+  it('says in the box when no evidence is kept', async () => {
+    await openVerify(5);
+    fireEvent.click(button('Confirm the event took place'));
+    const confirm = screen.getByRole('region', { name: 'Confirm the attestation' });
+    expect(confirm.textContent).toContain('No evidence is kept on chain.');
+  });
+
+  it('closes the box when the account changes, so another account cannot sign it', async () => {
+    const { services } = await openVerify(1);
+    fireEvent.click(button('Declare cancelled'));
+    expect(screen.getByRole('region', { name: 'Confirm the cancellation' })).toBeTruthy();
+    act(() => services.wallet.signInAs('org.testnet'));
+    expect(screen.queryByRole('region', { name: 'Confirm the cancellation' })).toBeNull();
+    act(() => services.wallet.signInAs(VERIFIER));
+    expect(screen.queryByRole('region', { name: 'Confirm the cancellation' })).toBeNull();
+    expect(services.wallet.sent).toEqual([]);
+  });
+
+  it('closes the box when another decision is sent', async () => {
+    const { services } = await openVerify(2);
+    fireEvent.click(button('Declare cancelled'));
+    expect(screen.getByRole('region', { name: 'Confirm the cancellation' })).toBeTruthy();
+    fireEvent.click(button('Accept'));
+    await screen.findByText('You accepted the terms. Tickets can now be sold.');
+    expect(screen.queryByRole('region', { name: 'Confirm the cancellation' })).toBeNull();
+    expect(services.wallet.sent).toEqual([
+      actions.acceptVerification(2, eventFixture(2).terms_hash),
+    ]);
   });
 
   it('rejects a reference longer than the contract keeps, before anything is sent', async () => {
