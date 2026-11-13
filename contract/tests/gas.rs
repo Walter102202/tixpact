@@ -5,8 +5,9 @@
 mod common;
 
 use common::{
-    Escrow, NEAR, NO_DEPOSIT, ONE_YOCTO, TestChain, amount, long_id, terms, ticket_receiver_wasm,
-    vanishing_holder_wasm,
+    Escrow, HOST, HOSTILE_ID, NEAR, NO_DEPOSIT, ONE_YOCTO, TestChain, USD, amount,
+    assert_purchase_accepted, assert_purchase_rejected, long_id, priced_terms, purchase_msg, terms,
+    ticket_receiver_wasm, vanishing_holder_wasm,
 };
 use near_api::types::transaction::result::{ExecutionFinalResult, ValueOrReceiptId};
 use near_api::{Account, NearToken};
@@ -609,5 +610,386 @@ async fn gas_of_every_method_in_its_worst_case() -> TestResult {
             tgas(minimum.as_gas())
         );
     }
+    Ok(())
+}
+
+/// One line of the token table: the escrow's call, what the token's receipts burnt, the escrow's
+/// callback, and the whole transaction.
+struct TokenRow {
+    case: String,
+    attached_tgas: u64,
+    call: u64,
+    token: u64,
+    follow_up: Option<u64>,
+    total: u64,
+}
+
+/// Adds a token row. The escrow's first receipt is the call; every receipt the token ran is
+/// summed; the follow-up is the later escrow receipt that logged `follow_up`, and then every
+/// escrow receipt must have succeeded.
+fn record_token(
+    rows: &mut Vec<TokenRow>,
+    escrow: &Escrow<'_>,
+    token: &near_api::AccountId,
+    case: &str,
+    attached_tgas: u64,
+    result: &ExecutionFinalResult,
+    follow_up: Option<&'static str>,
+) -> TestResult<()> {
+    let escrow_id = escrow.id();
+    let receipts: Vec<_> = result
+        .receipt_outcomes()
+        .iter()
+        .filter(|outcome| outcome.executor_id == escrow_id)
+        .collect();
+    if follow_up.is_some() {
+        assert!(
+            receipts.iter().all(|outcome| outcome.is_success()),
+            "{case}: an escrow receipt failed: {result:?}"
+        );
+    }
+    let call = receipts.first().ok_or("no escrow receipt")?;
+    let follow_up = match follow_up {
+        None => None,
+        Some(event) => {
+            let marker = format!("\"event\":\"{event}\"");
+            Some(
+                receipts
+                    .iter()
+                    .skip(1)
+                    .find(|outcome| outcome.logs.iter().any(|line| line.contains(&marker)))
+                    .ok_or_else(|| format!("{case}: no receipt logged {event}"))?,
+            )
+        }
+    };
+    let token_gas = result
+        .receipt_outcomes()
+        .iter()
+        .filter(|outcome| &outcome.executor_id == token)
+        .map(|outcome| outcome.gas_burnt.as_gas())
+        .sum();
+    rows.push(TokenRow {
+        case: case.to_string(),
+        attached_tgas,
+        call: call.gas_burnt.as_gas(),
+        token: token_gas,
+        follow_up: follow_up.map(|outcome| outcome.gas_burnt.as_gas()),
+        total: result.total_gas_burnt.as_gas(),
+    });
+    Ok(())
+}
+
+/// Rounds `gas` up to a multiple of `step` Tgas, in Tgas.
+fn round_up_tgas(gas: u64, step: u64) -> u64 {
+    gas.div_ceil(step * 1_000_000_000_000) * step
+}
+
+#[tokio::test]
+async fn gas_of_token_settlement_in_its_worst_case() -> TestResult {
+    // Plan v2, Task T3: a purchase through `ft_transfer_call`, and refunds and payouts paid with
+    // `ft_transfer`, with 64-character accounts and token id, the longest texts and full
+    // histories. `cargo test --test gas gas_of_token -- --nocapture` prints the table and the
+    // constants the margin rules of `docs/gas.md` give.
+    let chain = TestChain::start().await?;
+    let tusd_id = long_id("tusd");
+    let tokens = json!([
+        { "account_id": tusd_id, "symbol": "tUSD", "decimals": 6 },
+        { "account_id": HOSTILE_ID, "symbol": "HOST", "decimals": 18 },
+    ]);
+    let contract = chain
+        .deploy_escrow_listing(common::ESCROW_ID, false, tokens)
+        .await?;
+    let escrow = Escrow {
+        chain: &chain,
+        contract,
+    };
+    let tusd = chain.test_token(&tusd_id, "tUSD", 6).await?;
+    let hostile = chain.hostile_token(HOSTILE_ID, "HOST", 18).await?;
+    let names: Vec<String> = [
+        "organizer",
+        "unregistered-organizer",
+        "verifier",
+        "buyer",
+        "bouncer-a",
+        "bouncer-b",
+        "holder-1",
+        "unregistered-holder",
+        "holder-3",
+        "holder-4",
+    ]
+    .iter()
+    .map(|name| long_id(name))
+    .collect();
+    let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    let [
+        organizer,
+        lost_organizer,
+        verifier,
+        buyer,
+        bouncer_a,
+        bouncer_b,
+        h1,
+        h2,
+        h3,
+        h4,
+    ]: [Account; 10] = chain
+        .accounts(&refs, 200)
+        .await?
+        .try_into()
+        .map_err(|_| "ten accounts")?;
+    for account in [&escrow.id(), &buyer.0, &organizer.0, &h1.0, &h3.0] {
+        tusd.register(&buyer, account).await?;
+    }
+    for account in [&escrow.id(), &buyer.0, &h4.0] {
+        hostile.register(&buyer, account).await?;
+    }
+    tusd.faucet(&buyer).await?;
+    hostile.mint(&buyer, &buyer.0, 100 * HOST).await?;
+    let mut rows = Vec::new();
+    let largest = |times: [u64; 3], capacity: u32, currency: &str, price: u128| {
+        let mut terms = priced_terms(&verifier, times, capacity, Some(currency), price);
+        terms["title"] = json!("t".repeat(120));
+        terms["venue"] = json!("v".repeat(120));
+        terms
+    };
+    let escrow_id = escrow.id();
+
+    // Two payout events with a short window: one organizer is registered with the token, the
+    // other is not.
+    let short = chain.times_from_now([120, 150, 200]).await?;
+    let paid = escrow
+        .create_event(&organizer, largest(short, 1, &tusd_id, USD))
+        .await?;
+    let lost = escrow
+        .create_event(&lost_organizer, largest(short, 1, &tusd_id, USD))
+        .await?;
+    for event_id in [paid, lost] {
+        escrow.accept(&verifier, event_id).await?;
+        let result = tusd
+            .transfer_call(&buyer, &escrow_id, USD, &purchase_msg(event_id))
+            .await?;
+        assert_purchase_accepted(&result, USD);
+    }
+
+    // The measured event, an event nobody resolves, and an event in the hostile token.
+    let times = chain.times_from_now([400, 600, 900]).await?;
+    let event = escrow
+        .create_event(&organizer, largest(times, 10, &tusd_id, USD))
+        .await?;
+    let unresolved = escrow
+        .create_event(&organizer, largest(times, 1, &tusd_id, USD))
+        .await?;
+    let host_event = escrow
+        .create_event(&organizer, largest(times, 1, HOSTILE_ID, HOST))
+        .await?;
+    for event_id in [event, unresolved, host_event] {
+        escrow.accept(&verifier, event_id).await?;
+    }
+    let attached = common::FT_TRANSFER_CALL_TGAS;
+    let result = tusd
+        .transfer_call(&buyer, &escrow_id, USD, &purchase_msg(event))
+        .await?;
+    let t1 = assert_purchase_accepted(&result, USD);
+    let case =
+        "ft_transfer_call buys (call: ft_on_transfer; token: ft_transfer_call and its resolver)";
+    record_token(&mut rows, &escrow, &tusd.id, case, attached, &result, None)?;
+    let result = tusd
+        .transfer_call(&buyer, &escrow_id, USD + 1, &purchase_msg(event))
+        .await?;
+    assert_purchase_rejected(&result, &escrow.id(), "ERR_WRONG_DEPOSIT");
+    let case = "ft_transfer_call rejected (ERR_WRONG_DEPOSIT; the resolver returns the amount)";
+    record_token(&mut rows, &escrow, &tusd.id, case, attached, &result, None)?;
+    let mut bought = Vec::new();
+    for (token, event_id, price) in [
+        (&tusd, event, USD),
+        (&tusd, unresolved, USD),
+        (&hostile, host_event, HOST),
+    ] {
+        let result = token
+            .transfer_call(&buyer, &escrow_id, price, &purchase_msg(event_id))
+            .await?;
+        bought.push(assert_purchase_accepted(&result, price));
+    }
+    let [t2, t3, t4]: [String; 3] = bought.try_into().map_err(|_| "three tickets")?;
+
+    // Full histories: the three tUSD tickets move sixteen times, then each goes to its holder.
+    let moved = [&t1, &t2, &t3];
+    let transfers = |to: &Account| -> Vec<(&str, Value, u128)> {
+        moved
+            .iter()
+            .map(|token_id| {
+                let args = json!({
+                    "receiver_id": to.0, "token_id": token_id, "approval_id": null, "memo": null,
+                });
+                ("nft_transfer", args, 1)
+            })
+            .collect()
+    };
+    escrow
+        .batch(&buyer, transfers(&bouncer_a))
+        .await?
+        .assert_success();
+    for round in 0..15 {
+        let (from, to) = if round % 2 == 0 {
+            (&bouncer_a, &bouncer_b)
+        } else {
+            (&bouncer_b, &bouncer_a)
+        };
+        escrow.batch(from, transfers(to)).await?.assert_success();
+    }
+    let to_holders = [(&t1, &h1), (&t2, &h2), (&t3, &h3)]
+        .iter()
+        .map(|(token_id, holder)| {
+            let args = json!({
+                "receiver_id": holder.0, "token_id": token_id, "approval_id": null, "memo": null,
+            });
+            ("nft_transfer", args, 1)
+        })
+        .collect();
+    escrow.batch(&bouncer_b, to_holders).await?.assert_success();
+    escrow.transfer(&buyer, &h4.0, &t4).await?.assert_success();
+    assert_eq!(
+        escrow.history(&t1).await?["entries"]
+            .as_array()
+            .map(Vec::len),
+        Some(16)
+    );
+
+    // Payouts.
+    chain.advance_to(short[1]).await?;
+    escrow.attest(&verifier, paid).await?;
+    escrow.attest(&verifier, lost).await?;
+    let tgas_used = client_tgas("claim_payout");
+    let result = escrow.claim_payout(&organizer, paid).await?;
+    let case = "claim_payout + ft_transfer + on_payout_result (delivered)";
+    let settled = Some("payout_settled");
+    record_token(
+        &mut rows, &escrow, &tusd.id, case, tgas_used, &result, settled,
+    )?;
+    let result = escrow.claim_payout(&lost_organizer, lost).await?;
+    let case = "claim_payout + ft_transfer + on_payout_result (organizer not registered, restored)";
+    let failed = Some("payout_failed");
+    record_token(
+        &mut rows, &escrow, &tusd.id, case, tgas_used, &result, failed,
+    )?;
+
+    // Refunds of tickets with full histories.
+    for event_id in [event, host_event] {
+        let args = json!({ "event_id": event_id, "reason_ref": "r".repeat(256) });
+        escrow
+            .call(&organizer, "cancel_event", args, ONE_YOCTO, 30)
+            .await?
+            .assert_success();
+    }
+    let tgas_used = client_tgas("claim_refund");
+    let result = escrow.claim_refund(&h1, &t1, tgas_used).await?;
+    let case = "claim_refund + ft_transfer + on_refund_result (full history, delivered)";
+    let settled = Some("refund_settled");
+    record_token(
+        &mut rows, &escrow, &tusd.id, case, tgas_used, &result, settled,
+    )?;
+    let result = escrow.claim_refund(&h2, &t2, tgas_used).await?;
+    let case = "claim_refund + ft_transfer + on_refund_result (full history, holder not registered, restored)";
+    let failed = Some("refund_failed");
+    record_token(
+        &mut rows, &escrow, &tusd.id, case, tgas_used, &result, failed,
+    )?;
+    hostile.set_mode(&buyer, "long").await?;
+    let result = escrow.claim_refund(&h4, &t4, tgas_used).await?;
+    let case = "claim_refund + ft_transfer + on_refund_result (the token answers as long as its gas allows)";
+    let answer = common::value_returned_by(&result, &hostile.id).map_or(0, |bytes| bytes.len());
+    eprintln!("hostile token answer: {answer} bytes");
+    // If the callback cannot read the answer, the row still shows what the claim and the token
+    // burnt; `tokens.rs` judges the outcome.
+    let settled = if common::events_named(&result, "refund_settled").is_empty() {
+        eprintln!("the long answer: the callback did not settle the refund");
+        None
+    } else {
+        Some("refund_settled")
+    };
+    record_token(
+        &mut rows,
+        &escrow,
+        &hostile.id,
+        case,
+        tgas_used,
+        &result,
+        settled,
+    )?;
+
+    // The deadline passes with no outcome; the claim resolves the event before it claims.
+    chain.advance_to(times[2]).await?;
+    let result = escrow.claim_refund(&h3, &t3, tgas_used).await?;
+    let case = "claim_refund + ft_transfer + on_refund_result (expires the event first, full history, delivered)";
+    let settled = Some("refund_settled");
+    record_token(
+        &mut rows, &escrow, &tusd.id, case, tgas_used, &result, settled,
+    )?;
+    assert_eq!(escrow.ticket(&t3).await?["status"], "Refunded");
+    assert_eq!(
+        amount(&escrow.accounting(unresolved).await?, "refunds_settled"),
+        USD
+    );
+
+    eprintln!(
+        "| Case | Gas attached (Tgas) | Call (Tgas) | Token (Tgas) | Callback (Tgas) | Whole transaction (Tgas) |"
+    );
+    eprintln!("|---|---:|---:|---:|---:|---:|");
+    for row in &rows {
+        let follow_up = row
+            .follow_up
+            .map_or("-".to_string(), |gas| format!("{:.2}", tgas(gas)));
+        eprintln!(
+            "| {} | {} | {:.2} | {:.2} | {} | {:.2} |",
+            row.case,
+            row.attached_tgas,
+            tgas(row.call),
+            tgas(row.token),
+            follow_up,
+            tgas(row.total)
+        );
+    }
+
+    // What the margin rules of `docs/gas.md` give for the token path.
+    let settlement = || rows.iter().filter(|row| row.case.starts_with("claim_"));
+    let worst_ft_transfer = settlement().map(|row| row.token).max().unwrap_or(0);
+    let worst_callback = settlement()
+        .filter_map(|row| row.follow_up)
+        .max()
+        .unwrap_or(0);
+    let worst_call = settlement().map(|row| row.call).max().unwrap_or(0);
+    let ft_transfer_static = round_up_tgas(worst_ft_transfer * MARGIN, 5);
+    eprintln!(
+        "worst ft_transfer on the token {:.2} Tgas: 5x rounded up to 5 Tgas = {ft_transfer_static} Tgas",
+        tgas(worst_ft_transfer)
+    );
+    eprintln!(
+        "worst callback {:.2} Tgas: 5x = {:.2} Tgas against GAS_FOR_CALLBACK {} Tgas",
+        tgas(worst_callback),
+        tgas(worst_callback * MARGIN),
+        GAS_FOR_CALLBACK.as_tgas()
+    );
+    eprintln!(
+        "worst claim call {:.2} Tgas: a token claim minimum of ft_transfer static + {} + 5x call, rounded up to 10 Tgas = {} Tgas with {ft_transfer_static} Tgas for ft_transfer",
+        tgas(worst_call),
+        GAS_FOR_CALLBACK.as_tgas(),
+        round_up_tgas(
+            (ft_transfer_static + GAS_FOR_CALLBACK.as_tgas()) * 1_000_000_000_000
+                + worst_call * MARGIN,
+            10
+        )
+    );
+    let worst_purchase = rows
+        .iter()
+        .filter(|row| row.case.starts_with("ft_transfer_call"))
+        .map(|row| row.total)
+        .max()
+        .unwrap_or(0);
+    eprintln!(
+        "worst purchase transaction {:.2} Tgas against the client's {} Tgas",
+        tgas(worst_purchase),
+        common::FT_TRANSFER_CALL_TGAS
+    );
+    assert!(worst_callback * MARGIN <= GAS_FOR_CALLBACK.as_gas());
     Ok(())
 }

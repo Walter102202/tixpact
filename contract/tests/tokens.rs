@@ -1678,25 +1678,38 @@ async fn new_takes_a_fixed_list_of_tokens() -> TestResult {
     five.as_array_mut()
         .ok_or("a list")?
         .push(spec("tgbp.sandbox", "tGBP", 6));
+    // The codes are lane C2's reading (`docs/decisions/2026-11-13-token-list-checks-at-new.md`):
+    // a count over the limit is `ERR_LIMIT`, every other bad entry `ERR_INVALID_TERMS`.
     let bad_lists = [
-        ("five tokens", five),
+        ("five tokens", five, "ERR_LIMIT"),
         (
             "a duplicate",
             json!([spec(TUSD_ID, "tUSD", 6), spec(TUSD_ID, "tUSD2", 6)]),
+            "ERR_INVALID_TERMS",
         ),
-        ("an empty symbol", json!([spec(TUSD_ID, "", 6)])),
+        (
+            "an empty symbol",
+            json!([spec(TUSD_ID, "", 6)]),
+            "ERR_INVALID_TERMS",
+        ),
         (
             "a symbol of 13 bytes",
             json!([spec(TUSD_ID, "THIRTEENBYTES", 6)]),
+            "ERR_INVALID_TERMS",
         ),
         (
             "a symbol that is not ASCII",
             json!([spec(TUSD_ID, "t\u{dc}SD", 6)]),
+            "ERR_INVALID_TERMS",
         ),
-        ("25 decimals", json!([spec(TUSD_ID, "tUSD", 25)])),
+        (
+            "25 decimals",
+            json!([spec(TUSD_ID, "tUSD", 25)]),
+            "ERR_INVALID_TERMS",
+        ),
     ];
     let account = chain.accounts(&["refused.sandbox"], 50).await?.remove(0);
-    for (why, tokens) in bad_lists {
+    for (why, tokens, code) in bad_lists {
         let result = near_api::Contract::deploy(account.0.clone())
             .use_code(common::escrow_wasm())
             .with_init_call("new", json!({ "tokens": tokens }))?
@@ -1707,8 +1720,8 @@ async fn new_takes_a_fixed_list_of_tokens() -> TestResult {
             .ok_or("send_to returned before the transaction ran")?;
         let failure = failure_text(&result).ok_or_else(|| format!("{why}: accepted"))?;
         assert!(
-            failure.contains("Smart contract panicked: ERR_"),
-            "{why}: {failure}"
+            failure.contains(&format!("Smart contract panicked: {code}: ")),
+            "{why}: expected {code}, got {failure}"
         );
     }
     let view = Account(account.0.clone())
