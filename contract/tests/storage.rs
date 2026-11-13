@@ -3,10 +3,7 @@
 
 mod common;
 
-use common::{
-    Escrow, ONE_YOCTO, PRICE, STORAGE_BYTE_COST, TestChain, amount, faulty_escrow_wasm, long_id,
-    terms,
-};
+use common::{Escrow, ONE_YOCTO, PRICE, STORAGE_BYTE_COST, TestChain, amount, long_id, terms};
 use near_api::{Account, AccountId, Contract};
 use near_sdk::serde_json::{Value, json};
 use testresult::TestResult;
@@ -58,9 +55,7 @@ async fn t16_storage_stays_within_budget() -> TestResult {
     // The fault-injection build leaves every refund and the payout pending, so their operation
     // records stay stored: the most a ticket and an event can hold.
     let chain = TestChain::start().await?;
-    let escrow = chain
-        .escrow_with("faulty.sandbox", faulty_escrow_wasm())
-        .await?;
+    let escrow = chain.faulty_escrow("faulty.sandbox").await?;
     let deployed_bytes = chain.storage_usage(&escrow.id()).await?;
 
     let names: Vec<String> = ["organizer", "verifier", "bouncer-a", "bouncer-b", "buyer"]

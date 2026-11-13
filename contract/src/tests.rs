@@ -796,3 +796,63 @@ fn storage_constants_are_the_measured_worst_case_plus_twenty_percent() {
         "storage_per_ticket: measured {ticket_worst} bytes"
     );
 }
+
+/// `nft_transfer_call` is a second way into the transfer rules (R6, R8): each one rejects it
+/// exactly as it rejects `nft_transfer`, and leaves the ticket as it was.
+#[test]
+fn transfer_call_follows_every_transfer_rule() {
+    let mut contract = contract_with_a_sold_ticket();
+    let token = || "1-1".to_string();
+    let unchanged = |contract: &Contract, status: TicketStatus, entries: usize| {
+        let ticket = contract.get_ticket(token()).expect("ticket exists");
+        assert_eq!(ticket.owner_id, id(ANA));
+        assert_eq!(ticket.status, status);
+        let history = contract.get_ticket_history(token()).expect("ticket exists");
+        assert_eq!(history.entries.len(), entries);
+    };
+    let send = |contract: &mut Contract, caller: &str, to: &str, now_ms: u64, code: &str| {
+        call_with_gas(caller, 1, now_ms, 300);
+        fails_with(code, || {
+            let _ = contract.nft_transfer_call(id(to), token(), None, None, "keep".into());
+        });
+    };
+
+    // Someone who does not hold it.
+    send(&mut contract, LUIS, RECEIVER, 1_600_000, "ERR_UNAUTHORIZED");
+    unchanged(&contract, TicketStatus::Active, 1);
+    // To its own holder, and to the escrow itself.
+    send(&mut contract, ANA, ANA, 1_600_000, "ERR_UNAUTHORIZED");
+    unchanged(&contract, TicketStatus::Active, 1);
+    send(&mut contract, ANA, ESCROW, 1_600_000, "ERR_UNAUTHORIZED");
+    unchanged(&contract, TicketStatus::Active, 1);
+    // At the start and after it.
+    send(&mut contract, ANA, RECEIVER, STARTS, "ERR_TOO_LATE");
+    unchanged(&contract, TicketStatus::Active, 1);
+    send(&mut contract, ANA, RECEIVER, STARTS + 1, "ERR_TOO_LATE");
+    unchanged(&contract, TicketStatus::Active, 1);
+    // Once the event has an outcome.
+    call_as(ORGANIZER, 1, 1_700_000);
+    contract.cancel_event(1, None);
+    send(
+        &mut contract,
+        ANA,
+        RECEIVER,
+        1_700_001,
+        "ERR_ALREADY_RESOLVED",
+    );
+    unchanged(&contract, TicketStatus::Active, 1);
+    // While its refund is in flight: the lock answers before the outcome check.
+    call_as(ANA, 1, 1_700_002);
+    let _ = contract.claim_refund(token());
+    unchanged(&contract, TicketStatus::RefundPending, 2);
+    send(&mut contract, ANA, RECEIVER, 1_700_003, "ERR_TICKET_LOCKED");
+    unchanged(&contract, TicketStatus::RefundPending, 2);
+}
+
+#[test]
+fn resolver_returns_the_ticket_on_the_largest_answer() {
+    // `false` padded to 4 MiB, the protocol's limit: valid JSON, but longer than a boolean.
+    let mut answer = vec![b' '; 4 * 1024 * 1024];
+    answer[..5].copy_from_slice(b"false");
+    resolve_and_check(near_sdk::PromiseResult::Successful(answer), false);
+}

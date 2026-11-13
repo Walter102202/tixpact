@@ -81,12 +81,22 @@ impl TestChain {
 
     /// Deploys the ticket escrow to [`ESCROW_ID`] and initializes it.
     pub async fn deploy_escrow(&self) -> TestResult<Contract> {
-        self.deploy_escrow_code(ESCROW_ID, escrow_wasm()).await
+        self.deploy_escrow_code(ESCROW_ID, false).await
     }
 
-    /// Deploys an escrow build (`escrow_wasm` or `faulty_escrow_wasm`) to `id` with 50 NEAR and
-    /// initializes it.
-    pub async fn deploy_escrow_code(&self, id: &str, wasm: Vec<u8>) -> TestResult<Contract> {
+    /// Deploys the normal build, or the `fault-injection` one, to `id` with 50 NEAR, initializes
+    /// it, and checks that `get_config` reports the build that was asked for. A swapped build
+    /// fails here, before any test relies on it.
+    pub async fn deploy_escrow_code(
+        &self,
+        id: &str,
+        fault_injection: bool,
+    ) -> TestResult<Contract> {
+        let wasm = if fault_injection {
+            faulty_escrow_wasm()
+        } else {
+            escrow_wasm()
+        };
         let account = self.accounts(&[id], 50).await?.remove(0);
         Contract::deploy(account.0.clone())
             .use_code(wasm)
@@ -95,7 +105,18 @@ impl TestChain {
             .send_to(&self.network)
             .await?
             .assert_success();
-        Ok(account.as_contract())
+        let contract = account.as_contract();
+        let config: Value = contract
+            .call_function("get_config", ())
+            .read_only()
+            .fetch_from(&self.network)
+            .await?
+            .data;
+        assert_eq!(
+            config["fault_injection"], fault_injection,
+            "{id} runs the wrong build"
+        );
+        Ok(contract)
     }
 
     /// Creates `id` with `near` NEAR and deploys a fixture to it. Fixtures have no init method.
@@ -232,12 +253,16 @@ impl TestChain {
 
     /// Deploys the escrow at [`ESCROW_ID`] and returns it with its call helpers.
     pub async fn escrow(&self) -> TestResult<Escrow<'_>> {
-        self.escrow_with(ESCROW_ID, escrow_wasm()).await
+        let contract = self.deploy_escrow_code(ESCROW_ID, false).await?;
+        Ok(Escrow {
+            chain: self,
+            contract,
+        })
     }
 
-    /// Deploys an escrow build at `id` and returns it with its call helpers.
-    pub async fn escrow_with(&self, id: &str, wasm: Vec<u8>) -> TestResult<Escrow<'_>> {
-        let contract = self.deploy_escrow_code(id, wasm).await?;
+    /// Deploys the `fault-injection` build at `id` and returns it with its call helpers.
+    pub async fn faulty_escrow(&self, id: &str) -> TestResult<Escrow<'_>> {
+        let contract = self.deploy_escrow_code(id, true).await?;
         Ok(Escrow {
             chain: self,
             contract,
@@ -273,13 +298,22 @@ pub fn escrow_wasm() -> Vec<u8> {
 }
 
 /// The contract built with the `fault-injection` feature: its settlement callbacks run out of gas
-/// after their transfer. Written to its own folder so it never replaces the normal build.
+/// after their transfer.
+///
+/// It has a cargo target directory and an output folder of its own. With a shared target
+/// directory, `cargo near build` copies `target/wasm32-unknown-unknown/release/ticket_escrow.wasm`
+/// after cargo has released its lock, so a normal build running in another test thread could
+/// replace that file in between and each build would ship the other's wasm.
 pub fn faulty_escrow_wasm() -> Vec<u8> {
     static WASM: OnceLock<Vec<u8>> = OnceLock::new();
     WASM.get_or_init(|| {
         build_wasm(cargo_near_build::BuildOpts {
             features: Some("fault-injection".to_string()),
             out_dir: Some(out_dir("fault-injection")),
+            override_cargo_target_dir: Some(format!(
+                "{}/fault-injection-target",
+                env!("CARGO_TARGET_TMPDIR")
+            )),
             ..Default::default()
         })
     })

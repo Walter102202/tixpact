@@ -24,15 +24,18 @@ use crate::events::{EventRecord, Outcome};
 use crate::log;
 use crate::{Contract, ContractExt, HISTORY_CAP, MAX_MEMO_BYTES, MAX_MSG_BYTES, MAX_PAGE};
 
-/// Static gas of `nft_resolve_transfer`. The standard gives its resolver a fixed 5 Tgas; ours
-/// also clears the lock and may move the ticket back, so it gets its own amount: five times its
-/// measured worst case (3.11 Tgas, `docs/gas.md`) or more, rounded up to 5 Tgas.
-pub const GAS_FOR_RESOLVE_TRANSFER: Gas = Gas::from_tgas(20);
+/// Static gas of `nft_resolve_transfer`. The resolver must read whatever the receiver answers,
+/// and if it runs out of gas the ticket stays locked for good. So it covers twice the sum of the
+/// protocol's register-write fee on the longest answer (4 MiB, 15.94 Tgas at the published fee)
+/// and its own measured worst case (3.12 Tgas): 38.12, rounded up to 40 Tgas. Never lower it
+/// below what reading the longest answer costs (`docs/gas.md`).
+pub const GAS_FOR_RESOLVE_TRANSFER: Gas = Gas::from_tgas(40);
 
 /// Least prepaid gas `nft_transfer_call` accepts: the resolver's static gas plus five times the
-/// most the call itself burns (4.23 Tgas measured, `docs/gas.md`), rounded up to 10 Tgas; the
-/// receiver gets what is left. Below it the call fails as a whole.
-pub const GAS_TRANSFER_CALL_MIN: Gas = Gas::from_tgas(50);
+/// most the call itself burns (4.23 Tgas measured, `docs/gas.md`), rounded up to 10 Tgas. It does
+/// not protect the lock (the resolver's gas is reserved when the promise is created, or the call
+/// fails as a whole); it only guarantees the receiver about 25 Tgas.
+pub const GAS_TRANSFER_CALL_MIN: Gas = Gas::from_tgas(70);
 
 /// Where a ticket stands, as stored. `TransferPending` and `RefundPending` are locks (R8).
 #[near(serializers = [borsh, json])]
@@ -348,7 +351,7 @@ impl NonFungibleTokenCore for Contract {
 
     /// Transfers a ticket to a contract and calls its `nft_on_transfer`, under the same rules as
     /// `nft_transfer`. The ticket is locked (`TransferPending`) until `nft_resolve_transfer` runs:
-    /// meanwhile it can be neither claimed nor moved (R8). 1 yoctoNEAR and at least 50 Tgas.
+    /// meanwhile it can be neither claimed nor moved (R8). 1 yoctoNEAR and at least 70 Tgas.
     /// Resolves to `true` if the receiver kept the ticket.
     ///
     /// The body follows `near-contract-standards` 5.30.1 (`core_impl.rs`), with two changes: the
@@ -374,7 +377,7 @@ impl NonFungibleTokenCore for Contract {
         ensure(
             env::prepaid_gas() >= GAS_TRANSFER_CALL_MIN,
             Code::InsufficientGas,
-            "attach at least 50 Tgas so the transfer can be resolved",
+            "attach at least 70 Tgas so the transfer can be resolved",
         );
         ticket.status = TicketStatus::TransferPending;
         self.move_ticket(

@@ -8,7 +8,7 @@ use common::{
     Escrow, NEAR, NO_DEPOSIT, ONE_YOCTO, TestChain, long_id, terms, ticket_receiver_wasm,
     vanishing_holder_wasm,
 };
-use near_api::types::transaction::result::ExecutionFinalResult;
+use near_api::types::transaction::result::{ExecutionFinalResult, ValueOrReceiptId};
 use near_api::{Account, NearToken};
 use near_sdk::serde_json::{Value, json};
 use testresult::TestResult;
@@ -34,12 +34,19 @@ fn client_tgas(method: &str) -> u64 {
 
 /// Gas attached to a transaction that makes a fixture call the escrow, in Tgas.
 const FIXTURE_TGAS: u64 = 300;
+/// Gas that lets the receiver fixture return the protocol's longest answer (4 MiB costs it about
+/// 292 Tgas), within the protocol's 1,000 Tgas per transaction.
+const HUGE_ANSWER_TGAS: u64 = 400;
 /// Gas the vanishing-holder fixture attaches to its call into the escrow, in Tgas.
 const FIXTURE_CALL_TGAS: u64 = 100;
 /// The contract cannot be upgraded, so its gas constants keep this factor over the measured
-/// worst case: each callback and the resolver burn at most a fifth of their static gas, and each
-/// minimum covers the static gas it attaches plus five times what the call itself burns.
+/// worst case: each settlement callback burns at most a fifth of its static gas, and each minimum
+/// covers the static gas it attaches plus five times what the call itself burns.
 const MARGIN: u64 = 5;
+/// The resolver must read whatever the receiver answers. Its static gas covers twice its measured
+/// worst case plus the protocol's register-write fee on the longest possible answer, charged in
+/// full, so a doubling of every cost still leaves it room.
+const RESOLVER_MARGIN: u64 = 2;
 
 /// Which later escrow receipt of a transaction is the one to measure besides the call.
 #[derive(Clone, Copy)]
@@ -62,6 +69,37 @@ struct Row {
 
 fn tgas(gas: u64) -> f64 {
     gas as f64 / 1e12
+}
+
+/// One value of the sandbox's runtime configuration (`EXPERIMENTAL_protocol_config`), by JSON
+/// pointer below `result`. `near-api` has no call for it, so this sends the request itself.
+async fn protocol_config(chain: &TestChain, pointer: &str) -> TestResult<u64> {
+    use std::io::{Read, Write};
+    let addr = chain
+        .sandbox
+        .rpc_addr
+        .trim_start_matches("http://")
+        .to_string();
+    let body = r#"{"jsonrpc":"2.0","id":"0","method":"EXPERIMENTAL_protocol_config","params":{"finality":"final"}}"#;
+    let response = tokio::task::spawn_blocking(move || -> std::io::Result<String> {
+        let mut stream = std::net::TcpStream::connect(&addr)?;
+        let length = body.len();
+        write!(
+            stream,
+            "POST / HTTP/1.0\r\nHost: {addr}\r\nContent-Type: application/json\r\n\
+             Content-Length: {length}\r\n\r\n{body}"
+        )?;
+        let mut response = String::new();
+        stream.read_to_string(&mut response)?;
+        Ok(response)
+    })
+    .await??;
+    let json = response.split_once("\r\n\r\n").map_or("", |(_, json)| json);
+    let config: Value = near_sdk::serde_json::from_str(json)?;
+    config["result"]
+        .pointer(pointer)
+        .and_then(Value::as_u64)
+        .ok_or_else(|| format!("no {pointer} in the protocol config").into())
 }
 
 /// Checks that a transaction succeeded and that every receipt the escrow ran succeeded, and adds
@@ -325,6 +363,34 @@ async fn gas_of_every_method_in_its_worst_case() -> TestResult {
         .await?;
     let case = "nft_transfer_call + nft_resolve_transfer (receiver panics, returned)";
     record(&mut rows, &escrow, case, tgas_used, &result, FollowUp::Next)?;
+    let huge = json!({
+        "receiver_id": receiver.0, "token_id": t1, "approval_id": null,
+        "memo": "m".repeat(256), "msg": "huge",
+    });
+    let result = escrow
+        .call(&h1, "nft_transfer_call", huge, ONE_YOCTO, HUGE_ANSWER_TGAS)
+        .await?;
+    // With this much gas the receiver can pay for the protocol's longest answer.
+    let answer_bytes = result
+        .receipt_outcomes()
+        .iter()
+        .filter(|outcome| outcome.executor_id == receiver.0)
+        .find_map(|outcome| match outcome.clone().into_result() {
+            Ok(ValueOrReceiptId::Value(value)) => value.raw_bytes().ok().map(|b| b.len()),
+            _ => None,
+        })
+        .ok_or("the receiver returned no value")?;
+    assert_eq!(answer_bytes, 4 * 1024 * 1024);
+    let case = "nft_transfer_call + nft_resolve_transfer (4 MiB answer, returned)";
+    record(
+        &mut rows,
+        &escrow,
+        case,
+        HUGE_ANSWER_TGAS,
+        &result,
+        FollowUp::Next,
+    )?;
+    assert_eq!(escrow.ticket(t1).await?["owner_id"], h1.0.as_str());
     let keep = json!({
         "receiver_id": receiver.0, "token_id": t1, "approval_id": null,
         "memo": "m".repeat(256), "msg": "keep",
@@ -440,20 +506,41 @@ async fn gas_of_every_method_in_its_worst_case() -> TestResult {
         );
     }
 
+    // What loading the longest possible answer into a register would cost the resolver if the
+    // protocol charged its published per-byte fee in full.
+    let write_register_byte = protocol_config(
+        &chain,
+        "/runtime_config/wasm_config/ext_costs/write_register_byte",
+    )
+    .await?;
+    let longest_answer = protocol_config(
+        &chain,
+        "/runtime_config/wasm_config/limit_config/max_length_returned_data",
+    )
+    .await?;
+    let read_longest_answer = write_register_byte * longest_answer;
+    eprintln!(
+        "write_register_byte {write_register_byte} gas x longest answer {longest_answer} bytes \
+         = {:.2} Tgas",
+        tgas(read_longest_answer)
+    );
+
     for row in &rows {
         let Some(follow_up) = row.follow_up else {
             continue;
         };
-        let (static_gas, minimum) = if row.case.starts_with("nft_transfer_call") {
-            (GAS_FOR_RESOLVE_TRANSFER, GAS_TRANSFER_CALL_MIN)
+        let (static_gas, minimum, need) = if row.case.starts_with("nft_transfer_call") {
+            let need = (follow_up + read_longest_answer) * RESOLVER_MARGIN;
+            (GAS_FOR_RESOLVE_TRANSFER, GAS_TRANSFER_CALL_MIN, need)
         } else {
-            (GAS_FOR_CALLBACK, GAS_CLAIM_MIN)
+            (GAS_FOR_CALLBACK, GAS_CLAIM_MIN, follow_up * MARGIN)
         };
         assert!(
-            follow_up * MARGIN <= static_gas.as_gas(),
-            "{}: the follow-up burns {:.2} Tgas of its {:.2}",
+            need <= static_gas.as_gas(),
+            "{}: the follow-up burns {:.2} Tgas and the rule needs {:.2} of its {:.2}",
             row.case,
             tgas(follow_up),
+            tgas(need),
             tgas(static_gas.as_gas())
         );
         assert!(

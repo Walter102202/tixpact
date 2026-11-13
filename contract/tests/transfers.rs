@@ -10,7 +10,7 @@ use common::{
     receipt_failure_texts, terms, ticket_receiver_wasm,
 };
 use near_api::advanced::TransactionableOrSigned;
-use near_api::types::transaction::result::ExecutionFinalResult;
+use near_api::types::transaction::result::{ExecutionFinalResult, ValueOrReceiptId};
 use near_api::types::{Reference, TxExecutionStatus};
 use near_api::{Account, AccountId, Chain, CryptoHash, NearGas, NearToken, Transaction};
 use near_sdk::serde_json::{Value, json};
@@ -18,8 +18,12 @@ use testresult::TestResult;
 
 /// Where the receiver fixture is deployed.
 const RECEIVER_ID: &str = "receiver.sandbox";
-/// Gas for an `nft_transfer_call` to the fixture: its `reenter` mode schedules 120 Tgas.
-const TRANSFER_CALL_TGAS: u64 = 300;
+/// Gas for an `nft_transfer_call` to the fixture, within the protocol's 1,000 Tgas per
+/// transaction: its `reenter` mode schedules 120 Tgas, and with 400 Tgas its `huge` mode can pay
+/// for the protocol's longest answer, 4 MiB.
+const TRANSFER_CALL_TGAS: u64 = 400;
+/// `max_length_returned_data` of the protocol: the longest value a call may return.
+const MAX_RETURN_BYTES: usize = 4 * 1024 * 1024;
 
 /// The kinds of a ticket's history entries, oldest first, with the account each one names.
 async fn history_of(escrow: &Escrow<'_>, token_id: &str) -> TestResult<Vec<(String, String)>> {
@@ -46,11 +50,12 @@ async fn t12_transfer_call_receiver_outcomes() -> TestResult {
         .await?;
     let times = chain.times_from_now([120, 180, 240]).await?;
     let event_id = escrow
-        .create_event(&cast.organizer, terms(&cast.verifier, times, 6))
+        .create_event(&cast.organizer, terms(&cast.verifier, times, 7))
         .await?;
     escrow.accept(&cast.verifier, event_id).await?;
     let ana = cast.ana.0.as_str();
     let receiver_id = receiver.0.as_str();
+    let (mut kept_ids, mut returned_ids) = (Vec::new(), Vec::new());
 
     // Each mode, and whether the receiver keeps the ticket. Only a clean `false` keeps it.
     let modes = [
@@ -59,6 +64,7 @@ async fn t12_transfer_call_receiver_outcomes() -> TestResult {
         ("panic", false),
         ("garbage", false),
         ("oversized", false),
+        ("huge", false),
         ("reenter", true),
     ];
     for (msg, kept) in modes {
@@ -132,13 +138,52 @@ async fn t12_transfer_call_receiver_outcomes() -> TestResult {
                     result.logs()
                 );
             }
+            "huge" => {
+                assert!(failures.is_empty(), "{msg}: {failures:?}");
+                // The receiver really answered with the longest value the protocol allows.
+                let answer = result
+                    .receipt_outcomes()
+                    .iter()
+                    .filter(|outcome| outcome.executor_id == receiver.0)
+                    .find_map(|outcome| match outcome.clone().into_result() {
+                        Ok(ValueOrReceiptId::Value(value)) => value.raw_bytes().ok(),
+                        _ => None,
+                    })
+                    .ok_or("the receiver returned no value")?;
+                assert_eq!(answer.len(), MAX_RETURN_BYTES);
+            }
             _ => assert!(failures.is_empty(), "{msg}: {failures:?}"),
         }
+        if kept {
+            kept_ids.push(token_id);
+        } else {
+            returned_ids.push(token_id);
+        }
+    }
+
+    // The owner indexes follow every return: Ana lists exactly the returned tickets, the
+    // receiver exactly the kept ones.
+    for (owner, ids) in [(ana, &returned_ids), (receiver_id, &kept_ids)] {
+        let supply: String = escrow
+            .view("nft_supply_for_owner", json!({ "account_id": owner }))
+            .await?;
+        assert_eq!(supply, ids.len().to_string(), "{owner}");
+        let tokens: Vec<Value> = escrow
+            .view("nft_tokens_for_owner", json!({ "account_id": owner }))
+            .await?;
+        let mut listed: Vec<&str> = tokens
+            .iter()
+            .filter_map(|t| t["token_id"].as_str())
+            .collect();
+        listed.sort_unstable();
+        let mut expected: Vec<&str> = ids.iter().map(String::as_str).collect();
+        expected.sort_unstable();
+        assert_eq!(listed, expected, "{owner}");
     }
 
     // Moving tickets moves no money.
     let accounting = escrow.accounting(event_id).await?;
-    assert_eq!(amount(&accounting, "principal_reserved"), 6 * PRICE);
+    assert_eq!(amount(&accounting, "principal_reserved"), 7 * PRICE);
     Ok(())
 }
 
@@ -508,5 +553,29 @@ async fn t22_standard_token_surface() -> TestResult {
         )
         .await?;
     assert_fails_with(&result, "ERR_APPROVALS_DISABLED");
+
+    // And the approval methods of NEP-178 do not exist.
+    let approval_calls = [
+        (
+            "nft_approve",
+            json!({ "token_id": first, "account_id": ana, "msg": null }),
+        ),
+        (
+            "nft_revoke",
+            json!({ "token_id": first, "account_id": ana }),
+        ),
+        ("nft_revoke_all", json!({ "token_id": first })),
+        (
+            "nft_is_approved",
+            json!({ "token_id": first, "approved_account_id": ana }),
+        ),
+    ];
+    for (method, args) in approval_calls {
+        let result = escrow
+            .call(&cast.luis, method, args, ONE_YOCTO, TGAS)
+            .await?;
+        let failure = common::failure_text(&result).unwrap_or_else(|| panic!("{method} succeeded"));
+        assert!(failure.contains("MethodNotFound"), "{method}: {failure}");
+    }
     Ok(())
 }

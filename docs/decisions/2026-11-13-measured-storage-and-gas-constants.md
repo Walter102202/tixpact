@@ -38,3 +38,7 @@ Task C4 asks for the storage constants to be "the measurements plus a 20% margin
 - `claim_with_low_gas_fails_whole` and `transfer_call_with_low_gas_fails_whole` now read the minimum from the crate, so a later change of a constant keeps them testing "just below the minimum".
 - `buy_ticket` costs more as the shared token tree grows: 4.01 Tgas at the 3rd ticket, 6.06 Tgas at the 102nd. A rough estimate, assuming the same cost per doubling, is about 19 Tgas at the largest id range. That is under the client's 50 Tgas (`docs/gas.md`).
 - Revisit if a protocol upgrade changes storage or gas costs. Rerun the two measuring tests, which fail on any mismatch.
+
+## Correction, 2026-11-13 (after the C3 review)
+
+The resolver no longer follows "5 × the measured worst case": a hostile receiver's 4 MiB answer could cost it more than the short answers measured here. `GAS_FOR_RESOLVE_TRANSFER` is 40 Tgas and `GAS_TRANSFER_CALL_MIN` is 70 Tgas (`2026-11-13-resolver-gas-covers-the-longest-answer.md`). The settlement callbacks and `GAS_CLAIM_MIN` are unchanged.

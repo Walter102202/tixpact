@@ -5,8 +5,8 @@ mod common;
 
 use common::{
     Cast, Escrow, GAS_FEE_BOUND, NEAR, NO_DEPOSIT, ONE_YOCTO, PRICE, TestChain, Transfer, amount,
-    assert_fails_with, events_named, failed_receipts_on, faulty_escrow_wasm, receipt_failure_texts,
-    terms, vanishing_holder_wasm,
+    assert_fails_with, events_named, failed_receipts_on, receipt_failure_texts, terms,
+    vanishing_holder_wasm,
 };
 use near_api::{Account, NearToken};
 use near_sdk::serde_json::{Value, json};
@@ -78,6 +78,12 @@ async fn t03_organizer_cannot_withdraw_unresolved() -> TestResult {
     escrow.buy(&cast.luis, event_id, PRICE).await?;
     let before = chain.balance(&cast.organizer.0).await?;
 
+    // Without the 1 yoctoNEAR.
+    let args = json!({ "event_id": event_id });
+    let result = escrow
+        .call(&cast.organizer, "claim_payout", args, NO_DEPOSIT, 100)
+        .await?;
+    assert_fails_with(&result, "ERR_ONE_YOCTO");
     // Before the end.
     let result = escrow.claim_payout(&cast.organizer, event_id).await?;
     assert_fails_with(&result, "ERR_NOT_COMPLETED");
@@ -330,9 +336,7 @@ async fn t10_failed_transfer_restores_claim_once() -> TestResult {
 #[tokio::test]
 async fn t11_failed_callback_keeps_pending() -> TestResult {
     let chain = TestChain::start().await?;
-    let escrow = chain
-        .escrow_with("faulty.sandbox", faulty_escrow_wasm())
-        .await?;
+    let escrow = chain.faulty_escrow("faulty.sandbox").await?;
     let config: Value = escrow.view("get_config", json!({})).await?;
     assert_eq!(config["fault_injection"], true);
     let cast = chain.cast().await?;
@@ -388,6 +392,14 @@ async fn t11_failed_callback_keeps_pending() -> TestResult {
     );
     let after_second = chain.balance(&cast.ana.0).await? - before;
     assert!(after_second <= received, "nothing was paid twice");
+
+    // Nor can the ticket be sold while its refund is in flight (threat H3). The lock answers,
+    // not the outcome check behind it.
+    let sold = escrow.transfer(&cast.ana, &cast.luis.0, &token_id).await?;
+    assert_fails_with(&sold, "ERR_TICKET_LOCKED");
+    let ticket = escrow.ticket(&token_id).await?;
+    assert_eq!(ticket["owner_id"], cast.ana.0.as_str());
+    assert_eq!(ticket["status"], "RefundPending");
     Ok(())
 }
 
@@ -399,9 +411,7 @@ async fn t14_callbacks_are_private() -> TestResult {
     // Nobody can call them: not a stranger, not the holder, not the organizer, and not even a
     // transaction signed with the escrow's own key, which has no promise result to give.
     let chain = TestChain::start().await?;
-    let escrow = chain
-        .escrow_with("faulty.sandbox", faulty_escrow_wasm())
-        .await?;
+    let escrow = chain.faulty_escrow("faulty.sandbox").await?;
     let cast = chain.cast().await?;
     let (event_id, _) = accepted_event(&escrow, &cast, [600, 1_200, 1_800], 3).await?;
     let token_id = escrow.buy(&cast.ana, event_id, PRICE).await?;
@@ -508,9 +518,7 @@ async fn t18_payout_failure_paths() -> TestResult {
     assert_eq!(amount(&accounting, "organizer_settled"), 0);
 
     // Fault-injection build: the payout arrives but its callback fails.
-    let faulty = chain
-        .escrow_with("faulty.sandbox", faulty_escrow_wasm())
-        .await?;
+    let faulty = chain.faulty_escrow("faulty.sandbox").await?;
     let (event_id, times) = accepted_event(&faulty, &cast, [20, 30, 600], 2).await?;
     faulty.buy(&cast.luis, event_id, PRICE).await?;
     chain.advance_to(times[1]).await?;
@@ -708,6 +716,19 @@ async fn claim_with_low_gas_fails_whole() -> TestResult {
             "nothing was sent"
         );
     }
+    // Without the 1 yoctoNEAR the claim fails the same way, whatever the gas.
+    let args = json!({ "token_id": token_id });
+    let result = escrow
+        .call(&cast.luis, "claim_refund", args, NO_DEPOSIT, 100)
+        .await?;
+    assert_fails_with(&result, "ERR_ONE_YOCTO");
+    assert!(
+        chain
+            .transfers_from(&result, &escrow.id())
+            .await?
+            .is_empty(),
+        "nothing was sent"
+    );
     let ticket = escrow.ticket(&token_id).await?;
     assert_eq!(ticket["status"], "Active");
     assert_eq!(ticket["pending_operation_id"], Value::Null);

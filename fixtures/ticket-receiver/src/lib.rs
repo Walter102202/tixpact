@@ -9,11 +9,20 @@
 //! | `panic` | the call fails |
 //! | `garbage` | `maybe`, which is not JSON |
 //! | `oversized` | `false` padded to 11 bytes: a valid "keep" longer than any boolean |
+//! | `huge` | as many zero bytes as its gas can pay to return, up to the protocol's 4 MiB (about 292 Tgas), made the cheapest way (fresh memory is already zero): the largest answer a receiver can make the resolver read |
 //! | `reenter` | tries `claim_refund` and `nft_transfer` on the ticket and reads `get_ticket`, then logs what it saw and keeps the ticket |
 //! | `hold` | answers `true` only after someone calls `release`, re-calling itself every block until then, so the transfer stays unresolved across blocks (`t13`) |
 
 use near_sdk::serde_json::{Value, json};
 use near_sdk::{AccountId, Gas, NearToken, Promise, PromiseError, env, near};
+
+/// `max_length_returned_data` of the protocol: the longest value a call may return.
+const MAX_RETURN_BYTES: usize = 4 * 1024 * 1024;
+/// Gas a call pays per byte it returns to another receipt, rounded up from 69.5 Mgas measured in
+/// the sandbox (`docs/gas.md`).
+const GAS_PER_RETURNED_BYTE: u64 = 70_000_000;
+/// Gas kept back from the answer for the rest of `nft_on_transfer`.
+const GAS_KEPT_BACK: Gas = Gas::from_tgas(5);
 
 /// Static gas of each step this fixture schedules.
 const GAS_FOR_CLAIM: Gas = Gas::from_tgas(70);
@@ -47,6 +56,7 @@ impl TicketReceiver {
             "panic" => env::panic_str("the receiver refuses this ticket"),
             "garbage" => env::value_return(b"maybe"),
             "oversized" => env::value_return(b"false      "),
+            "huge" => env::value_return(vec![0; Self::largest_affordable_answer()]),
             "reenter" => {
                 Self::reenter(ticket_contract, previous_owner_id, token_id)
                     .as_return()
@@ -99,6 +109,17 @@ impl TicketReceiver {
 }
 
 impl TicketReceiver {
+    /// The longest answer the gas left to this call can pay for.
+    fn largest_affordable_answer() -> usize {
+        let spare = env::prepaid_gas()
+            .as_gas()
+            .saturating_sub(env::used_gas().as_gas())
+            .saturating_sub(GAS_KEPT_BACK.as_gas());
+        usize::try_from(spare / GAS_PER_RETURNED_BYTE)
+            .unwrap_or(MAX_RETURN_BYTES)
+            .min(MAX_RETURN_BYTES)
+    }
+
     fn reenter(
         ticket_contract: AccountId,
         previous_owner_id: AccountId,
