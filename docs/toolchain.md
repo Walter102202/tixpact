@@ -107,14 +107,25 @@ Verified facts the code depends on:
 - Each test starts its own node on its own ports and stops it when `TestChain` is dropped. After a run that was killed, check that no `near-sandbox` process is left.
 - `fast_forward(200)` moved the block time past a 60-second deadline in the template's test. Read the block time in tests instead of assuming a rate.
 
-### CLI forms (help text read on 2026-11-12; first real use is Task I1)
+### CLI forms on testnet (run on 2026-11-12 unless marked)
 
 ```text
-cargo near build non-reproducible-wasm --locked                                   # from contract/
-cargo near deploy build-non-reproducible-wasm --locked <account> with-init-call new json-args {} ...
+# build, from contract/ (the gate runs it)
+cargo near build non-reproducible-wasm --locked
+
+# a new account with 10 testnet NEAR; the key goes to ~/.near-credentials/testnet/<account>.json
 near account create-account sponsor-by-faucet-service <name>.testnet autogenerate-new-keypair save-to-legacy-keychain network-config testnet create
-near contract deploy <account> use-file <wasm> with-init-call new json-args {} prepaid-gas '30 Tgas' attached-deposit '0 NEAR' network-config testnet sign-with-legacy-keychain send
-near contract call-function as-transaction <contract> <method> json-args <json> prepaid-gas '<n> Tgas' attached-deposit '<amount>' sign-as <account> network-config testnet sign-with-legacy-keychain send
+
+# deploy and initialize in one transaction
+near contract deploy <account> use-file <wasm> with-init-call new json-args '{}' prepaid-gas '30 Tgas' attached-deposit '0 NEAR' network-config testnet sign-with-legacy-keychain send
+
+# a view
+near contract call-function as-read-only <contract> get_config json-args '{}' network-config testnet now
+
+# a change call (NOT RUN YET: assembled from the help text; Task I2 runs it for scripts/direct-calls.sh)
+near contract call-function as-transaction <contract> <method> json-args '<json>' prepaid-gas '<n> Tgas' attached-deposit '<amount>' sign-as <account> network-config testnet sign-with-legacy-keychain send
 ```
 
-The first line is verified by the gate. The others are assembled from the subcommands each `--help` lists; Task I1 runs them and replaces this note with the exact lines that worked. Deleting the final contract's keys (Task I3) is done with Walter present and is written down then.
+Development accounts created with the faucet on 2026-11-12 (keys only in the WSL keychain of the development machine): `te-d1-escrow.testnet` (holds the Phase 0 scaffold, deployed to prove the commands; the real development deployment goes to a fresh account), `te-d1-organizer.testnet`, `te-d1-verifier.testnet`, `te-d1-ana.testnet`, `te-d1-luis.testnet`, `te-d1-anyone.testnet`, `te-d1-agent.testnet`.
+
+The scripts that need those keys run inside WSL, where Node 22.22.0 is installed (`/usr/bin/node`): `node scripts/demo-scenario.mjs` reads the keychain itself. Deleting the final contract's keys (Task I3) is done with Walter present and is written down then.

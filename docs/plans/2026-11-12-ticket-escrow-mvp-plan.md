@@ -430,11 +430,11 @@ Needs Walter's go for three things: installing the Rust toolchain in his WSL, cr
 
 **Interfaces.** Produces every method of the frozen interface except `claim_refund`, `claim_payout`, the two callbacks and `get_operation`; `quote_event_budget` uses provisional constants.
 
-- [ ] Write the failing tests `t01`, `t02`, `t04`, `t05`, `t06`, `t15`, `t17`, `t21` and the Review Focus 4 test `create_event_rejects_bad_terms` (verifier equal to organizer, price `0`, capacity `0` and `101`, start in the past, title of 121 bytes).
-- [ ] Run the contract check command. Expected: the new tests fail to compile or fail.
-- [ ] Implement. Notes the signatures do not decide: validate before any state change; `terms_hash` as defined above; `buy_ticket` mints with `internal_mint_with_refund(.., None)` and emits `NftMint`; the accounting identity is asserted by a `debug_assert!` helper called at the end of every state-changing method and checked in every test through `get_accounting`.
-- [ ] Run the check command. Expected: all listed tests pass.
-- [ ] Commit `feat(contract): event rules, purchases and per-event accounting`, tick, push.
+- [x] Write the failing tests `t01`, `t02`, `t04`, `t05`, `t06`, `t15`, `t17`, `t21` and the Review Focus 4 test `create_event_rejects_bad_terms` (verifier equal to organizer, price `0`, capacity `0` and `101`, start in the past, title of 121 bytes).
+- [x] Run the contract check command. Expected: the new tests fail to compile or fail.
+- [x] Implement. Notes the signatures do not decide: validate before any state change; `terms_hash` as defined above; `buy_ticket` mints with `internal_mint_with_refund(.., None)` and emits `NftMint`; the accounting identity is asserted by a `debug_assert!` helper called at the end of every state-changing method and checked in every test through `get_accounting`.
+- [x] Run the check command. Expected: all listed tests pass.
+- [x] Commit `feat(contract): event rules, purchases and per-event accounting`, tick, push.
 
 ### Task C2: settlement
 
@@ -549,7 +549,7 @@ Needs Walter's go for three things: installing the Rust toolchain in his WSL, cr
 
 Starts when W0 is on `main`. Enters the `agents` track of the hackathon only if G3 shows it working on testnet.
 
-**Revision note.** Filled by the integrator when W0 is merged.
+**Revision note (2026-11-13, W0 merged).** Worktree `.claude/worktrees/m`, branch `track/m`, created from the `main` commit "docs(plan): fill the Track M revision note". Check command: `pnpm install --frozen-lockfile && pnpm lint && pnpm typecheck && pnpm test && pnpm build`; expected on that commit: lint checks 37 files, 8 test files with 72 tests pass (all in `packages/client`; `mcp` has none yet). `mcp/package.json` already pins `@modelcontextprotocol/sdk` 1.32.2, `near-api-js` 7.5.3, `zod` 4.6.7 and the workspace client; `mcp/src/index.ts` is an empty placeholder. What the client exports, with exact signatures, is listed in `C:\dev\near-project-reports\track-w.md` under "Notes for the next task" (two blocks: W0 and the W0 fix); use `createFixtureReader()` as the fake chain and `actions.*` for every call the agent builds. Never edit `packages/client`: write what you need under "Needs the integrator". Testnet: the agent's account is `te-d1-agent.testnet` (10 NEAR from the faucet; key in the WSL keychain file `~/.near-credentials/testnet/te-d1-agent.testnet.json`, never copied anywhere and never printed). Everything that touches testnet (spike S4, the smoke script with a key) waits until the integrator says the contract is deployed and gives its account id; until then build and test against the fixture reader and a recording signer.
 
 **Read first for this track:** the Frozen interface; `packages/client/src`; `C:\dev\dealingwith-si\apps\backend\src\mcp\{server,tools,format}.ts` and `C:\dev\dealingwith-si\apps\backend\src\modules\policies\evaluate.ts` as the model for tool registration, the two-view results and ordered policy checks; `C:\dev\dealingwith-si\docs\mcp.md` as the model for the guide.
 
@@ -597,7 +597,7 @@ Starts when W0 is on `main`. Enters the `agents` track of the hackathon only if 
 ### Task I2: the documents a judge reads (by G4)
 
 - [ ] `README.md`, written for a machine reader first: what it is in two sentences; the problem with three sourced facts; how each is solved; "Try it" as numbered "do X, see Y" steps (open the hosted demo; run `./scripts/gate.sh` and see the test names pass; run the read-only deployment check); the claims table (claim → test name → transaction in `docs/proof.md`); what NEAR does here, concretely; "What is real and what is simulated" (testnet funds, demo accounts played by us, a verifier that is one account, short demo windows); trust limits; architecture and interface; AI and third-party disclosure; license.
-- [ ] `docs/design.md`: the rules, state machines, accounting and decisions in English, derived from the spec without its market and naming sections.
+- [x] `docs/design.md`: the rules, state machines, accounting and decisions in English, derived from the spec without its market and naming sections.
 - [ ] `scripts/direct-calls.sh` (T20) and a "If the website is down" section in the README.
 - [ ] Hosted web on Vercel or Cloudflare Pages (Walter's account), kept up until 2026-11-25.
 
