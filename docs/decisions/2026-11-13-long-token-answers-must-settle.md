@@ -32,3 +32,5 @@ If a protocol or sandbox upgrade ever makes copying the answer cost more than th
 ## Update, same day
 
 Lane C2's cce6572 reverts f64aa42 (`2026-11-13-the-token-gets-at-least-its-static-gas.md`), so the first row holds again: measured on track/t2 71e4b6d, 278.05 Tgas, 3,974,126 bytes, callback 2.33 Tgas, Refunded. Why the copy costs almost nothing: in the runtime, `promise_result` puts the answer in the register with `set_rc_data` (near-vm-runner 0.38.1, `src/logic/host.rs:4636`), which pays `write_register_base` but no `write_register_byte` ("the data is shared, not copied", `src/logic/vmstate.rs:82-113`). The per-byte fee of 3,801,564 gas that C2's record applies is charged for other register writes, not for promise results.
+
+Lane C2's 479ef78 gives the callbacks the same share of unused gas as the token (`CALLBACK_GAS_WEIGHT`). Measured on track/t2 21a802a at 300 Tgas: the token burns 148.46 Tgas and answers 2,110,112 bytes; the callback burns 2.33 Tgas and the refund ends `Refunded`. The tests' expectations did not change.
