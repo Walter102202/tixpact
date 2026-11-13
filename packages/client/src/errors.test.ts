@@ -23,11 +23,23 @@ const FROZEN_CODES = [
   'ERR_INSUFFICIENT_LIQUIDITY',
   'ERR_INSUFFICIENT_GAS',
   'ERR_APPROVALS_DISABLED',
+  // Interface v2 (plan 2026-11-13, "Currencies").
+  'ERR_WRONG_CURRENCY',
+  'ERR_BAD_MESSAGE',
 ];
 
 describe('error codes', () => {
   it('are exactly the frozen list', () => {
     expect([...ERROR_CODES]).toEqual(FROZEN_CODES);
+  });
+
+  it('read the codes interface v2 adds for purchases in a token', () => {
+    expect(
+      parseContractError('Smart contract panicked: ERR_WRONG_CURRENCY: event 1 is priced in NEAR'),
+    ).toEqual({ code: 'ERR_WRONG_CURRENCY', message: ERROR_MESSAGES.ERR_WRONG_CURRENCY });
+    expect(parseContractError('Smart contract panicked: ERR_BAD_MESSAGE: not JSON').code).toBe(
+      'ERR_BAD_MESSAGE',
+    );
   });
 
   it('each have one distinct plain-English sentence', () => {
