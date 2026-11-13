@@ -7,7 +7,7 @@ import {
   PHASE_LABELS,
   type Unit,
 } from '@ticket-escrow/client';
-import { type ReactNode, useEffect, useId, useState } from 'react';
+import { type ReactNode, useId, useState } from 'react';
 import { moneyExact, unitFor } from '../../lib/money';
 import { useTx } from '../../lib/near/useTx';
 import { useWallet } from '../../lib/near/useWallet';
@@ -91,8 +91,14 @@ function VerifyDetails({
   const [pending, setPending] = useState<Pending | null>(null);
   const [sent, setSent] = useState<VerifierAction | null>(null);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a change of account closes the box.
-  useEffect(() => setPending(null), [accountId]);
+  // A change of account closes the box, so switching back does not reopen it. Adjusted during
+  // render, not in an effect: a mount effect ran after the first paint and could close a box
+  // opened by a click in between.
+  const [boxAccount, setBoxAccount] = useState(accountId);
+  if (boxAccount !== accountId) {
+    setBoxAccount(accountId);
+    setPending(null);
+  }
 
   const blockers = verifierBlockers(event, accountId, time);
   const succeeded = tx.view.kind === 'done' && tx.view.result.ok;
