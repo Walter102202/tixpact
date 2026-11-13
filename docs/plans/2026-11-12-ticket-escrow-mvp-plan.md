@@ -590,15 +590,15 @@ Starts when W0 is on `main`. Enters the `agents` track of the hackathon only if 
 
 ### Task I1: testnet deployment and the scenario script (after G1)
 
-- [ ] Create a development contract account with the faucet, deploy the C1+C2 build, call `new`. Record the commands and the account in `docs/toolchain.md`.
-- [ ] `scripts/demo-scenario.mjs`: with four keychain accounts (organizer, verifier, Ana, Luis) it creates an event with windows of a few minutes, accepts, Ana buys, transfers to Luis, the organizer tries to collect and is rejected, time passes, a fifth account expires the event, Ana's claim is rejected, Luis claims. It writes `docs/proof.md`: one row per step with the claim it proves, the transaction link and the observed result. A second run covers the completed path.
+- [x] Create a development contract account with the faucet, deploy the C1+C2 build, call `new`. Record the commands and the account in `docs/toolchain.md`.
+- [x] `scripts/demo-scenario.mjs`: with four keychain accounts (organizer, verifier, Ana, Luis) it creates an event with windows of a few minutes, accepts, Ana buys, transfers to Luis, the organizer tries to collect and is rejected, time passes, a fifth account expires the event, Ana's claim is rejected, Luis claims. It writes `docs/proof.md`: one row per step with the claim it proves, the transaction link and the observed result. A second run covers the completed path.
 - [ ] Walter creates the Meteor testnet accounts; run spike S3 with him.
 
 ### Task I2: the documents a judge reads (by G4)
 
 - [ ] `README.md`, written for a machine reader first: what it is in two sentences; the problem with three sourced facts; how each is solved; "Try it" as numbered "do X, see Y" steps (open the hosted demo; run `./scripts/gate.sh` and see the test names pass; run the read-only deployment check); the claims table (claim → test name → transaction in `docs/proof.md`); what NEAR does here, concretely; "What is real and what is simulated" (testnet funds, demo accounts played by us, a verifier that is one account, short demo windows); trust limits; architecture and interface; AI and third-party disclosure; license.
 - [x] `docs/design.md`: the rules, state machines, accounting and decisions in English, derived from the spec without its market and naming sections.
-- [ ] `scripts/direct-calls.sh` (T20) and a "If the website is down" section in the README.
+- [ ] `scripts/direct-calls.sh` (T20, done and run on testnet 2026-11-12) and a "If the website is down" section in the README (pending with the README).
 - [ ] Hosted web on Vercel or Cloudflare Pages (Walter's account), kept up until 2026-11-25.
 
 ### Task I3: hardening and the final deployment (Saturday morning)

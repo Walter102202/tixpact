@@ -122,10 +122,14 @@ near contract deploy <account> use-file <wasm> with-init-call new json-args '{}'
 # a view
 near contract call-function as-read-only <contract> get_config json-args '{}' network-config testnet now
 
-# a change call (NOT RUN YET: assembled from the help text; Task I2 runs it for scripts/direct-calls.sh)
+# a change call (scripts/direct-calls.sh is built on it)
 near contract call-function as-transaction <contract> <method> json-args '<json>' prepaid-gas '<n> Tgas' attached-deposit '<amount>' sign-as <account> network-config testnet sign-with-legacy-keychain send
 ```
 
+What the CLI prints, as `scripts/direct-calls.sh` relies on it: the returned value goes to stdout and nothing else does (`2` for `create_event`, `"3-1"` for `buy_ticket`, a JSON document for a view); the transaction id, the logs and the explorer link go to stderr. An exact deposit is written in yoctoNEAR: `attached-deposit '40000000000000000000000 yoctoNEAR'`.
+
 Development accounts created with the faucet on 2026-11-12 (keys only in the WSL keychain of the development machine): `te-d1-escrow.testnet` (holds the Phase 0 scaffold, deployed to prove the commands; the real development deployment goes to a fresh account), `te-d1-organizer.testnet`, `te-d1-verifier.testnet`, `te-d1-ana.testnet`, `te-d1-luis.testnet`, `te-d1-anyone.testnet`, `te-d1-agent.testnet`.
+
+Each version of the contract goes to a new account, because the stored state of one version cannot be read by the next: `te-d2-escrow.testnet` holds the build of Task C1 (2026-11-12) and `te-d3-escrow.testnet` the build of Tasks C1 and C2 (2026-11-12, wasm SHA-256 `677bee81976c94c48c8696e70478a582ff02b6402ce54690610913283fdd8281`). The wasm deployed is the one the gate builds: `<CARGO_TARGET_DIR>/near/ticket_escrow/ticket_escrow.wasm`.
 
 The scripts that need those keys run inside WSL, where Node 22.22.0 is installed (`/usr/bin/node`): `node scripts/demo-scenario.mjs` reads the keychain itself. Deleting the final contract's keys (Task I3) is done with Walter present and is written down then.
