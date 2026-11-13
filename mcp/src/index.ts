@@ -21,7 +21,7 @@ export {
   type Intent,
   type Policy,
 } from './policy.js';
-export { depsFromEnv } from './runtime.js';
+export { depsFromEnv, type RuntimeOptions } from './runtime.js';
 export { TOOL_NAMES, type ToolName, type WriteResult, type WriteStatus } from './schemas.js';
 export { createServer, SERVER_NAME } from './server.js';
 export {

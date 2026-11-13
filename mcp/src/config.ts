@@ -40,7 +40,9 @@ export class ConfigError extends Error {
 /** A curve-prefixed base58 secret key, the form near-cli and near-api-js use. */
 const SECRET_KEY = /^(ed25519|secp256k1):[1-9A-HJ-NP-Za-km-z]{32,128}$/;
 
-const UrlSchema = z.url({ protocol: /^https?$/ });
+// https only: the RPC answers what the agent reads before it signs, so nobody on the path may
+// change those answers.
+const UrlSchema = z.url({ protocol: /^https$/ });
 
 function value(env: Env, name: string): string | undefined {
   const raw = env[name]?.trim();
@@ -50,11 +52,15 @@ function value(env: Env, name: string): string | undefined {
 function account(env: Env, name: string): string | undefined {
   const raw = value(env, name);
   if (raw === undefined) return undefined;
+  // The messages name the variable, never its value: a key pasted into the wrong variable must not
+  // be printed back into a log.
   if (!AccountIdSchema.safeParse(raw).success) {
-    throw new ConfigError(`${name} ${raw} is not a NEAR account id.`);
+    throw new ConfigError(`${name} is not a NEAR account id (the value is not shown).`);
   }
   if (raw.endsWith('.near')) {
-    throw new ConfigError(`${name} ${raw} is a mainnet account: this server only runs on testnet.`);
+    throw new ConfigError(
+      `${name} is a mainnet account (it ends in .near): this server only runs on testnet.`,
+    );
   }
   return raw;
 }
@@ -92,11 +98,14 @@ export function loadConfig(env: Env): AgentConfig {
           .split(',')
           .map((url) => url.trim())
           .filter((url) => url !== '');
-  for (const url of rpcUrls) {
+  rpcUrls.forEach((url, index) => {
+    // An RPC URL can carry an API key, so the message gives its position, not the URL.
     if (!UrlSchema.safeParse(url).success) {
-      throw new ConfigError(`RPC_URLS has ${url}, which is not an http or https URL.`);
+      throw new ConfigError(
+        `RPC_URLS entry ${index + 1} is not an https URL (the value is not shown).`,
+      );
     }
-  }
+  });
 
   const agentAccountId = account(env, 'AGENT_ACCOUNT_ID') ?? null;
   const maxPrice = yocto(env, 'MAX_PRICE_YOCTO');

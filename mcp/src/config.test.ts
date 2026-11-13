@@ -61,13 +61,28 @@ describe('loadConfig', () => {
     );
   });
 
-  it('refuses mainnet account names', () => {
-    expect(configError({ CONTRACT_ID: 'tickets.near' }).message).toContain(
-      'CONTRACT_ID tickets.near is a mainnet account',
+  it('refuses mainnet account names, naming the variable but not its value', () => {
+    expect(configError({ CONTRACT_ID: 'tickets.near' }).message).toBe(
+      'CONTRACT_ID is a mainnet account (it ends in .near): this server only runs on testnet.',
     );
-    expect(configError({ ...signing, AGENT_ACCOUNT_ID: 'agent.near' }).message).toContain(
-      'AGENT_ACCOUNT_ID agent.near is a mainnet account',
+    const agent = configError({ ...signing, AGENT_ACCOUNT_ID: 'agent.near' }).message;
+    expect(agent).toBe(
+      'AGENT_ACCOUNT_ID is a mainnet account (it ends in .near): this server only runs on testnet.',
     );
+    expect(agent).not.toContain('agent.near');
+  });
+
+  it('never repeats a value it refuses, even one shaped like a key', () => {
+    // Someone pasting the key into the wrong variable must not see it printed back in a log.
+    const misplaced = configError({ ...signing, AGENT_ACCOUNT_ID: FAKE_KEY }).message;
+    expect(misplaced).toBe('AGENT_ACCOUNT_ID is not a NEAR account id (the value is not shown).');
+    expect(misplaced).not.toContain(FAKE_KEY.slice(8, 20));
+    const secretUrl = 'https://rpc.example/?apikey=s3cr3t-token';
+    const rpc = configError({ ...readOnly, RPC_URLS: 'https://a.example,ftp://x.example' }).message;
+    expect(rpc).toBe('RPC_URLS entry 2 is not an https URL (the value is not shown).');
+    const plain = configError({ ...readOnly, RPC_URLS: secretUrl.replace('https', 'http') });
+    expect(plain.message).toBe('RPC_URLS entry 1 is not an https URL (the value is not shown).');
+    expect(plain.message).not.toContain('s3cr3t');
   });
 
   it('needs a contract id', () => {
@@ -107,8 +122,11 @@ describe('loadConfig', () => {
     expect(error.message).not.toContain(badKey);
   });
 
-  it('rejects an RPC URL that is not http or https', () => {
+  it('accepts only https RPC URLs', () => {
     expect(configError({ ...readOnly, RPC_URLS: 'ftp://x.example' }).message).toContain('RPC_URLS');
+    expect(configError({ ...readOnly, RPC_URLS: 'http://rpc.testnet.near.org' }).message).toContain(
+      'not an https URL',
+    );
   });
 });
 

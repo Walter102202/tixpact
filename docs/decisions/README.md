@@ -48,3 +48,5 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-12 | Agent writes return one of five statuses; the chain is checked before the policy | `2026-11-12-agent-write-results-and-checks.md` |
 | 2026-11-12 | The agent's configuration fails closed, and the policy also bounds gas and deposits | `2026-11-12-agent-config-fails-closed.md` |
 | 2026-11-12 | The agent's signer knows the transaction hash before sending, and judges send errors itself | `2026-11-12-agent-signer-knows-the-hash-before-sending.md` |
+| 2026-11-13 | A purchase the agent signed counts against its cap until a read shows it is no longer exposure | `2026-11-13-agent-purchase-counts-until-a-read-clears-it.md` |
+| 2026-11-13 | The agent signs only through RPC endpoints that confirmed testnet, and checks the chain before every signature | `2026-11-13-agent-signs-only-through-endpoints-confirmed-on-testnet.md` |

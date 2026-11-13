@@ -71,9 +71,14 @@ const tgas = (gas: bigint) => formatNear((gas * TGAS).toString(), 24);
  * on its way back. Refunded tickets returned their money; released ones paid for an event that took
  * place. Returns yoctoNEAR.
  */
+/** Whether a ticket in this claim state still has its price inside the contract for its holder. */
+export function isExposedClaim(claim: Claim): boolean {
+  return EXPOSED.has(claim);
+}
+
 export function exposureOf(tickets: readonly TicketView[]): string {
   return tickets
-    .filter((ticket) => EXPOSED.has(ticket.claim))
+    .filter((ticket) => isExposedClaim(ticket.claim))
     .reduce((sum, ticket) => sum + BigInt(ticket.principal), 0n)
     .toString();
 }

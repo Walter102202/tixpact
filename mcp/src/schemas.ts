@@ -136,8 +136,13 @@ export const OUTPUT = {
   list_my_tickets: z.strictObject({
     account_id: z.string(),
     tickets: z.array(TicketViewSchema),
-    /** Principal still inside the contract for these tickets: what the exposure cap counts. */
+    /**
+     * What the exposure cap counts: the principal still inside the contract for these tickets, plus
+     * purchases this server signed that the list does not show yet.
+     */
     exposure: YoctoSchema,
+    /** The part of `exposure` from purchases signed but not in the list yet. */
+    in_flight: YoctoSchema,
   }),
   get_wallet: z.strictObject({
     account_id: z.string(),
@@ -145,6 +150,8 @@ export const OUTPUT = {
     contract_id: z.string(),
     balance: YoctoSchema,
     can_sign: z.boolean(),
+    /** Why the agent cannot sign, or null when it can. */
+    signing_off_reason: z.string().nullable(),
     max_price: YoctoSchema.nullable(),
     max_exposure: YoctoSchema.nullable(),
     exposure: YoctoSchema,

@@ -56,7 +56,7 @@ export interface NearSignerOptions {
    * calls `viewNodeStatus`, `viewAccessKey`, `viewBlock` and `sendTransactionUntil`.
    */
   provider: Provider;
-  /** The chain the provider must report before the first signature. Default `testnet`. */
+  /** The chain the provider must report before every signature. Default `testnet`. */
   chainId?: string;
 }
 
@@ -98,7 +98,7 @@ function describe(error: unknown): string {
 /**
  * Signs with a key from the environment through near-api-js. Each call reads a fresh nonce, signs
  * locally (so the hash is known before anything is sent) and submits with `waitUntil: 'INCLUDED'`.
- * Before the first signature it checks that the provider is on the expected chain.
+ * Before every signature it checks that the provider is on the expected chain.
  */
 export function createNearSigner(options: NearSignerOptions): AgentSigner {
   const { accountId, provider } = options;
@@ -110,10 +110,9 @@ export function createNearSigner(options: NearSignerOptions): AgentSigner {
     // The library's message may quote part of the key; ours never does.
     throw new Error('AGENT_PRIVATE_KEY is not a valid secret key (the value is not shown).');
   }
-  let chainChecked = false;
-
+  // Checked before every signature, not once: the provider fails over between endpoints, and one
+  // read at startup says nothing about the endpoint that answers later.
   async function ensureChain(): Promise<void> {
-    if (chainChecked) return;
     let reported: string;
     try {
       reported = (await provider.viewNodeStatus()).chain_id;
@@ -132,7 +131,6 @@ export function createNearSigner(options: NearSignerOptions): AgentSigner {
         false,
       );
     }
-    chainChecked = true;
   }
 
   return {

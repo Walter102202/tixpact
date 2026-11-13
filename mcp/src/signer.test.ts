@@ -92,12 +92,12 @@ describe('createNearSigner', () => {
     expect(fn?.gas).toBe(BigInt(buy.gas));
   });
 
-  it('checks the chain once, before the first signature', async () => {
+  it('checks the chain before every signature, not only the first', async () => {
     const chain = fakeChain();
     const agent = signer(chain.provider);
     await agent.signAndSend(CONTRACT, buy);
     await agent.signAndSend(CONTRACT, actions.claimRefund('1-1'));
-    expect(chain.statusReads()).toBe(1);
+    expect(chain.statusReads()).toBe(2);
   });
 
   it('signs nothing when the RPC is not on testnet', async () => {

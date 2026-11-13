@@ -7,10 +7,12 @@ import { depsFromEnv } from '../runtime.js';
 import { createServer, SERVER_NAME } from '../server.js';
 
 async function main(): Promise<void> {
-  const deps = depsFromEnv(process.env);
+  const deps = await depsFromEnv(process.env);
   await createServer(deps).connect(new StdioServerTransport());
   const mode =
-    deps.signer === null ? 'read-only (no key configured)' : `signing as ${deps.signer.accountId}`;
+    deps.signer !== null
+      ? `signing as ${deps.signer.accountId}`
+      : `read-only (${deps.signingOffReason ?? 'no key configured'})`;
   console.error(
     `${SERVER_NAME} on ${deps.config.network}: contract ${deps.config.contractId}, ${mode}.`,
   );

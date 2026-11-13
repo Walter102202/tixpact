@@ -423,9 +423,14 @@ describe('the exposure cap over several purchases', () => {
   const buy = (client: Client) => call(client, 'buy_ticket', { event_id: 1 });
 
   it('two purchases asked for at once cannot both pass it', async () => {
-    // 8.5 NEAR held, a 10 NEAR cap and 1.5 NEAR tickets: one more fits, two do not.
-    const { signer, calls } = recordingSigner();
-    const client = await connect(deps(signer));
+    // 8.5 NEAR held, a 10 NEAR cap and 1.5 NEAR tickets: one more fits, two do not. The purchase
+    // mints 1-5, which no read shows yet (the recorded buySucceeded mints 1-4, which the fixture
+    // data has with another holder).
+    const minted = 'MintsFiveHash111111111111111111111111111111';
+    const { signer, calls } = recordingSigner({ ...HASHES, buy_ticket: minted });
+    const client = await connect(
+      deps(signer, { txRpc: createFixtureRpc({ ...TXS, minted: okTx(minted, '1-5') }) }),
+    );
     const results = await Promise.all([buy(client), buy(client)]);
     expect(results.map((r) => r.data.status).sort()).toEqual(['denied', 'succeeded']);
     expect(calls).toHaveLength(1);
@@ -500,6 +505,228 @@ describe('the exposure cap over several purchases', () => {
     expect((await buy(client)).data.status).toBe('failed');
     expect((await buy(client)).data.status).toBe('failed');
     expect(calls).toHaveLength(2);
+  });
+});
+
+describe('the exposure cap against stale reads and lost sends', () => {
+  const NEWCOMER = 'newcomer.testnet';
+  const TIGHT = { maxPriceYocto: parseNear('1.5'), maxExposureYocto: parseNear('3') };
+  const fast = { attempts: 1, intervalMs: 0, sleep: async () => {} };
+  const buy = (client: Client) => call(client, 'buy_ticket', { event_id: 1 });
+
+  /**
+   * A chain where each purchase mints the next ticket of event 1 to the agent, and whose reads can
+   * be switched between nodes, as a load balancer would: `current`; `list` (the ticket list is
+   * behind and shows none of the new tickets, direct ticket reads are current); `all` (the list is
+   * behind and direct reads do not know the new tickets either); `failing` (every ticket read fails).
+   */
+  function mintingChain(agent: string) {
+    const data = structuredClone(DATA);
+    const live = createFixtureReader(data);
+    const minted: Record<string, RecordedTx> = {};
+    const calls: Recorded[] = [];
+    let serial = 100;
+    let node: 'current' | 'list' | 'all' | 'failing' = 'current';
+    const isNew = (tokenId: string) => Number(tokenId.split('-')[1]) > 100;
+    const reader: Reader = {
+      ...live,
+      async listTicketsForOwner(accountId, from, limit) {
+        if (node === 'failing') throw new Error('node behind');
+        const page = await live.listTicketsForOwner(accountId, from, limit);
+        return node === 'current' ? page : page.filter((t) => !isNew(t.token_id));
+      },
+      async getTicket(tokenId) {
+        if (node === 'failing') throw new Error('node behind');
+        return node === 'all' && isNew(tokenId) ? null : live.getTicket(tokenId);
+      },
+    };
+    const signer: AgentSigner = {
+      accountId: agent,
+      async signAndSend(receiverId, sent) {
+        calls.push({ receiverId, call: sent });
+        serial += 1;
+        const tokenId = `1-${serial}`;
+        data.tickets.push({
+          token_id: tokenId,
+          event_id: 1,
+          serial,
+          owner_id: agent,
+          principal: parseNear('1.5'),
+          status: 'Active',
+          claim: 'Reserved',
+          pending_operation_id: null,
+        });
+        const hash = `Mint${serial}Hash1111111111111111111111111111111111`;
+        minted[hash] = okTx(hash, tokenId);
+        return hash;
+      },
+    };
+    const chainDeps: ToolDeps = {
+      config: config({ agentAccountId: agent, caps: TIGHT }),
+      reader,
+      txRpc: createFixtureRpc(minted),
+      signer,
+      track: fast,
+    };
+    const mine = () => data.tickets.filter((t) => t.owner_id === agent);
+    return {
+      calls,
+      deps: chainDeps,
+      mine,
+      readFrom: (next: typeof node) => {
+        node = next;
+      },
+    };
+  }
+
+  const HELD_ABOVE_CAP =
+    'Exposure would be 4.5 NEAR (3 NEAR in tickets held plus 1.5 NEAR for this one), above the cap of 3 NEAR';
+
+  for (const stale of ['list', 'all'] as const) {
+    it(`keeps counting a confirmed purchase when a later read comes from a node behind (${stale})`, async () => {
+      // Caps 1.5 / 3 and nothing held: A, then B on a current node (the list shows A), then C on a
+      // node whose list shows neither. Holding A, B and C would be 4.5 NEAR against a cap of 3.
+      const chain = mintingChain(NEWCOMER);
+      const client = await connect(chain.deps);
+      expect((await buy(client)).data.status).toBe('succeeded');
+      expect((await buy(client)).data.status).toBe('succeeded');
+      chain.readFrom(stale);
+      expect((await buy(client)).data).toMatchObject({
+        status: 'denied',
+        reason: 'exposure_above_cap',
+        message: HELD_ABOVE_CAP,
+      });
+      // Back on a current node the count is the same, not doubled.
+      chain.readFrom('current');
+      expect((await buy(client)).data).toMatchObject({ message: HELD_ABOVE_CAP });
+      expect(chain.calls).toHaveLength(2);
+    });
+  }
+
+  it('refuses to sign when the ticket reads fail', async () => {
+    const chain = mintingChain(NEWCOMER);
+    const client = await connect(chain.deps);
+    expect((await buy(client)).data.status).toBe('succeeded');
+    chain.readFrom('failing');
+    expect((await buy(client)).isError).toBe(true);
+    expect(chain.calls).toHaveLength(1);
+  });
+
+  it('stops counting a purchase once a direct read shows the ticket went to someone else', async () => {
+    const chain = mintingChain(NEWCOMER);
+    const client = await connect(chain.deps);
+    expect((await buy(client)).data.status).toBe('succeeded');
+    must(chain.mine()[0]).owner_id = 'ana.testnet';
+    chain.readFrom('list');
+    // A left: B and C fit under the cap of 3, D does not.
+    expect((await buy(client)).data.status).toBe('succeeded');
+    expect((await buy(client)).data.status).toBe('succeeded');
+    expect((await buy(client)).data).toMatchObject({ message: HELD_ABOVE_CAP });
+    expect(chain.calls).toHaveLength(3);
+  });
+
+  it('stops counting a purchase once a direct read shows it refunded', async () => {
+    const chain = mintingChain(NEWCOMER);
+    const client = await connect(chain.deps);
+    expect((await buy(client)).data.status).toBe('succeeded');
+    Object.assign(must(chain.mine()[0]), { status: 'Refunded', claim: 'Refunded' });
+    chain.readFrom('list');
+    expect((await buy(client)).data.status).toBe('succeeded');
+    expect((await buy(client)).data.status).toBe('succeeded');
+    expect((await buy(client)).data).toMatchObject({ message: HELD_ABOVE_CAP });
+    expect(chain.calls).toHaveLength(3);
+  });
+
+  it('stops counting a purchase the list shows refunded', async () => {
+    const chain = mintingChain(NEWCOMER);
+    const client = await connect(chain.deps);
+    expect((await buy(client)).data.status).toBe('succeeded');
+    Object.assign(must(chain.mine()[0]), { status: 'Refunded', claim: 'Refunded' });
+    expect((await buy(client)).data.status).toBe('succeeded');
+    expect((await buy(client)).data.status).toBe('succeeded');
+    expect(chain.calls).toHaveLength(3);
+  });
+
+  it('an error the signer did not classify is unconfirmed, and the price keeps counting', async () => {
+    const calls: ContractCall[] = [];
+    const signer: AgentSigner = {
+      accountId: AGENT,
+      async signAndSend(_receiverId, sent) {
+        calls.push(sent);
+        throw new Error('socket hang up');
+      },
+    };
+    const client = await connect(deps(signer, { txRpc: unreachableTxRpc() }));
+    const first = await buy(client);
+    expect(first.data).toMatchObject({ status: 'unconfirmed', tx_hash: null, explorer_url: null });
+    expect(first.data.message).toContain('its hash is unknown');
+    expect(first.data.message).toContain('socket hang up');
+    expect(first.data.message).toContain(
+      'Its price counts against the exposure cap until this server restarts.',
+    );
+    const mine = await call(client, 'list_my_tickets');
+    expect(mine.data.exposure).toBe(parseNear('10'));
+    expect((await buy(client)).data).toMatchObject({
+      status: 'denied',
+      reason: 'exposure_above_cap',
+    });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('a send that may have landed with no hash known is unconfirmed, and counted', async () => {
+    const signer: AgentSigner = {
+      accountId: AGENT,
+      async signAndSend() {
+        throw new SendError('timed out', null, true);
+      },
+    };
+    const client = await connect(deps(signer, { txRpc: unreachableTxRpc() }));
+    expect((await buy(client)).data).toMatchObject({ status: 'unconfirmed', tx_hash: null });
+    expect((await call(client, 'get_wallet')).data).toMatchObject({ exposure: parseNear('10') });
+  });
+
+  it('list_my_tickets counts a purchase in flight, exactly as the cap does', async () => {
+    const { signer } = recordingSigner({
+      buy_ticket: 'UnknownHash1111111111111111111111111111111',
+    });
+    const client = await connect(deps(signer));
+    expect((await buy(client)).data.status).toBe('unconfirmed');
+    const mine = await call(client, 'list_my_tickets');
+    expect(mine.data.exposure).toBe(parseNear('10'));
+    expect(mine.text).toContain('purchases signed but not visible yet');
+  });
+});
+
+describe('the agent account', () => {
+  it('refuses a signer for another account than AGENT_ACCOUNT_ID', () => {
+    const other: AgentSigner = { ...recordingSigner().signer, accountId: 'ana.testnet' };
+    expect(() => createServer(deps(other))).toThrow(
+      'The key signs for ana.testnet, but AGENT_ACCOUNT_ID is luis.testnet: refusing to start.',
+    );
+    expect(() => createServer(deps(other, { config: config({ agentAccountId: null }) }))).toThrow(
+      'The key signs for ana.testnet, but AGENT_ACCOUNT_ID is not set: refusing to start.',
+    );
+  });
+
+  it('says why signing is off when the server chose to run read-only', async () => {
+    const reason = 'the RPC reports chain mainnet, not testnet';
+    const client = await connect(deps(null, { signingOffReason: reason }));
+    expect((await call(client, 'buy_ticket', { event_id: 1 })).data).toMatchObject({
+      status: 'denied',
+      reason: 'signing_off',
+      message: `signing is off: ${reason}`,
+    });
+    const wallet = await call(client, 'get_wallet');
+    expect(wallet.data).toMatchObject({ can_sign: false, signing_off_reason: reason });
+    expect(wallet.text).toContain(`Signing: off (${reason})`);
+  });
+
+  it('without a key, get_wallet says that is why it cannot sign', async () => {
+    const client = await connect(deps(null));
+    expect((await call(client, 'get_wallet')).data).toMatchObject({
+      can_sign: false,
+      signing_off_reason: 'no key configured',
+    });
   });
 });
 

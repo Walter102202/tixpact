@@ -14,13 +14,14 @@ It can spend only its own account, only on one contract, only through four metho
 | One contract | `CONTRACT_ID` | the policy (`mcp/src/policy.ts`, `evaluate`): any other receiver is denied |
 | Four methods: `buy_ticket`, `nft_transfer`, `expire_event`, `claim_refund` | fixed | the policy: any other method is denied |
 | Price of one ticket | `MAX_PRICE_YOCTO` | the policy: the `buy_ticket` deposit must be at or below it |
-| Exposure: the price of every ticket held whose money is still in the contract (reserved, claimable or being refunded) | `MAX_EXPOSURE_YOCTO` | the policy: exposure plus the price must be at or below it. Exposure is read from the chain before every write, purchases already signed but not yet visible keep counting, and writes run one at a time |
+| Exposure: the price of every ticket held whose money is still in the contract (reserved, claimable or being refunded) | `MAX_EXPOSURE_YOCTO` | the policy: exposure plus the price must be at or below it. Exposure is read from the chain before every write; a purchase this server signed keeps counting until a read shows it failed, went to someone else or was refunded, even when the list comes from a node that is behind; writes run one at a time |
 | No money on any other call | fixed | the policy: only `buy_ticket` may attach more than 1 yoctoNEAR |
 | Fees | the client gas table (`actions.GAS_TGAS`) | the policy: prepaid gas never above the table (at most 100 Tgas, for `claim_refund`) |
-| Testnet only | `NEAR_NETWORK` | the configuration refuses any other network and `.near` accounts; the signer checks the RPC's chain id before its first signature |
+| Testnet only | `NEAR_NETWORK`, `RPC_URLS` | the configuration refuses any other network, `.near` accounts and RPC URLs that are not `https`. At start every endpoint is asked its chain id: one on another network, or none answering, turns signing off (the server runs read-only and says why). The signer sends only through endpoints that answered `testnet` and checks the chain id again before every signature |
+| One account | `AGENT_ACCOUNT_ID` | the server refuses to start when the key signs for another account |
 | No key, no writes | `AGENT_PRIVATE_KEY` | every write tool is denied before anything is read or signed |
 
-The checks run in this order: the key, the caps, the chain (does the event exist, is it on sale, does the agent hold the ticket, has the deadline passed), the policy, then the signer. A denial or a refusal names the amounts and says that nothing was signed. Design records: `docs/decisions/2026-11-12-agent-exposure-and-one-write-at-a-time.md`, `2026-11-12-agent-write-results-and-checks.md`, `2026-11-12-agent-config-fails-closed.md`.
+The checks run in this order: the key, the caps, the chain (does the event exist, is it on sale, does the agent hold the ticket, has the deadline passed), the policy, then the signer. A denial or a refusal names the amounts and says that nothing was signed. Design records: `docs/decisions/2026-11-12-agent-exposure-and-one-write-at-a-time.md`, `2026-11-12-agent-write-results-and-checks.md`, `2026-11-12-agent-config-fails-closed.md`, `2026-11-13-agent-purchase-counts-until-a-read-clears-it.md`, `2026-11-13-agent-signs-only-through-endpoints-confirmed-on-testnet.md`.
 
 ## Run it
 
@@ -34,13 +35,13 @@ pnpm install --frozen-lockfile && pnpm build
 |---|---|---|
 | `CONTRACT_ID` | yes | the ticket contract on testnet |
 | `NEAR_NETWORK` | no | `testnet`, the only value accepted |
-| `RPC_URLS` | no | comma-separated endpoints tried in order; default `https://test.rpc.fastnear.com,https://near-testnet.drpc.org` |
+| `RPC_URLS` | no | comma-separated `https` endpoints tried in order; default `https://test.rpc.fastnear.com,https://near-testnet.drpc.org` |
 | `AGENT_ACCOUNT_ID` | to sign, and for `list_my_tickets` and `get_wallet` | the agent's own testnet account |
 | `AGENT_PRIVATE_KEY` | to sign | its secret key, `ed25519:...` |
 | `MAX_PRICE_YOCTO` | to sign | per-ticket cap in yoctoNEAR (1 NEAR = 1 followed by 24 zeros) |
 | `MAX_EXPOSURE_YOCTO` | to sign | exposure cap in yoctoNEAR |
 
-With a key, the account and both caps are required; there are no default caps. Without a key the server runs read-only.
+With a key, the account and both caps are required; there are no default caps. Without a key the server runs read-only. A configuration error names the variable (for `RPC_URLS`, the entry's position) and never repeats its value.
 
 The server is started by the MCP client, which launches `node <repo>/mcp/dist/bin/serve.js` (also `pnpm --filter @ticket-escrow/mcp start`). It logs one line to stderr when it starts; stdout carries the protocol.
 
@@ -76,7 +77,7 @@ Every tool returns two views of the same result: Markdown text for the model and
 - `denied`: refused by the rules above. Nothing signed.
 - `not_sent`: the chain says the contract would reject it. Nothing signed.
 - `succeeded` / `failed`: signed, then judged by reading the transaction back by hash with every receipt. A refund is reported only when the money moved.
-- `unconfirmed`: signed, but no final status arrived in time; the result carries the hash and the explorer link.
+- `unconfirmed`: signed, and possibly on the chain, but no final status arrived in time. With a hash the result carries it and the explorer link; without one it links the agent's account. An unconfirmed purchase keeps counting against the exposure cap (until restart when its hash is unknown).
 
 The examples below are the real output of the built server on the fixture chain (agent `luis.testnet`, caps 1.5 NEAR per ticket and 10 NEAR of exposure). The fixture reader answers every account with the contract's balance, which is why the agent's balance equals the contract's.
 
@@ -165,7 +166,7 @@ History:
 Exposure counted by the cap: 8.5 NEAR (tickets whose price is still in the contract).
 ```
 
-`structuredContent`: `{ "account_id": "luis.testnet", "tickets": [ <TicketView>, … ], "exposure": "8500000000000000000000000" }`.
+`structuredContent`: `{ "account_id": "luis.testnet", "tickets": [ <TicketView>, … ], "exposure": "8500000000000000000000000", "in_flight": "0" }`. `exposure` is the total the cap checks; `in_flight` is the part from purchases signed but not in the list yet, and the text then shows both parts.
 
 ### `get_wallet`
 
@@ -185,7 +186,7 @@ Signing: on. Every write is checked against the caps before it is signed.
 ```
 
 ```json
-{ "account_id": "luis.testnet", "network": "testnet", "contract_id": "ticket-escrow.testnet", "balance": "26731000000000000000000000", "can_sign": true, "max_price": "1500000000000000000000000", "max_exposure": "10000000000000000000000000", "exposure": "8500000000000000000000000", "headroom": "1500000000000000000000000" }
+{ "account_id": "luis.testnet", "network": "testnet", "contract_id": "ticket-escrow.testnet", "balance": "26731000000000000000000000", "can_sign": true, "signing_off_reason": null, "max_price": "1500000000000000000000000", "max_exposure": "10000000000000000000000000", "exposure": "8500000000000000000000000", "headroom": "1500000000000000000000000" }
 ```
 
 ### `verify_contract`
@@ -299,7 +300,7 @@ It starts the built server as a child process over stdio, exactly as an MCP clie
 
 ## Limits
 
-- Run one server per agent key. The exposure check is exact within one process; two processes with the same key do not see each other's purchases in flight. The watcher only expires and claims, which never raise exposure.
+- Run one server per agent key. The exposure check covers what this process signed; two processes with the same key do not see each other's purchases in flight. The watcher only expires and claims, which never raise exposure.
 - Fees are paid from the balance and do not count toward the caps; each call's prepaid gas is bounded by the client's gas table.
 - A transfer gives the ticket and its refund away. Exposure counts only the tickets the agent holds, so a transfer frees room under the cap; the balance stays the hard limit on everything the agent can ever spend.
 - The checks before signing read the same views as the web, which can be one block behind; a refused call can simply be asked again. They never let through a call the policy denies.
@@ -308,5 +309,5 @@ It starts the built server as a child process over stdio, exactly as an MCP clie
 
 ## Verification
 
-- 2026-11-12, offline: `pnpm --filter @ticket-escrow/mcp test` runs the tools through the SDK's in-memory client and server pair on the fixture chain with a recording signer, the policy, the configuration, the signer against a fake provider and the watcher (88 tests). The built server over stdio, through the smoke script against an RPC that refuses connections, listed the ten tools and reported the failed read as a tool error.
+- 2026-11-13, offline: `pnpm --filter @ticket-escrow/mcp test` runs the tools through the SDK's in-memory client and server pair on the fixture chain with a recording signer, the policy, the configuration, the signer against a fake provider, the start-up network check and the watcher (104 tests). The built server over stdio, through the smoke script against an RPC that refuses connections, listed the ten tools and reported the failed read as a tool error.
 - Testnet: pending the deployed contract (spike S4 and the smoke run with a key).

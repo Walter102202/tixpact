@@ -7,7 +7,12 @@ import { depsFromEnv } from '../runtime.js';
 import { WATCH_INTERVAL_MS, watch } from '../watch.js';
 
 async function main(): Promise<void> {
-  const deps = depsFromEnv(process.env);
+  const deps = await depsFromEnv(process.env);
+  if (deps.signer === null && deps.signingOffReason) {
+    throw new ConfigError(
+      `The watcher signs expiries and claims, but signing is off: ${deps.signingOffReason}.`,
+    );
+  }
   if (deps.signer === null) {
     throw new ConfigError(
       'The watcher signs expiries and claims, so it needs AGENT_PRIVATE_KEY with AGENT_ACCOUNT_ID and both caps.',

@@ -143,9 +143,13 @@ export function formatMyTickets(output: ToolOutput<'list_my_tickets'>): string {
       `- Ticket ${ticket.token_id} (event ${ticket.event_id}): ${near(ticket.principal)}, ${CLAIM_LABELS[ticket.claim]}`,
     );
   }
+  const inFlight = BigInt(output.in_flight);
+  const listed = BigInt(output.exposure) - inFlight;
   lines.push(
     '',
-    `Exposure counted by the cap: ${near(output.exposure)} (tickets whose price is still in the contract).`,
+    inFlight === 0n
+      ? `Exposure counted by the cap: ${near(output.exposure)} (tickets whose price is still in the contract).`
+      : `Exposure counted by the cap: ${near(output.exposure)} (${near(listed.toString())} in tickets listed, ${near(output.in_flight)} in purchases signed but not visible yet).`,
   );
   return lines.join('\n');
 }
@@ -161,7 +165,7 @@ export function formatWallet(wallet: ToolOutput<'get_wallet'>): string {
     `Contract it may call: ${wallet.contract_id} (buy_ticket, nft_transfer, expire_event, claim_refund only).`,
     wallet.can_sign
       ? 'Signing: on. Every write is checked against the caps before it is signed.'
-      : 'Signing: off (no key configured). The agent can read but not buy, transfer or claim.',
+      : `Signing: off (${wallet.signing_off_reason ?? 'not available'}). The agent can read but not buy, transfer or claim.`,
   ].join('\n');
 }
 

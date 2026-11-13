@@ -2,6 +2,7 @@ import {
   actions,
   type ContractCall,
   type EventView,
+  explorerAccountUrl,
   explorerTxUrl,
   moneyMoved,
   PHASE_LABELS,
@@ -12,9 +13,9 @@ import {
   type TxStatusRpc,
   trackTransaction,
 } from '@ticket-escrow/client';
-import type { AgentConfig } from './config.js';
+import { type AgentConfig, ConfigError } from './config.js';
 import { near, when } from './format.js';
-import { evaluate, exposureOf, type Policy } from './policy.js';
+import { evaluate, exposureOf, isExposedClaim, type Policy } from './policy.js';
 import {
   MAX_PAGE,
   type ToolInput,
@@ -33,8 +34,10 @@ export interface AgentDeps {
   reader: Reader;
   /** Where transactions are judged; the same RPC as the reader in production. */
   txRpc: TxStatusRpc;
-  /** Null when no key is configured: every write is then denied. */
+  /** Null when no key is configured or signing was turned off: every write is then denied. */
   signer: AgentSigner | null;
+  /** Why the signer is null although a key is configured (for example, the RPC is not testnet). */
+  signingOffReason?: string | null;
   /** How long to follow a transaction (tests shorten it). */
   track?: TrackOptions;
 }
@@ -66,17 +69,33 @@ const MAX_PAGES = 100;
 /** Accounting reads in flight at once for `verify_contract`. */
 const READ_BATCH = 10;
 
-/** A purchase that is signed but not yet visible in the agent's ticket list. */
+/**
+ * A purchase this server signed. It counts against the exposure cap until a read shows its price
+ * is no longer the agent's exposure: the transaction failed, or the ticket is held by someone else
+ * or no longer has its price in the contract.
+ */
 interface PendingPurchase {
-  txHash: string;
+  /** The transaction hash, or a local id when the send failed before the hash was known. */
+  key: string;
+  /** Null when the hash is unknown: then it counts until this server restarts. */
+  txHash: string | null;
   deposit: bigint;
   /** The minted ticket id once the transaction is judged; null while unconfirmed. */
   tokenId: string | null;
 }
 
+/** What the exposure cap counts right now, and where it comes from. */
+interface Exposure {
+  /** The agent's tickets, as the list read now shows them. */
+  tickets: TicketView[];
+  /** Principal of the signed purchases the list does not show. */
+  inFlight: bigint;
+  total: bigint;
+}
+
 type Sent =
   | { kind: 'done'; result: WriteResult }
-  | { kind: 'unconfirmed'; txHash: string; result: WriteResult }
+  | { kind: 'unconfirmed'; txHash: string | null; result: WriteResult }
   | { kind: 'tracked'; txHash: string; tx: TxResult };
 
 function writeResult(
@@ -122,7 +141,14 @@ async function readAllPages<T>(read: (from: number) => Promise<T[]>, what: strin
 export function createAgent(deps: AgentDeps): Agent {
   const { config, reader } = deps;
   const contractId = config.contractId;
+  // Reads and the cap use AGENT_ACCOUNT_ID and writes are signed by the key's account: one account.
+  if (deps.signer !== null && deps.signer.accountId !== config.agentAccountId) {
+    throw new ConfigError(
+      `The key signs for ${deps.signer.accountId}, but AGENT_ACCOUNT_ID is ${config.agentAccountId ?? 'not set'}: refusing to start.`,
+    );
+  }
   const pending = new Map<string, PendingPurchase>();
+  let unknownSends = 0;
 
   // Writes run one at a time, so two purchases asked for at once cannot both pass the exposure
   // check against the same balance of tickets.
@@ -157,33 +183,59 @@ export function createAgent(deps: AgentDeps): Agent {
   }
 
   /**
-   * The principal the exposure cap counts: the agent's tickets still inside the contract, plus
-   * purchases already signed that the ticket list does not show yet (unconfirmed, or confirmed on
-   * a node the list was not read from). Call it only inside `serialized`.
+   * Where a signed purchase stands: `listed` (the list counts it), `in_flight` (the list does not
+   * show it, so it is added) or `cleared` (a read shows its price is no longer the agent's
+   * exposure). A read that fails or does not know the ticket keeps it counting: the list or the
+   * node may simply be behind.
    */
-  async function exposureNow(accountId: string): Promise<bigint> {
-    const tickets = await allTickets(accountId);
-    const listed = new Set(tickets.map((t) => t.token_id));
-    for (const purchase of [...pending.values()]) {
-      if (purchase.tokenId === null) {
-        const verdict = await peek(purchase.txHash, accountId);
-        if (verdict === null) continue;
-        if (!verdict.ok) {
-          pending.delete(purchase.txHash);
-          continue;
-        }
-        if (typeof verdict.value === 'string') purchase.tokenId = verdict.value;
-      }
-      if (purchase.tokenId !== null && listed.has(purchase.tokenId)) {
-        pending.delete(purchase.txHash);
-      }
+  async function standing(
+    purchase: PendingPurchase,
+    listed: ReadonlyMap<string, TicketView>,
+    accountId: string,
+  ): Promise<'listed' | 'in_flight' | 'cleared'> {
+    if (purchase.tokenId === null && purchase.txHash !== null) {
+      const verdict = await peek(purchase.txHash, accountId);
+      if (verdict !== null && !verdict.ok) return 'cleared';
+      if (verdict?.ok && typeof verdict.value === 'string') purchase.tokenId = verdict.value;
     }
-    let total = BigInt(exposureOf(tickets));
-    for (const purchase of pending.values()) total += purchase.deposit;
-    return total;
+    if (purchase.tokenId === null) return 'in_flight';
+    const inList = listed.get(purchase.tokenId);
+    if (inList !== undefined) return isExposedClaim(inList.claim) ? 'listed' : 'cleared';
+    const ticket = await reader.getTicket(purchase.tokenId).catch(() => null);
+    if (ticket === null) return 'in_flight';
+    const stillMine = ticket.owner_id === accountId && isExposedClaim(ticket.claim);
+    return stillMine ? 'in_flight' : 'cleared';
   }
 
+  /**
+   * The principal the exposure cap counts: the agent's tickets still inside the contract, plus
+   * every purchase this server signed that the list does not show (unconfirmed, or confirmed but
+   * read from a node that is behind). A purchase leaves the count only when a read shows it is no
+   * longer exposure. Call it only inside `serialized`.
+   */
+  async function exposureNow(accountId: string): Promise<Exposure> {
+    const tickets = await allTickets(accountId);
+    const listed = new Map(tickets.map((t) => [t.token_id, t]));
+    let inFlight = 0n;
+    for (const purchase of [...pending.values()]) {
+      const where = await standing(purchase, listed, accountId);
+      if (where === 'cleared') pending.delete(purchase.key);
+      if (where === 'in_flight') inFlight += purchase.deposit;
+    }
+    return { tickets, inFlight, total: BigInt(exposureOf(tickets)) + inFlight };
+  }
+
+  const signingOff = deps.signingOffReason ?? null;
+
   function writeGate(): { signer: AgentSigner; policy: Policy } | { denied: WriteResult } {
+    if (deps.signer === null && signingOff !== null) {
+      return {
+        denied: writeResult('denied', {
+          reason: 'signing_off',
+          message: `signing is off: ${signingOff}`,
+        }),
+      };
+    }
     if (deps.signer === null) {
       return { denied: writeResult('denied', { reason: 'no_key', message: NO_KEY }) };
     }
@@ -203,7 +255,7 @@ export function createAgent(deps: AgentDeps): Agent {
     const exposure = await exposureNow(signer.accountId);
     const decision = evaluate(
       policy,
-      { exposureYocto: exposure.toString() },
+      { exposureYocto: exposure.total.toString() },
       { receiverId: contractId, call },
     );
     if (decision.outcome === 'deny') {
@@ -221,21 +273,33 @@ export function createAgent(deps: AgentDeps): Agent {
     try {
       txHash = await signer.signAndSend(contractId, call);
     } catch (error) {
-      if (error instanceof SendError && error.mayHaveLanded && error.txHash !== null) {
-        txHash = error.txHash;
-      } else {
-        const hash = error instanceof SendError ? error.txHash : null;
+      const detail = error instanceof Error ? error.message : String(error);
+      const hash = error instanceof SendError ? error.txHash : null;
+      // Only the signer's own verdict that nothing landed makes this a failure. Anything else may
+      // have reached the chain, so it is unconfirmed and a purchase keeps counting.
+      if (error instanceof SendError && !error.mayHaveLanded) {
         return {
           kind: 'done',
           result: writeResult('failed', {
             reason: 'not_accepted',
-            message: `The node did not accept the transaction: ${error instanceof Error ? error.message : String(error)}`,
+            message: `The node did not accept the transaction: ${detail}`,
             call: view,
             tx_hash: hash,
             explorer_url: hash === null ? null : explorerTxUrl(hash),
           }),
         };
       }
+      if (hash === null) {
+        return {
+          kind: 'unconfirmed',
+          txHash: null,
+          result: writeResult('unconfirmed', {
+            message: `It may have been sent, but its hash is unknown (${detail}), so its result cannot be checked here. Look at the agent account before trying again: ${explorerAccountUrl(signer.accountId)}.`,
+            call: view,
+          }),
+        };
+      }
+      txHash = hash;
     }
 
     try {
@@ -351,8 +415,14 @@ export function createAgent(deps: AgentDeps): Agent {
 
     async listMyTickets() {
       const accountId = requireAgent();
-      const tickets = await allTickets(accountId);
-      return { account_id: accountId, tickets, exposure: exposureOf(tickets) };
+      // The same count the cap uses, so the agent never sees less exposure than the policy does.
+      const { tickets, inFlight, total } = await serialized(() => exposureNow(accountId));
+      return {
+        account_id: accountId,
+        tickets,
+        exposure: total.toString(),
+        in_flight: inFlight.toString(),
+      };
     },
 
     async getWallet() {
@@ -362,22 +432,25 @@ export function createAgent(deps: AgentDeps): Agent {
         serialized(() => exposureNow(accountId)),
       ]);
       const caps = config.caps;
-      const headroom =
-        caps === null
-          ? null
-          : (BigInt(caps.maxExposureYocto) > exposure
-              ? BigInt(caps.maxExposureYocto) - exposure
-              : 0n
-            ).toString();
+      const held = exposure.total;
+      const cap = caps === null ? null : BigInt(caps.maxExposureYocto);
+      const headroom = cap === null ? null : (cap > held ? cap - held : 0n).toString();
+      const offReason =
+        deps.signer === null
+          ? (signingOff ?? 'no key configured')
+          : caps === null
+            ? 'no caps configured'
+            : null;
       return {
         account_id: accountId,
         network: config.network,
         contract_id: contractId,
         balance: proof.balance,
-        can_sign: deps.signer !== null,
+        can_sign: offReason === null,
+        signing_off_reason: offReason,
         max_price: caps?.maxPriceYocto ?? null,
         max_exposure: caps?.maxExposureYocto ?? null,
-        exposure: exposure.toString(),
+        exposure: held.toString(),
         headroom,
       };
     },
@@ -428,11 +501,20 @@ export function createAgent(deps: AgentDeps): Agent {
         const sent = await sendChecked(call, gate.signer, gate.policy);
         const deposit = BigInt(call.deposit);
         if (sent.kind === 'unconfirmed') {
-          pending.set(sent.txHash, { txHash: sent.txHash, deposit, tokenId: null });
+          unknownSends += 1;
+          const key = sent.txHash ?? `unknown-send-${unknownSends}`;
+          pending.set(key, { key, txHash: sent.txHash, deposit, tokenId: null });
+          const counted =
+            sent.txHash === null
+              ? 'Its price counts against the exposure cap until this server restarts.'
+              : 'Its price counts against the exposure cap until the transaction shows it failed.';
+          return { ...sent.result, message: `${sent.result.message} ${counted}` };
         }
         if (sent.kind !== 'tracked') return sent.result;
         const tokenId = typeof sent.tx.value === 'string' ? sent.tx.value : null;
-        if (sent.tx.ok) pending.set(sent.txHash, { txHash: sent.txHash, deposit, tokenId });
+        if (sent.tx.ok) {
+          pending.set(sent.txHash, { key: sent.txHash, txHash: sent.txHash, deposit, tokenId });
+        }
         return judged(
           call,
           sent.txHash,
