@@ -84,6 +84,15 @@ pub struct OperationView {
     pub started_at_ms: u64,
 }
 
+/// Whether a payment arrived: anything but a confirmed failure (R7). A native transfer answers
+/// nothing and so does a standard `ft_transfer`; a token that answers a value still ran its
+/// transfer, because only a failed receipt is reverted. The callbacks read the answer bounded at
+/// 0 bytes, so a value arrives as `TooLong`, never as something to deserialize, and counts as
+/// delivered: giving the right back after a payment that went through would let it be paid twice.
+fn delivered(payment: &Result<(), PromiseError>) -> bool {
+    !matches!(payment, Err(PromiseError::Failed))
+}
+
 /// The least gas a claim on an event priced in `currency` needs. Checked before anything is
 /// written.
 fn ensure_claim_gas(currency: Option<&AccountId>) {
@@ -302,13 +311,14 @@ impl Contract {
         Self::transfer_then(currency, caller, amount, callback)
     }
 
-    /// Callback of `claim_refund`. Settles the refund if the transfer arrived; restores the
-    /// holder's right if it failed. Removes the operation and returns whether money moved.
+    /// Callback of `claim_refund`. Settles the refund unless the transfer is confirmed failed,
+    /// in which case it restores the holder's right (`delivered`). Removes the operation and
+    /// returns whether money moved.
     #[private]
     pub fn on_refund_result(
         &mut self,
         operation_id: u64,
-        #[callback_result] transfer: Result<(), PromiseError>,
+        #[callback_result(max_bytes = 0)] transfer: Result<(), PromiseError>,
     ) -> bool {
         let Some(operation) = self.operations.remove(&operation_id) else {
             return false;
@@ -322,7 +332,7 @@ impl Contract {
         let now_ms = env::block_timestamp_ms();
         let mut event = self.load_event(operation.event_id);
         let mut ticket = self.load_ticket(&token_id);
-        let delivered = transfer.is_ok();
+        let delivered = delivered(&transfer);
         if delivered {
             event.ledger.settle_refund(operation.amount);
             ticket.status = TicketStatus::Refunded;
@@ -353,13 +363,14 @@ impl Contract {
         delivered
     }
 
-    /// Callback of `claim_payout`. Settles the payout if the transfer arrived; makes the amount
-    /// available again if it failed. Removes the operation and returns whether money moved.
+    /// Callback of `claim_payout`. Settles the payout unless the transfer is confirmed failed,
+    /// in which case it makes the amount available again (`delivered`). Removes the operation
+    /// and returns whether money moved.
     #[private]
     pub fn on_payout_result(
         &mut self,
         operation_id: u64,
-        #[callback_result] transfer: Result<(), PromiseError>,
+        #[callback_result(max_bytes = 0)] transfer: Result<(), PromiseError>,
     ) -> bool {
         let Some(operation) = self.operations.remove(&operation_id) else {
             return false;
@@ -369,7 +380,7 @@ impl Contract {
             return false;
         }
         let mut event = self.load_event(operation.event_id);
-        let delivered = transfer.is_ok();
+        let delivered = delivered(&transfer);
         if delivered {
             event.ledger.settle_payout(operation.amount);
             log::settlement(
