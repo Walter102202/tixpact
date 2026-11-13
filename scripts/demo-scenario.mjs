@@ -165,6 +165,27 @@ async function balanceOf(accountId) {
   return BigInt((await reader.getAccountProof(accountId)).balance);
 }
 
+// What the ticket says about itself: its standard NFT metadata (NEP-177), which the contract
+// computes from the ticket's state at each read. A wallet or an explorer shows these words.
+async function ticketSays(story, tokenId, when, sentence) {
+  const token = await rpc.callFunction({
+    contractId,
+    method: 'nft_token',
+    args: { token_id: tokenId },
+    blockQuery: { finality: 'final' },
+  });
+  const description = token?.metadata?.description ?? '';
+  const picture = String(token?.metadata?.media ?? '').startsWith('data:image/svg+xml;base64,');
+  check(
+    story,
+    `${when}, the ticket itself says so: its NFT text and picture are computed from its state`,
+    'NEP-177 · `t32_metadata_follows_the_state`',
+    `the description ends with "${sentence}" and the picture is drawn by the contract`,
+    `"${description}"${picture ? ', with a picture drawn by the contract' : ', without a picture'}`,
+    description.endsWith(sentence) && picture,
+  );
+}
+
 async function createAcceptedEvent(story, title, money = {}) {
   const starts = Date.now() + STARTS_IN_MS;
   const terms = {
@@ -298,6 +319,12 @@ async function organizerDisappears() {
       accounting.principal_reserved === '0' &&
       accounting.organizer_available === '0',
   );
+  await ticketSays(
+    story,
+    tokenId,
+    'After the refund',
+    `${formatNear(PRICE)} NEAR was refunded to the holder.`,
+  );
   return eventId;
 }
 
@@ -339,6 +366,12 @@ async function eventTakesPlace() {
     `organizer_settled = ${PRICE}, organizer_available = 0`,
     `organizer_settled = ${accounting.organizer_settled}, organizer_available = ${accounting.organizer_available}`,
     accounting.organizer_settled === PRICE && accounting.organizer_available === '0',
+  );
+  await ticketSays(
+    story,
+    tokenId,
+    'After the payout',
+    'The event was confirmed and the price went to the organizer.',
   );
   return eventId;
 }
@@ -583,6 +616,12 @@ async function pricedInDollars(token) {
       accounting.principal_reserved === '0' &&
       accounting.organizer_available === '0' &&
       heldAtEnd === heldBefore,
+  );
+  await ticketSays(
+    story,
+    tokenId,
+    'After the refund',
+    `${shown(price)} was refunded to the holder.`,
   );
   return eventId;
 }
