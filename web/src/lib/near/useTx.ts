@@ -14,8 +14,6 @@ import { useServices } from '../../services';
 
 /** How the re-read after a transaction went. */
 export type Reread =
-  /** No re-read was asked for. */
-  | 'none'
   /** The page shows the change the transaction made. */
   | 'caught-up'
   /** The page was read again, but the node does not show the change yet. */
@@ -56,10 +54,23 @@ export interface TxControl {
    * unknown: no action that could pay twice may be offered.
    */
   busy: boolean;
-  run: <T>(call: ContractCall, refresh?: Refresh<T>) => Promise<void>;
+  /**
+   * Sends `call` and follows it. `refresh` is required: after an unknown result the actions come
+   * back only once the page has been read again, so every call must say how to read it.
+   */
+  run: <T>(call: ContractCall, refresh: Refresh<T>) => Promise<void>;
   dismiss: () => void;
-  /** After an unknown result: read the page again; on success the actions come back. */
+  /**
+   * After an unknown result: ask the chain for it again, which ends like a normal send when it now
+   * answers. If it still does not, read the page; only a successful read brings the actions back.
+   */
   recheck: () => Promise<void>;
+}
+
+interface Unconfirmed {
+  txHash: string;
+  signerId: string;
+  refresh: Refresh<unknown>;
 }
 
 export function notSentMessage(error: unknown): string {
@@ -77,21 +88,12 @@ const sameKey =
 export function useTx(): TxControl {
   const { wallet, txRpc, trackOptions, rereadOptions, fixtureMode } = useServices();
   const [view, setView] = useState<TxView>({ kind: 'idle' });
-  // The refresh of the transaction in flight, kept for `recheck`.
-  const lastRefresh = useRef<Refresh<unknown> | undefined>(undefined);
+  // The sent transaction whose result is unknown, kept for `recheck`.
+  const unconfirmed = useRef<Unconfirmed | null>(null);
 
-  const run = useCallback(
-    async <T>(call: ContractCall, refresh?: Refresh<T>) => {
-      lastRefresh.current = refresh as Refresh<unknown> | undefined;
-      setView({ kind: 'wallet' });
-      let sent: { txHash: string; signerId: string };
-      try {
-        sent = await wallet.send(call);
-      } catch (error) {
-        setView({ kind: 'not-sent', message: notSentMessage(error) });
-        return;
-      }
-      const { txHash, signerId } = sent;
+  /** Follows a sent transaction to its result. `again` is a recheck after an unknown result. */
+  const follow = useCallback(
+    async ({ txHash, signerId, refresh }: Unconfirmed, again: boolean) => {
       setView({ kind: 'sending', txHash, signerId, stage: 'sending' });
       let result: TxResult;
       try {
@@ -103,59 +105,67 @@ export function useTx(): TxControl {
           trackOptions,
         );
       } catch {
-        // Sent, result unknown: read the page once, and keep every action hidden until the person
-        // reads it again (`recheck`), so a second click cannot pay twice.
-        let rereadFailed = false;
-        if (refresh) {
-          try {
-            refresh.apply(await refresh.read());
-          } catch {
-            rereadFailed = true;
-          }
+        // Sent, result unknown: read the page, and keep every action hidden until the person asks
+        // again (`recheck`), so a second click cannot pay twice.
+        let read = true;
+        try {
+          refresh.apply(await refresh.read());
+        } catch {
+          read = false;
         }
-        setView({ kind: 'unconfirmed', txHash, signerId, rereadFailed });
+        if (again && read) {
+          // Still unknown, but the page now shows the chain's state: the actions follow from it.
+          unconfirmed.current = null;
+          setView({ kind: 'idle' });
+          return;
+        }
+        unconfirmed.current = { txHash, signerId, refresh };
+        setView({ kind: 'unconfirmed', txHash, signerId, rereadFailed: !read });
         return;
       }
+      unconfirmed.current = null;
 
-      let reread: Reread = 'none';
-      if (refresh) {
-        try {
-          // Demo data never changes, so waiting for it to change would only end in "behind".
-          if (result.ok && !fixtureMode) {
-            const { changed, value } = await readUntilChanged(refresh.read, refresh.before, {
-              ...rereadOptions,
-              isEqual: sameKey(refresh.key),
-            });
-            refresh.apply(value);
-            reread = changed ? 'caught-up' : 'behind';
-          } else {
-            refresh.apply(await refresh.read());
-            reread = 'caught-up';
-          }
-        } catch {
-          reread = 'failed';
+      let reread: Reread;
+      try {
+        // Demo data never changes, so waiting for it to change would only end in "behind".
+        if (result.ok && !fixtureMode) {
+          const { changed, value } = await readUntilChanged(refresh.read, refresh.before, {
+            ...rereadOptions,
+            isEqual: sameKey(refresh.key),
+          });
+          refresh.apply(value);
+          reread = changed ? 'caught-up' : 'behind';
+        } else {
+          refresh.apply(await refresh.read());
+          reread = 'caught-up';
         }
+      } catch {
+        reread = 'failed';
       }
       setView({ kind: 'done', txHash, signerId, result, reread });
     },
-    [wallet, txRpc, trackOptions, rereadOptions, fixtureMode],
+    [txRpc, trackOptions, rereadOptions, fixtureMode],
+  );
+
+  const run = useCallback(
+    async <T>(call: ContractCall, refresh: Refresh<T>) => {
+      setView({ kind: 'wallet' });
+      let sent: { txHash: string; signerId: string };
+      try {
+        sent = await wallet.send(call);
+      } catch (error) {
+        setView({ kind: 'not-sent', message: notSentMessage(error) });
+        return;
+      }
+      await follow({ ...sent, refresh: refresh as Refresh<unknown> }, false);
+    },
+    [wallet, follow],
   );
 
   const recheck = useCallback(async () => {
-    const refresh = lastRefresh.current;
-    if (!refresh) {
-      setView({ kind: 'idle' });
-      return;
-    }
-    try {
-      refresh.apply(await refresh.read());
-      setView({ kind: 'idle' });
-    } catch {
-      setView((current) =>
-        current.kind === 'unconfirmed' ? { ...current, rereadFailed: true } : current,
-      );
-    }
-  }, []);
+    const pending = unconfirmed.current;
+    if (pending) await follow(pending, true);
+  }, [follow]);
 
   const dismiss = useCallback(() => setView({ kind: 'idle' }), []);
   const busy = view.kind === 'wallet' || view.kind === 'sending' || view.kind === 'unconfirmed';

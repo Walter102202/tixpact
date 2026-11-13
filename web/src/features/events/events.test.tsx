@@ -283,7 +283,7 @@ describe('buying a ticket', () => {
         .getByRole('link', { name: 'View the transaction in the explorer' })
         .getAttribute('href'),
     ).toBe(explorerTxUrl(TX_FIXTURES.buySucceeded.hash));
-    fireEvent.click(within(box).getByRole('button', { name: 'Read the page again' }));
+    fireEvent.click(within(box).getByRole('button', { name: 'Check again' }));
     expect(await screen.findByRole('button', { name: 'Buy for 1.5 NEAR' })).toBeTruthy();
     expect(services.wallet.sent).toHaveLength(1);
   });

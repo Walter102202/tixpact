@@ -1,6 +1,6 @@
 import { actions, type Config, type EventTerms } from '@ticket-escrow/client';
-import { type FormEvent, useCallback, useEffect, useId, useState } from 'react';
-import { useTx } from '../../lib/near/useTx';
+import { type FormEvent, useCallback, useId, useState } from 'react';
+import { type Refresh, useTx } from '../../lib/near/useTx';
 import { useWallet } from '../../lib/near/useWallet';
 import { Link } from '../../lib/router';
 import { useLoad } from '../../lib/useLoad';
@@ -8,14 +8,11 @@ import { useServices } from '../../services';
 import { LoadState } from '../../ui/LoadState';
 import { TxStatus } from '../../ui/TxStatus';
 import { near, nearExact } from '../events/eventCopy';
-import { OrganizerEvents } from './OrganizerEvents';
+import { type OrganizedEvent, OrganizerEvents, readOrganizedEvents } from './OrganizerEvents';
 import { checkTerms, EMPTY_FORM, type Field, type FormValues, parseCapacity } from './terms';
 
 export function OrganizerPage() {
   const { accountId, signIn } = useWallet();
-  const [created, setCreated] = useState(0);
-  // Stable, so the form's effect runs once per created event.
-  const onCreated = useCallback(() => setCreated((n) => n + 1), []);
   return (
     <section className="page organizer-page" aria-labelledby="organizer-heading">
       <h1 id="organizer-heading">Organize an event</h1>
@@ -27,21 +24,44 @@ export function OrganizerPage() {
           </button>
         </>
       ) : (
-        <div key={accountId}>
-          <CreateEvent organizer={accountId} onCreated={onCreated} />
-          <OrganizerEvents key={created} organizer={accountId} />
-        </div>
+        <Organizer key={accountId} organizer={accountId} />
       )}
     </section>
   );
 }
 
-function CreateEvent({ organizer, onCreated }: { organizer: string; onCreated: () => void }) {
+function Organizer({ organizer }: { organizer: string }) {
+  const { reader } = useServices();
+  const read = useCallback(() => readOrganizedEvents(reader, organizer), [reader, organizer]);
+  const events = useLoad(`organized:${organizer}`, read);
+  // A create adds to the organizer's events: the form re-reads them after a send, so an unknown
+  // result never brings the button back before the list was read again.
+  const refresh: Refresh<OrganizedEvent[]> = {
+    before: events.state.status === 'ready' ? events.state.data : [],
+    read,
+    apply: events.set,
+    key: (rows) => rows.map((row) => row.event.event_id),
+  };
+  return (
+    <div>
+      <CreateEvent organizer={organizer} refresh={refresh} />
+      <OrganizerEvents organizer={organizer} load={events} />
+    </div>
+  );
+}
+
+function CreateEvent({
+  organizer,
+  refresh,
+}: {
+  organizer: string;
+  refresh: Refresh<OrganizedEvent[]>;
+}) {
   const { reader } = useServices();
   const config = useLoad('config', () => reader.getConfig());
   return (
     <LoadState load={config} loadingText="Reading the contract's limits…">
-      {(limits) => <CreateEventForm config={limits} organizer={organizer} onCreated={onCreated} />}
+      {(limits) => <CreateEventForm config={limits} organizer={organizer} refresh={refresh} />}
     </LoadState>
   );
 }
@@ -66,11 +86,11 @@ const INPUTS: Record<Field, { type: string; hint?: string; inputMode?: 'decimal'
 function CreateEventForm({
   config,
   organizer,
-  onCreated,
+  refresh,
 }: {
   config: Config;
   organizer: string;
-  onCreated: () => void;
+  refresh: Refresh<OrganizedEvent[]>;
 }) {
   const { reader, timeZone, now } = useServices();
   const tx = useTx();
@@ -90,17 +110,13 @@ function CreateEventForm({
   const verifier = check.errors['Verifier account'] ? null : values['Verifier account'].trim();
   const done = tx.view.kind === 'done' && tx.view.result.ok;
 
-  useEffect(() => {
-    if (done) onCreated();
-  }, [done, onCreated]);
-
   function submit(formEvent: FormEvent) {
     formEvent.preventDefault();
     setSubmitted(true);
     if (check.terms === null || budget === null) return;
     setSent(check.terms);
     // Sent straight from the click: the wallet opens a popup, which browsers allow only here.
-    void tx.run(actions.createEvent(check.terms, budget));
+    void tx.run(actions.createEvent(check.terms, budget), refresh);
   }
 
   const waitingForQuote = capacity !== null && budget === null;

@@ -36,9 +36,7 @@ function TxLink({ txHash }: { txHash: string }) {
 
 /** What the page says about its own data after a failed transaction. */
 function rereadNote(reread: Reread, note: string | undefined): string | undefined {
-  if (reread === 'failed') return NOT_READ_AGAIN;
-  if (reread === 'none') return undefined;
-  return note;
+  return reread === 'failed' ? NOT_READ_AGAIN : note;
 }
 
 /**
@@ -140,13 +138,13 @@ function TxContent({
         <div className="tx tx-notice" role="alert">
           <p>The transaction was sent, but its result could not be read yet.</p>
           <p className="muted">
-            Check it in the explorer before trying again. Nothing else is offered on this page until
-            it is read again.
+            Check it in the explorer before trying again. Nothing else is offered here until the
+            chain gives the result or this page is read again.
           </p>
           {view.rereadFailed && <p className="muted">{NOT_READ_AGAIN}</p>}
           <TxLink txHash={view.txHash} />
           <button type="button" className="btn btn-sm btn-secondary" onClick={() => void recheck()}>
-            Read the page again
+            Check again
           </button>
         </div>
       );

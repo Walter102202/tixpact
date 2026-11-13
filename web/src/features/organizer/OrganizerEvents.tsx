@@ -4,35 +4,43 @@ import {
   type EventView,
   moneyMoved,
   PHASE_LABELS,
+  type Reader,
 } from '@ticket-escrow/client';
 import { type ReactNode, useState } from 'react';
 import { useTx } from '../../lib/near/useTx';
 import { readAllPages } from '../../lib/pages';
 import { Link } from '../../lib/router';
-import { useLoad } from '../../lib/useLoad';
+import type { Load } from '../../lib/useLoad';
 import { useServices } from '../../services';
 import { LoadState } from '../../ui/LoadState';
 import { TxStatus } from '../../ui/TxStatus';
 import { near, nearExact } from '../events/eventCopy';
 
-interface OrganizedEvent {
+export interface OrganizedEvent {
   event: EventView;
   accounting: AccountingView | null;
 }
 
-export function OrganizerEvents({ organizer }: { organizer: string }) {
-  const { reader } = useServices();
-  const load = useLoad(`organized:${organizer}`, async (): Promise<OrganizedEvent[]> => {
-    const all = await readAllPages((from, limit) => reader.listEvents(from, limit));
-    const mine = all.filter((e) => e.organizer_id === organizer);
-    return Promise.all(
-      mine.map(async (event) => ({
-        event,
-        accounting: await reader.getAccounting(event.event_id),
-      })),
-    );
-  });
+/** Every event `organizer` created, with its accounting. */
+export async function readOrganizedEvents(
+  reader: Reader,
+  organizer: string,
+): Promise<OrganizedEvent[]> {
+  const all = await readAllPages((from, limit) => reader.listEvents(from, limit));
+  const mine = all.filter((e) => e.organizer_id === organizer);
+  return Promise.all(
+    mine.map(async (event) => ({ event, accounting: await reader.getAccounting(event.event_id) })),
+  );
+}
 
+export function OrganizerEvents({
+  organizer,
+  load,
+}: {
+  organizer: string;
+  load: Load<OrganizedEvent[]>;
+}) {
+  const { reader } = useServices();
   return (
     <section className="organized" aria-labelledby="organized-heading">
       <h2 id="organized-heading">Your events</h2>

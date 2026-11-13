@@ -2,10 +2,13 @@ import { fireEvent, screen, within } from '@testing-library/react';
 import {
   actions,
   createFixtureReader,
+  createFixtureRpc,
   type EventTerms,
   FIXTURES,
   parseNear,
   type Reader,
+  TX_FIXTURES,
+  type TxStatusRpc,
 } from '@ticket-escrow/client';
 import { describe, expect, it } from 'vitest';
 import { createFixtureWallet } from '../../lib/near/wallet';
@@ -158,6 +161,98 @@ describe('/organizer: create an event', () => {
       '/events/9',
     );
     expect(screen.getByText(/\/verify\/9/)).toBeTruthy();
+  });
+});
+
+describe('/organizer: a create whose result is unknown', () => {
+  /** A chain that does not answer until `up()`. */
+  function silentChain() {
+    let answering = false;
+    const recorded = createFixtureRpc();
+    const txRpc: TxStatusRpc = {
+      viewTransactionStatusWithReceipts: (params) =>
+        answering
+          ? recorded.viewTransactionStatusWithReceipts(params)
+          : Promise.reject(new Error('every endpoint timed out')),
+    };
+    return { txRpc, up: () => (answering = true) };
+  }
+
+  async function createUnconfirmed(services: ReturnType<typeof testServices>) {
+    await openOrganizer(services);
+    fill(VALID);
+    await screen.findByText('Storage budget: 0.7 NEAR');
+    fireEvent.click(createButton());
+    const notice = await screen.findByText(/its result could not be read yet/);
+    expect(screen.queryByRole('button', { name: /^Create the event/ })).toBeNull();
+    return notice.closest('[role="alert"]') as HTMLElement;
+  }
+
+  it('asks the chain again first, and shows the result it now gives', async () => {
+    const chain = silentChain();
+    const services = testServices({ txRpc: chain.txRpc, wallet: createFixtureWallet(ORGANIZER) });
+    const box = await createUnconfirmed(services);
+    chain.up();
+    fireEvent.click(within(box).getByRole('button', { name: 'Check again' }));
+    expect(await screen.findByText(/Event 9 created\./)).toBeTruthy();
+    // A second click would create a second event and spend a second budget.
+    expect(screen.queryByRole('button', { name: /^Create the event/ })).toBeNull();
+    expect(services.wallet.sent).toHaveLength(1);
+  });
+
+  it('when the chain still does not answer, brings the button back only after reading your events', async () => {
+    let listFails = false;
+    let lists = 0;
+    const fixtures = createFixtureReader();
+    const reader: Reader = {
+      ...fixtures,
+      listEvents: (from, limit) => {
+        lists += 1;
+        return listFails
+          ? Promise.reject(new Error('the RPC is down'))
+          : fixtures.listEvents(from, limit);
+      },
+    };
+    const services = testServices({
+      reader,
+      txRpc: silentChain().txRpc,
+      wallet: createFixtureWallet(ORGANIZER),
+    });
+    const box = await createUnconfirmed(services);
+
+    listFails = true;
+    fireEvent.click(within(box).getByRole('button', { name: 'Check again' }));
+    expect(await screen.findByText(/could not be read again/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Create the event/ })).toBeNull();
+
+    listFails = false;
+    const before = lists;
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
+    expect(await screen.findByRole('button', { name: /^Create the event/ })).toBeTruthy();
+    expect(lists).toBeGreaterThan(before);
+    expect(services.wallet.sent).toHaveLength(1);
+  });
+
+  it('shows the new event in "Your events" after a create, from the re-read', async () => {
+    const data = structuredClone(FIXTURES);
+    const reader = createFixtureReader(data);
+    const wallet = createFixtureWallet(ORGANIZER);
+    wallet.answer = async () => {
+      // The chain now holds event 9.
+      const template = data.events.find((e) => e.event_id === 2);
+      if (template) data.events.push({ ...template, event_id: 9, title: VALID.Title });
+      return { txHash: TX_FIXTURES.eventCreated.hash, signerId: ORGANIZER };
+    };
+    await openOrganizer(testServices({ reader, wallet, fixtureMode: false }));
+    const list = await screen.findByRole('list', { name: 'Your events' });
+    expect(within(list).queryByText(VALID.Title)).toBeNull();
+    fill(VALID);
+    await screen.findByText('Storage budget: 0.7 NEAR');
+    fireEvent.click(createButton());
+    expect(await screen.findByText(/Event 9 created\./)).toBeTruthy();
+    expect(
+      within(screen.getByRole('list', { name: 'Your events' })).getByText(VALID.Title),
+    ).toBeTruthy();
   });
 });
 

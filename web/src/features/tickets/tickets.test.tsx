@@ -315,7 +315,7 @@ describe('transferring a ticket', () => {
     expect(
       within(box).getByRole('link', { name: 'View the transaction in the explorer' }),
     ).toBeTruthy();
-    fireEvent.click(within(box).getByRole('button', { name: 'Read the page again' }));
+    fireEvent.click(within(box).getByRole('button', { name: 'Check again' }));
     await waitFor(() => expect(input().disabled).toBe(false));
     // The reviewed account was cleared when it was sent: a second transfer starts from review.
     expect(screen.queryByRole('region', { name: 'Confirm the transfer' })).toBeNull();
@@ -497,7 +497,7 @@ describe('claiming a refund', () => {
     const notice = await screen.findByText(/its result could not be read yet/);
     expect(screen.queryByRole('button', { name: /^Claim / })).toBeNull();
     const box = notice.closest('[role="alert"]') as HTMLElement;
-    fireEvent.click(within(box).getByRole('button', { name: 'Read the page again' }));
+    fireEvent.click(within(box).getByRole('button', { name: 'Check again' }));
     expect(
       await screen.findByRole('button', { name: 'Claim 1.5 NEAR to luis.testnet' }),
     ).toBeTruthy();
