@@ -28,3 +28,7 @@ Even the 3.97 MB answer, close to the 4 MiB maximum, cost the callback 2.33 Tgas
 ## Consequences
 
 If a protocol or sandbox upgrade ever makes copying the answer cost more than the callback's static gas, the two strict long-answer tests turn red. Then relax only their long case to the hard rule, as the ruling describes; the 5-byte case and the hard-rule test stay as they are.
+
+## Update, same day
+
+Lane C2's cce6572 reverts f64aa42 (`2026-11-13-the-token-gets-at-least-its-static-gas.md`), so the first row holds again: measured on track/t2 71e4b6d, 278.05 Tgas, 3,974,126 bytes, callback 2.33 Tgas, Refunded. Why the copy costs almost nothing: in the runtime, `promise_result` puts the answer in the register with `set_rc_data` (near-vm-runner 0.38.1, `src/logic/host.rs:4636`), which pays `write_register_base` but no `write_register_byte` ("the data is shared, not copied", `src/logic/vmstate.rs:82-113`). The per-byte fee of 3,801,564 gas that C2's record applies is charged for other register writes, not for promise results.
