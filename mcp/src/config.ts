@@ -1,7 +1,7 @@
 import { AccountIdSchema, YoctoSchema } from '@ticket-escrow/client';
 import { z } from 'zod';
 
-// Configuration from the environment. It fails closed: testnet only, no mainnet account names, and
+// Configuration from the environment. It fails closed: testnet only, only `.testnet` account names, and
 // a key is accepted only together with the agent account and both caps. The key itself is never
 // part of the returned config (so it cannot end up in a log or a tool result); only the signer
 // factory reads it, through `readAgentKey`.
@@ -57,9 +57,11 @@ function account(env: Env, name: string): string | undefined {
   if (!AccountIdSchema.safeParse(raw).success) {
     throw new ConfigError(`${name} is not a NEAR account id (the value is not shown).`);
   }
-  if (raw.endsWith('.near')) {
+  // Named testnet accounts only. A mainnet name is refused, and so is an implicit (64-hex) id: the
+  // same key controls it on every network, so a signature for it could be valid elsewhere.
+  if (!raw.endsWith('.testnet')) {
     throw new ConfigError(
-      `${name} is a mainnet account (it ends in .near): this server only runs on testnet.`,
+      `${name} must be an account ending in .testnet: this server only runs on testnet (the value is not shown).`,
     );
   }
   return raw;

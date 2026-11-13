@@ -13,6 +13,7 @@ import {
   InvalidNonceError,
   InvalidTransactionError,
   TransactionExecutionError,
+  UnknownTransactionError,
 } from 'near-api-js/rpc-errors';
 
 // The one way the agent signs. The tools hand it a call the policy already allowed and judge the
@@ -133,6 +134,19 @@ export function createNearSigner(options: NearSignerOptions): AgentSigner {
     }
   }
 
+  /** Whether the chain knows a transaction: only "unknown" on every endpoint that answered is no. */
+  async function lookUp(txHash: string): Promise<'known' | 'unknown' | 'cannot_tell'> {
+    try {
+      await provider.viewTransactionStatus({ txHash, accountId, waitUntil: 'NONE' });
+      return 'known';
+    } catch (error) {
+      const errors = error instanceof FailoverRpcError ? [...error.errors] : [error];
+      const unknown =
+        errors.length > 0 && errors.every((e) => e instanceof UnknownTransactionError);
+      return unknown ? 'unknown' : 'cannot_tell';
+    }
+  }
+
   return {
     accountId,
     async signAndSend(receiverId, call) {
@@ -168,7 +182,22 @@ export function createNearSigner(options: NearSignerOptions): AgentSigner {
           }
           const verdict = verdictOf(error);
           if (verdict === 'executed') return txHash;
-          if (verdict === 'stale_nonce' && attempt < NONCE_ATTEMPTS) continue;
+          if (verdict === 'stale_nonce') {
+            // "Nonce already used" may mean this very transaction used it: an endpoint can include
+            // it and still time out, and the failover then sends the same bytes to the next one.
+            // Sign again only once the chain says it does not know this hash.
+            const known = await lookUp(txHash);
+            if (known === 'known') return txHash;
+            if (known === 'cannot_tell') {
+              throw new SendError(
+                `${describe(error)} Whether this transaction landed could not be checked.`,
+                txHash,
+                true,
+                { cause: error },
+              );
+            }
+            if (attempt < NONCE_ATTEMPTS) continue;
+          }
           throw new SendError(describe(error), txHash, verdict === 'unknown', { cause: error });
         }
       }

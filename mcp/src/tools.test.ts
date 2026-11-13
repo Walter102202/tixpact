@@ -715,6 +715,33 @@ describe('the exposure cap against stale reads and lost sends', () => {
   });
 });
 
+describe('writes that do not raise exposure', () => {
+  it('claim, transfer and expire work when the ticket list cannot be read; a purchase does not', async () => {
+    // Anyone can push thousands of tickets to the agent; only buy_ticket needs the whole list.
+    const unreadable: Reader = {
+      ...createFixtureReader(DATA),
+      async listTicketsForOwner() {
+        throw new Error('the list did not end after 100 pages');
+      },
+    };
+    const { signer, calls } = recordingSigner();
+    const client = await connect(deps(signer, { reader: unreadable }));
+    expect((await call(client, 'claim_refund', { token_id: '8-1' })).data.status).toBe('succeeded');
+    expect(
+      (await call(client, 'transfer_ticket', { token_id: '1-3', receiver_id: 'ana.testnet' })).data
+        .status,
+    ).toBe('succeeded');
+    expect((await call(client, 'expire_event', { event_id: 6 })).data.status).toBe('succeeded');
+    const purchase = await call(client, 'buy_ticket', { event_id: 1 });
+    expect(purchase.isError).toBe(true);
+    expect(calls.map((c) => c.call.methodName)).toEqual([
+      'claim_refund',
+      'nft_transfer',
+      'expire_event',
+    ]);
+  });
+});
+
 describe('the agent account', () => {
   it('refuses a signer for another account than AGENT_ACCOUNT_ID', () => {
     const other: AgentSigner = { ...recordingSigner().signer, accountId: 'ana.testnet' };

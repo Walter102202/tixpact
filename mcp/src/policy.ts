@@ -32,8 +32,11 @@ export interface Policy {
 
 /** What the policy needs from the chain, read right before each decision. */
 export interface AgentState {
-  /** `exposureOf` the agent's tickets, in yoctoNEAR. */
-  exposureYocto: string;
+  /**
+   * What the exposure cap counts, in yoctoNEAR. Null when it was not read: only `buy_ticket` needs
+   * it, and a purchase without it is never allowed.
+   */
+  exposureYocto: string | null;
 }
 
 /** The exact function call the agent is about to sign. */
@@ -135,6 +138,9 @@ export function evaluate(policy: Policy, state: AgentState, intent: Intent): Dec
       'price_above_cap',
       `Price ${near(deposit)} is above the per-ticket cap of ${near(maxPrice)}`,
     );
+  }
+  if (state.exposureYocto === null) {
+    throw new Error('The exposure was not read, so the purchase was not signed.');
   }
   const held = BigInt(state.exposureYocto);
   const after = held + deposit;

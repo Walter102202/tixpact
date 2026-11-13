@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
 import { createAgent } from './agent.js';
 import type { AgentConfig } from './config.js';
 import type { AgentSigner } from './signer.js';
-import { watch, watchOnce } from './watch.js';
+import { createWatchState, watch, watchOnce } from './watch.js';
 
 const AGENT = 'luis.testnet';
 const EXPIRE_HASH = 'ExpireOkHash11111111111111111111111111111111';
@@ -120,6 +120,104 @@ describe('watchOnce', () => {
     expect(lines.slice(1).map((l) => l.split(':')[0])).toEqual([
       'claim_refund 6-1',
       'claim_refund 8-1',
+    ]);
+  });
+});
+
+describe('watchOnce across rounds', () => {
+  /** An agent holding only the claimable 8-1, whose claims fail or succeed as `outcomes` says. */
+  function claimer(outcomes: Array<'fail' | 'ok'>) {
+    const data = { ...FIXTURES, tickets: FIXTURES.tickets.filter((t) => t.token_id === '8-1') };
+    const sent: number[] = [];
+    let round = 0;
+    const signer: AgentSigner = {
+      accountId: AGENT,
+      async signAndSend() {
+        sent.push(round);
+        const outcome = outcomes[sent.length - 1] ?? outcomes.at(-1);
+        return outcome === 'ok'
+          ? TX_FIXTURES.refundSettled.hash
+          : TX_FIXTURES.refundCallbackFailed.hash;
+      },
+    };
+    const agent = createAgent({
+      config,
+      reader: createFixtureReader(data),
+      txRpc: createFixtureRpc(),
+      signer,
+      track: { attempts: 1, sleep: async () => {} },
+    });
+    const lines: string[] = [];
+    const state = createWatchState();
+    const runRounds = async (n: number) => {
+      for (let i = 0; i < n; i += 1) {
+        round += 1;
+        await watchOnce({ agent, log: (line) => lines.push(line), state });
+      }
+    };
+    return { sent, lines, runRounds };
+  }
+
+  it('waits twice as long after each failed claim, and gives up after five', async () => {
+    const { sent, lines, runRounds } = claimer(['fail']);
+    await runRounds(40);
+    // Rounds are 30 s apart: the retries come 60 s, 120 s, 240 s and 480 s after a failure.
+    expect(sent).toEqual([1, 3, 7, 15, 31]);
+    const gaveUp = lines.filter((l) => l.startsWith('Gave up on claim_refund 8-1'));
+    expect(gaveUp).toHaveLength(1);
+    expect(gaveUp[0]).toContain('after 5 failed attempts');
+    expect(gaveUp[0]).toContain('did not complete');
+  });
+
+  it('starts counting again after a claim succeeds', async () => {
+    const { sent, runRounds } = claimer(['fail', 'ok', 'fail']);
+    await runRounds(5);
+    expect(sent).toEqual([1, 3, 4]);
+  });
+});
+
+describe('watchOnce and a stop request', () => {
+  it('sends nothing more once Ctrl+C arrives in the middle of a round', async () => {
+    const controller = new AbortController();
+    const calls: ContractCall[] = [];
+    const signer: AgentSigner = {
+      accountId: AGENT,
+      async signAndSend(_receiverId, call) {
+        calls.push(call);
+        controller.abort();
+        return EXPIRE_HASH;
+      },
+    };
+    const agent = createAgent({
+      config,
+      reader: createFixtureReader(),
+      txRpc: createFixtureRpc({ expired: okTx(EXPIRE_HASH, 'Refundable') }),
+      signer,
+      track: { attempts: 1, sleep: async () => {} },
+    });
+    const lines: string[] = [];
+    await watchOnce({ agent, log: (line) => lines.push(line), signal: controller.signal });
+    expect(calls).toEqual([actions.expireEvent(6)]);
+    expect(lines.at(-1)).toBe('Stop requested: nothing more is sent in this round.');
+  });
+});
+
+describe('watchOnce and a long ticket list', () => {
+  it('claims the tickets it could read before the list stopped answering', async () => {
+    const live = createFixtureReader();
+    const reader: Reader = {
+      ...live,
+      async listTicketsForOwner(accountId, from, limit) {
+        if (from > 0) throw new Error('page 2 unreadable');
+        return live.listTicketsForOwner(accountId, from, limit);
+      },
+    };
+    const { agent, calls, log } = setup(reader);
+    await expect(watchOnce({ agent, log })).rejects.toThrow('page 2 unreadable');
+    expect(calls).toEqual([
+      actions.expireEvent(6),
+      actions.claimRefund('6-1'),
+      actions.claimRefund('8-1'),
     ]);
   });
 });

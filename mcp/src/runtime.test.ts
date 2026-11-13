@@ -8,6 +8,7 @@ const SECRET = KeyPair.fromRandom('ed25519').toString();
 
 const A = 'https://a.example';
 const B = 'https://b.example';
+const C = 'https://c.example';
 
 const signing = {
   CONTRACT_ID: 'ticket-escrow.testnet',
@@ -18,8 +19,11 @@ const signing = {
   RPC_URLS: `${A},${B}`,
 };
 
-/** Each endpoint answers its chain id, or fails when it is not in the map. */
-function chains(answers: Record<string, string>) {
+/**
+ * Each endpoint answers its chain id, or fails when it is not in the map. An entry set to undefined
+ * is an endpoint that answers its status without a chain id.
+ */
+function chains(answers: Record<string, string | undefined>) {
   const asked: string[] = [];
   const signingUrls: string[][] = [];
   return {
@@ -28,9 +32,8 @@ function chains(answers: Record<string, string>) {
     options: {
       chainIdOf: async (url: string) => {
         asked.push(url);
-        const chain = answers[url];
-        if (chain === undefined) throw new Error(`${url} did not answer`);
-        return chain;
+        if (!(url in answers)) throw new Error(`${url} did not answer`);
+        return answers[url];
       },
       onSigningRpc: (urls: readonly string[]) => {
         signingUrls.push([...urls]);
@@ -75,6 +78,27 @@ describe('depsFromEnv', () => {
     expect(deps.signingOffReason).toBe(
       'no RPC endpoint answered, so the network could not be confirmed as testnet; restart once one does',
     );
+  });
+
+  it('an endpoint that answers without a chain id is not confirmed, and hides no later wrong one', async () => {
+    const check = chains({ [A]: undefined, [B]: 'mainnet', [C]: 'testnet' });
+    const deps = await depsFromEnv({ ...signing, RPC_URLS: `${A},${B},${C}` }, check.options);
+    expect(deps.signer).toBeNull();
+    expect(deps.signingOffReason).toBe('RPC_URLS entry 2 reports chain mainnet, not testnet');
+  });
+
+  it('a failed read hides no later wrong one either', async () => {
+    const check = chains({ [B]: 'mainnet' });
+    const deps = await depsFromEnv(signing, check.options);
+    expect(deps.signer).toBeNull();
+    expect(deps.signingOffReason).toBe('RPC_URLS entry 2 reports chain mainnet, not testnet');
+  });
+
+  it('leaves out of signing an endpoint that answered without a chain id', async () => {
+    const check = chains({ [A]: undefined, [B]: 'testnet' });
+    const deps = await depsFromEnv(signing, check.options);
+    expect(deps.signer?.accountId).toBe('te-d1-agent.testnet');
+    expect(check.signingUrls).toEqual([[B]]);
   });
 
   it('signs only through the endpoints that confirmed testnet', async () => {

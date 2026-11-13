@@ -61,15 +61,25 @@ describe('loadConfig', () => {
     );
   });
 
-  it('refuses mainnet account names, naming the variable but not its value', () => {
-    expect(configError({ CONTRACT_ID: 'tickets.near' }).message).toBe(
-      'CONTRACT_ID is a mainnet account (it ends in .near): this server only runs on testnet.',
-    );
+  it('accepts only .testnet accounts, naming the variable but not its value', () => {
+    const notTestnet = (name: string) =>
+      `${name} must be an account ending in .testnet: this server only runs on testnet (the value is not shown).`;
+    expect(configError({ CONTRACT_ID: 'tickets.near' }).message).toBe(notTestnet('CONTRACT_ID'));
     const agent = configError({ ...signing, AGENT_ACCOUNT_ID: 'agent.near' }).message;
-    expect(agent).toBe(
-      'AGENT_ACCOUNT_ID is a mainnet account (it ends in .near): this server only runs on testnet.',
-    );
+    expect(agent).toBe(notTestnet('AGENT_ACCOUNT_ID'));
     expect(agent).not.toContain('agent.near');
+    // An implicit account is the same account on every network, so it is refused too.
+    const implicit = 'a'.repeat(64);
+    expect(configError({ ...signing, AGENT_ACCOUNT_ID: implicit }).message).toBe(
+      notTestnet('AGENT_ACCOUNT_ID'),
+    );
+    expect(configError({ CONTRACT_ID: implicit }).message).toBe(notTestnet('CONTRACT_ID'));
+    expect(configError({ CONTRACT_ID: 'escrow.testnet.near' }).message).toBe(
+      notTestnet('CONTRACT_ID'),
+    );
+    expect(loadConfig({ CONTRACT_ID: 'te-d3-escrow.testnet' }).contractId).toBe(
+      'te-d3-escrow.testnet',
+    );
   });
 
   it('never repeats a value it refuses, even one shaped like a key', () => {

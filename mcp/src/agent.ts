@@ -49,6 +49,8 @@ export interface Agent {
   getEvent(input: ToolInput<'get_event'>): Promise<ToolOutput<'get_event'>>;
   getTicket(input: ToolInput<'get_ticket'>): Promise<ToolOutput<'get_ticket'>>;
   listMyTickets(): Promise<ToolOutput<'list_my_tickets'>>;
+  /** One page of the agent's tickets, read directly: the watcher pages through them itself. */
+  myTicketsPage(fromIndex: number, limit: number): Promise<TicketView[]>;
   getWallet(): Promise<ToolOutput<'get_wallet'>>;
   verifyContract(): Promise<ToolOutput<'verify_contract'>>;
   buyTicket(input: ToolInput<'buy_ticket'>): Promise<WriteResult>;
@@ -252,12 +254,13 @@ export function createAgent(deps: AgentDeps): Agent {
     policy: Policy,
   ): Promise<Sent> {
     const view = callView(call, contractId);
-    const exposure = await exposureNow(signer.accountId);
-    const decision = evaluate(
-      policy,
-      { exposureYocto: exposure.total.toString() },
-      { receiverId: contractId, call },
-    );
+    // Only a purchase raises exposure, so only a purchase reads the whole ticket list: a claim, a
+    // transfer or an expiry must work even when that list cannot be read to the end.
+    const exposureYocto =
+      call.methodName === 'buy_ticket'
+        ? (await exposureNow(signer.accountId)).total.toString()
+        : null;
+    const decision = evaluate(policy, { exposureYocto }, { receiverId: contractId, call });
     if (decision.outcome === 'deny') {
       return {
         kind: 'done',
@@ -411,6 +414,10 @@ export function createAgent(deps: AgentDeps): Agent {
         reader.getTicketHistory(token_id),
       ]);
       return { ticket, event, history };
+    },
+
+    async myTicketsPage(fromIndex, limit) {
+      return reader.listTicketsForOwner(requireAgent(), fromIndex, limit);
     },
 
     async listMyTickets() {
