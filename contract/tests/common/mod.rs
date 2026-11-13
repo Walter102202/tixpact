@@ -793,6 +793,32 @@ pub fn nep171_events(result: &ExecutionFinalResult, name: &str) -> Vec<Value> {
         .collect()
 }
 
+/// The `EVENT_JSON` logs whose `event` field is `name` that receipts executed by `executor`
+/// logged (every executor when `None`), each with whether its receipt succeeded. Failed receipts
+/// are included: their logs are kept in the outcome even though their writes are not.
+pub fn events_logged_by(
+    result: &ExecutionFinalResult,
+    executor: Option<&AccountId>,
+    name: &str,
+) -> Vec<(Value, bool)> {
+    result
+        .receipt_outcomes()
+        .iter()
+        .filter(|outcome| executor.is_none_or(|id| &outcome.executor_id == id))
+        .flat_map(|outcome| {
+            let succeeded = outcome.is_success();
+            outcome
+                .logs
+                .iter()
+                .filter_map(|line| line.strip_prefix("EVENT_JSON:"))
+                .filter_map(|text| near_sdk::serde_json::from_str::<Value>(text).ok())
+                .filter(|event| event["event"] == name)
+                .map(move |event| (event, succeeded))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
 /// The `EVENT_JSON` logs of a transaction whose `event` field is `name`.
 pub fn events_named(result: &ExecutionFinalResult, name: &str) -> Vec<Value> {
     result
@@ -851,7 +877,8 @@ pub fn purchase_msg(event_id: u32) -> String {
 
 /// Asserts that a purchase through `ft_transfer_call` was rejected with `code`: the escrow's
 /// `ft_on_transfer` failed with it, the token's resolver reports that nothing was used (`"0"`),
-/// and no ticket was minted. Whether every token came back is checked on the balances.
+/// no ticket was minted, and no receipt, failed or not, logged `ticket_purchased` (the web and the
+/// agent decide from that log alone). Whether every token came back is checked on the balances.
 #[track_caller]
 pub fn assert_purchase_rejected(result: &ExecutionFinalResult, escrow: &AccountId, code: &str) {
     let failures: Vec<String> = result
@@ -876,6 +903,11 @@ pub fn assert_purchase_rejected(result: &ExecutionFinalResult, escrow: &AccountI
         "no ticket minted"
     );
     assert!(events_named(result, "ticket_purchased").is_empty());
+    assert_eq!(
+        events_logged_by(result, None, "ticket_purchased"),
+        [],
+        "no receipt logged a purchase"
+    );
 }
 
 /// Asserts that a purchase through `ft_transfer_call` bought a ticket for exactly `price`: the

@@ -6,9 +6,9 @@ mod common;
 use common::{
     Call, Cast, Escrow, GAS_FEE_BOUND, HOST, HOSTILE_ID, NEAR, NO_DEPOSIT, ONE_YOCTO, PRICE,
     STORAGE_BYTE_COST, TEUR_ID, TUSD_ID, TestChain, Token, TokenMove, Transfer, UNLISTED_ID, USD,
-    amount, assert_fails_with, assert_purchase_accepted, assert_purchase_rejected, events_named,
-    failed_receipts_on, failure_text, nep171_events, priced_terms, purchase_msg,
-    receipt_failure_texts, token_moves, value_returned_by, vanishing_holder_wasm,
+    amount, assert_fails_with, assert_purchase_accepted, assert_purchase_rejected,
+    events_logged_by, events_named, failed_receipts_on, failure_text, nep171_events, priced_terms,
+    purchase_msg, receipt_failure_texts, token_moves, value_returned_by, vanishing_holder_wasm,
 };
 use near_api::types::transaction::result::ExecutionFinalResult;
 use near_api::{Account, AccountId, NearToken};
@@ -349,10 +349,36 @@ async fn t25_token_purchase_reserves_exact_price() -> TestResult {
         .await?;
     let token_id = assert_purchase_accepted(&result, TUSD_PRICE);
     assert_eq!(token_id, format!("{event_id}-1"));
-    let purchased = &events_named(&result, "ticket_purchased")[0];
+    // The web and the agent decide that a token purchase bought a ticket only from the log of
+    // the escrow's `ft_on_transfer` receipt. The escrow runs exactly one receipt here: the
+    // token's call of `ft_on_transfer`, and it succeeded.
+    let calls = chain.calls_from(&result, &tusd.id).await?;
+    let on_transfer: Vec<&Call> = calls
+        .iter()
+        .filter(|call| call.receiver == escrow.id().as_str())
+        .collect();
+    assert_eq!(on_transfer.len(), 1, "one call into the escrow: {calls:?}");
+    assert_eq!(on_transfer[0].method, "ft_on_transfer");
+    assert!(on_transfer[0].succeeded, "ft_on_transfer succeeded");
+    let escrow_receipts = result
+        .receipt_outcomes()
+        .iter()
+        .filter(|outcome| outcome.executor_id == escrow.id())
+        .count();
+    assert_eq!(escrow_receipts, 1, "the escrow ran only ft_on_transfer");
+    let logged = events_logged_by(&result, Some(&escrow.id()), "ticket_purchased");
+    assert_eq!(logged.len(), 1, "one purchase log: {logged:?}");
+    let (purchased, succeeded) = &logged[0];
+    assert!(succeeded, "logged by the receipt that succeeded");
     assert_eq!(purchased["standard"], "ticket_escrow");
     assert_eq!(purchased["version"], "2.0.0");
+    assert_eq!(purchased["data"][0]["token_id"], token_id.as_str());
     assert_eq!(purchased["data"][0]["currency"], TUSD_ID);
+    assert_eq!(
+        events_logged_by(&result, None, "ticket_purchased").len(),
+        1,
+        "no other receipt logged a purchase"
+    );
     assert_eq!(
         nep171_events(&result, "nft_mint"),
         vec![json!({ "owner_id": cast.ana.0, "token_ids": [token_id] })]
