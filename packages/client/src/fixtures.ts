@@ -909,6 +909,98 @@ export const TX_FIXTURES = {
       ],
     ),
   },
+
+  /**
+   * org.testnet collects event 7, but deletes its account before the transfer runs: the transfer
+   * fails, the callback makes the 4.5 NEAR available again and returns `false`.
+   */
+  payoutTransferFailed: {
+    hash: 'xXHb577AHA1YXyzsEKTHCwpTRBB7HG6V42TuhwzAzXY',
+    signerId: ORGANIZER,
+    failedReceiptId: 'C2NdT9VcAzT1XB1f7sUqbwuUMi5A9Z2CtGKctCjwLynb',
+    status: recordedStatus(
+      'xXHb577AHA1YXyzsEKTHCwpTRBB7HG6V42TuhwzAzXY',
+      ORGANIZER,
+      { method: 'claim_payout', argsBase64: btoa('{"event_id":7}'), deposit: '1', gasTgas: 100 },
+      { SuccessValue: 'ZmFsc2U=' },
+      [
+        outcome(
+          'B7aQhYmvifQQYmDD5uDCqFBWBivcKDiXVnKzTqDbaryo',
+          FIXTURE_CONTRACT_ID,
+          { SuccessReceiptId: 'EM8ZAxeZcCztBUeVEFDfZKAo92mmreEef76Wv4thnzpF' },
+          [
+            'C2NdT9VcAzT1XB1f7sUqbwuUMi5A9Z2CtGKctCjwLynb',
+            'EM8ZAxeZcCztBUeVEFDfZKAo92mmreEef76Wv4thnzpF',
+          ],
+          [
+            eventJson('payout_requested', {
+              operation_id: 10,
+              event_id: 7,
+              amount: parseNear('4.5'),
+            }),
+          ],
+        ),
+        outcome(
+          'C2NdT9VcAzT1XB1f7sUqbwuUMi5A9Z2CtGKctCjwLynb',
+          ORGANIZER,
+          {
+            Failure: {
+              ActionError: { index: 0, kind: { AccountDoesNotExist: { account_id: ORGANIZER } } },
+            },
+          },
+          ['H7F4QSXhZ2gRQMPkGgpC79xtkr3kDMeGpCDvy6pbhmXm'],
+        ),
+        outcome(
+          'EM8ZAxeZcCztBUeVEFDfZKAo92mmreEef76Wv4thnzpF',
+          FIXTURE_CONTRACT_ID,
+          { SuccessValue: 'ZmFsc2U=' },
+          [],
+          [eventJson('payout_failed', { operation_id: 10, event_id: 7, amount: parseNear('4.5') })],
+        ),
+        // The failed transfer's deposit comes back to the contract in a later receipt.
+        outcome('H7F4QSXhZ2gRQMPkGgpC79xtkr3kDMeGpCDvy6pbhmXm', FIXTURE_CONTRACT_ID, GAS_REFUND),
+      ],
+    ),
+  },
+
+  /**
+   * org.testnet collects event 7: the transfer succeeds, the callback runs out of gas, so the
+   * contract still shows the payout in flight.
+   */
+  payoutCallbackFailed: {
+    hash: 'YNfotakvYX3WXn4BxwhsdKZ4SDuscupkraV53it4dfQ',
+    signerId: ORGANIZER,
+    failedReceiptId: 'GBXQMzsDkK29gssNKbB9DF3tJYDCvFgE7NhDKgrGqG19',
+    status: recordedStatus(
+      'YNfotakvYX3WXn4BxwhsdKZ4SDuscupkraV53it4dfQ',
+      ORGANIZER,
+      { method: 'claim_payout', argsBase64: btoa('{"event_id":7}'), deposit: '1', gasTgas: 100 },
+      OUT_OF_GAS,
+      [
+        outcome(
+          '7nZqrEh6k7V2pbVFyoEb1EeifT5Eiz4aZx1N85E7gDE2',
+          FIXTURE_CONTRACT_ID,
+          { SuccessReceiptId: 'GBXQMzsDkK29gssNKbB9DF3tJYDCvFgE7NhDKgrGqG19' },
+          [
+            '2LbxrV1Y2WJWANY1eRxexAMHYnQ1vWAULVCp4NQG35VW',
+            'GBXQMzsDkK29gssNKbB9DF3tJYDCvFgE7NhDKgrGqG19',
+          ],
+          [
+            eventJson('payout_requested', {
+              operation_id: 11,
+              event_id: 7,
+              amount: parseNear('4.5'),
+            }),
+          ],
+        ),
+        outcome('2LbxrV1Y2WJWANY1eRxexAMHYnQ1vWAULVCp4NQG35VW', ORGANIZER, { SuccessValue: '' }),
+        outcome('GBXQMzsDkK29gssNKbB9DF3tJYDCvFgE7NhDKgrGqG19', FIXTURE_CONTRACT_ID, OUT_OF_GAS, [
+          '54QJTq5wiaMHUZJqpDe2DU2z9yTRyghX2k2FrWUNLqWf',
+        ]),
+        outcome('54QJTq5wiaMHUZJqpDe2DU2z9yTRyghX2k2FrWUNLqWf', ORGANIZER, GAS_REFUND),
+      ],
+    ),
+  },
 } satisfies Record<string, RecordedTx>;
 
 /** A `TxStatusRpc` that answers from recorded statuses, whatever stage is asked for. */

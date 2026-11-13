@@ -7,6 +7,7 @@ import {
   FIXTURES,
   parseNear,
   type Reader,
+  type RecordedTx,
   TX_FIXTURES,
   type TxStatusRpc,
 } from '@ticket-escrow/client';
@@ -441,6 +442,20 @@ describe('/organizer: cancel an event', () => {
     expect(within(jazz).queryByRole('button', { name: 'Cancel event' })).toBeNull();
   });
 
+  it.each([
+    ['one millisecond before the deadline', -1, true],
+    ['at the deadline', 0, false],
+  ] as const)('%s, the row offers it: %s', async (_, offset, offered) => {
+    const data = structuredClone(FIXTURES);
+    const jazzEvent = data.events.find((e) => e.event_id === 1);
+    if (jazzEvent) jazzEvent.now_ms = jazzEvent.resolution_deadline_ms + offset;
+    await openOrganizer(
+      testServices({ reader: createFixtureReader(data), wallet: createFixtureWallet(ORGANIZER) }),
+    );
+    const button = within(await row('Jazz night')).queryByRole('button', { name: 'Cancel event' });
+    expect(button !== null).toBe(offered);
+  });
+
   it('"Keep the event" closes the box and sends nothing', async () => {
     const services = await openOrganizer();
     const jazz = await row('Jazz night');
@@ -461,6 +476,35 @@ describe('/organizer: your events and the payout', () => {
     fireEvent.click(collect[0] as HTMLElement);
     expect(await screen.findByText('Sent 4.5 NEAR to org.testnet.')).toBeTruthy();
     expect(services.wallet.sent).toEqual([actions.claimPayout(7)]);
+  });
+
+  /** Collects event 7's 4.5 NEAR with a wallet that lends `recorded`'s hash. */
+  async function collectWith(recorded: RecordedTx) {
+    const wallet = createFixtureWallet(ORGANIZER);
+    wallet.answer = async () => ({ txHash: recorded.hash, signerId: ORGANIZER });
+    await openOrganizer(testServices({ wallet }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Collect 4.5 NEAR to org.testnet' }));
+    const title = await screen.findByText('The payout did not complete.');
+    return title.closest('[role="alert"]') as HTMLElement;
+  }
+
+  it('never says "Sent" when the transfer to the organizer failed, and offers it again', async () => {
+    const box = await collectWith(TX_FIXTURES.payoutTransferFailed);
+    expect(box.textContent).toContain('Failed step: the transfer to org.testnet.');
+    expect(screen.queryByText(/^Sent /)).toBeNull();
+    // The callback made the amount available again, and the re-read shows it.
+    expect(screen.getByRole('button', { name: 'Collect 4.5 NEAR to org.testnet' })).toBeTruthy();
+  });
+
+  it('never says "Sent" when the confirmation failed, and says the payout stays pending', async () => {
+    const box = await collectWith(TX_FIXTURES.payoutCallbackFailed);
+    expect(box.textContent).toContain(
+      "Failed step: the contract's confirmation after the transfer.",
+    );
+    expect(box.textContent).toContain(
+      'The transfer to org.testnet ran, but the contract could not record it. The payout stays pending, so it cannot be paid twice.',
+    );
+    expect(screen.queryByText(/^Sent /)).toBeNull();
   });
 
   it('names the exact amount on the button and once sent', async () => {

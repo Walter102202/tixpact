@@ -175,6 +175,14 @@ function OrganizedRow({
           tx={tx}
           failureTitle="The payout did not complete."
           failureNote="The amount above was read again from the contract."
+          failureDetail={(result) =>
+            result.failedReceipt?.step === 'callback' ? (
+              <p>
+                The transfer to {organizer} ran, but the contract could not record it. The payout
+                stays pending, so it cannot be paid twice.
+              </p>
+            ) : null
+          }
           succeeded={moneyMoved}
           success={() => (
             <p>

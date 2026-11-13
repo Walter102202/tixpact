@@ -111,6 +111,24 @@ describe('trackTransaction on recorded statuses', () => {
     }
   });
 
+  it('reads a payout whose transfer to the organizer failed as failed, with false', async () => {
+    const tx = TX_FIXTURES.payoutTransferFailed;
+    const { result } = await track(rpc, tx.hash, tx.signerId);
+    expect(result.ok).toBe(false);
+    expect(result.failedReceipt?.receiptId).toBe(tx.failedReceiptId);
+    expect(result.failedReceipt?.executorId).toBe('org.testnet');
+    expect(result.failedReceipt?.step).toBe('other');
+    expect(result.value).toBe(false);
+  });
+
+  it('reads a payout whose confirmation ran out of gas as failed at the callback', async () => {
+    const tx = TX_FIXTURES.payoutCallbackFailed;
+    const { result } = await track(rpc, tx.hash, tx.signerId);
+    expect(result.ok).toBe(false);
+    expect(result.failedReceipt?.receiptId).toBe(tx.failedReceiptId);
+    expect(result.failedReceipt?.step).toBe('callback');
+  });
+
   it('maps a contract panic to its error code', async () => {
     const tx = TX_FIXTURES.buyRejected;
     const { result } = await track(rpc, tx.hash, tx.signerId);
