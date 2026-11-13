@@ -636,6 +636,24 @@ section,
   gap: 8px;
 }
 
+/* Proof */
+.proof-card {
+  max-width: 52rem;
+  margin-top: 32px;
+}
+.proof-verdict {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  color: var(--foreground);
+  margin-top: 20px;
+}
+.proof-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+}
+
 @media (max-width: 760px) {
   .terms-form {
     grid-template-columns: minmax(0, 1fr);

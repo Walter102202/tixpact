@@ -539,9 +539,9 @@ Needs Walter's go for three things: installing the Rust toolchain in his WSL, cr
 
 **Files:** `web/src/features/proof/*`.
 
-- [ ] Failing tests: `/proof` shows the contract account, code hash, number of access keys ("0 keys: nobody can change this contract" or "N keys: this deployment can still be changed"), contract balance, the sum of reserved principal from `get_accounting` over all events, the block height of the read, and links to the explorer; with the RPC failing it shows "Could not read the chain" and no stale numbers.
-- [ ] Implement, then sweep every route for loading, empty and error states, keyboard reach, focus, 375 px, and console errors.
-- [ ] Run. Expected: green. Commit `feat(web): proof page and complete states`, tick, push. End the report with `STATUS: DONE`.
+- [x] Failing tests: `/proof` shows the contract account, code hash, number of access keys ("0 keys: nobody can change this contract" or "N keys: this deployment can still be changed"), contract balance, the sum of reserved principal from `get_accounting` over all events, the block height of the read, and links to the explorer; with the RPC failing it shows "Could not read the chain" and no stale numbers.
+- [x] Implement, then sweep every route for loading, empty and error states, keyboard reach, focus, 375 px, and console errors.
+- [x] Run. Expected: green. Commit `feat(web): proof page and complete states`, tick, push. End the report with `STATUS: DONE`.
 
 ---
 

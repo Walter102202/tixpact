@@ -9,6 +9,7 @@ const NAV: Array<{ to: string; label: string }> = [
   { to: '/', label: 'Events' },
   { to: '/tickets', label: 'My tickets' },
   { to: '/organizer', label: 'Organize' },
+  { to: '/proof', label: 'Proof' },
 ];
 
 export function Shell({ children }: { children: ReactNode }) {

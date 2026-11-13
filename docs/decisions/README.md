@@ -49,3 +49,4 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-12 | Web test pins, the `process` replacement and the wallet-error wording | `2026-11-12-web-build-pins-and-the-process-shim.md` |
 | 2026-11-12 | The ticket page: when the claim and the transfer are offered, and what counts as paid | `2026-11-12-web-ticket-page-claims-and-transfers.md` |
 | 2026-11-12 | Organizer and verifier pages: checks before the wallet, a second click for irreversible decisions | `2026-11-12-web-organizer-and-verifier-pages.md` |
+| 2026-11-12 | The proof page reads everything fresh, and every route fails the same visible way | `2026-11-12-web-proof-page-and-state-sweep.md` |
