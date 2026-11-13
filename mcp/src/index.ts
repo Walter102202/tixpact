@@ -21,6 +21,20 @@ export {
   type Intent,
   type Policy,
 } from './policy.js';
+export { depsFromEnv } from './runtime.js';
 export { TOOL_NAMES, type ToolName, type WriteResult, type WriteStatus } from './schemas.js';
 export { createServer, SERVER_NAME } from './server.js';
-export { type AgentSigner, SendError } from './signer.js';
+export {
+  type AgentSigner,
+  createNearSigner,
+  type NearSignerOptions,
+  SendError,
+} from './signer.js';
+export {
+  WATCH_INTERVAL_MS,
+  type WatchOnceOptions,
+  type WatchOptions,
+  type WatchRound,
+  watch,
+  watchOnce,
+} from './watch.js';
