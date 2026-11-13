@@ -1,6 +1,6 @@
 # A verifier is shown as a group when its Sputnik DAO policy says one group decides function calls
 
-Date: 2026-11-13. Author: lane P. Status: accepted; its rule that `Everyone` roles are left out of the count of approvers is replaced by `2026-11-13-group-verifier-any-other-approver-gives-null.md`.
+Date: 2026-11-13. Author: lane P. Status: accepted; its rule that `Everyone` roles are left out of the count of approvers is replaced by `2026-11-13-group-verifier-any-other-approver-gives-null.md`, and its rule of looking only at `call`, with the line's wording, by `2026-11-13-group-verifier-counts-every-rule-changing-label.md`.
 
 ## Context
 

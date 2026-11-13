@@ -39,7 +39,7 @@ describe('an event whose verifier is a group', () => {
     await screen.findByRole('heading', { level: 1, name: 'Jazz night' });
     await waitFor(() =>
       expect(verifierFact()).toBe(
-        `${JURY} · a group of 3: 2 must agree (a.testnet, b.testnet, c.testnet) · accepted these terms`,
+        `${JURY} · a group of 3; its rules now: 2 must agree (a.testnet, b.testnet, c.testnet) · accepted these terms`,
       ),
     );
   });
@@ -53,7 +53,7 @@ describe('an event whose verifier is a group', () => {
   it('names five members of a larger group and counts the rest', () => {
     const members = Array.from({ length: 9 }, (_, i) => `m${i + 1}.testnet`);
     expect(groupLine({ members, needed: 5 })).toBe(
-      'a group of 9: 5 must agree (m1.testnet, m2.testnet, m3.testnet, m4.testnet, m5.testnet and 4 more)',
+      'a group of 9; its rules now: 5 must agree (m1.testnet, m2.testnet, m3.testnet, m4.testnet, m5.testnet and 4 more)',
     );
     expect(groupLine({ members: members.slice(0, 6), needed: 4 })).toContain('m6.testnet)');
   });
