@@ -5,7 +5,7 @@
 mod common;
 
 use common::{
-    Escrow, NEAR, NO_DEPOSIT, ONE_YOCTO, TestChain, long_id, terms, ticket_receiver_wasm,
+    Escrow, NEAR, NO_DEPOSIT, ONE_YOCTO, TestChain, amount, long_id, terms, ticket_receiver_wasm,
     vanishing_holder_wasm,
 };
 use near_api::types::transaction::result::{ExecutionFinalResult, ValueOrReceiptId};
@@ -177,6 +177,7 @@ async fn gas_of_every_method_in_its_worst_case() -> TestResult {
         "holder-1",
         "holder-2",
         "holder-3",
+        "holder-4",
     ]
     .iter()
     .map(|name| long_id(name))
@@ -192,11 +193,12 @@ async fn gas_of_every_method_in_its_worst_case() -> TestResult {
         h1,
         h2,
         h3,
-    ]: [Account; 9] = chain
+        h4,
+    ]: [Account; 10] = chain
         .accounts(&refs, 200)
         .await?
         .try_into()
-        .map_err(|_| "nine accounts")?;
+        .map_err(|_| "ten accounts")?;
     let receiver = chain
         .deploy_fixture(&long_id("receiver"), 10, ticket_receiver_wasm())
         .await?;
@@ -296,7 +298,7 @@ async fn gas_of_every_method_in_its_worst_case() -> TestResult {
     }
     let calls = vec![("buy_ticket", buy.clone(), NEAR); 4];
     escrow.batch(&bouncer_a, calls).await?.assert_success();
-    let tickets: Vec<String> = (96..=99)
+    let mut tickets: Vec<String> = (96..=99)
         .map(|serial| format!("{event}-{serial}"))
         .collect();
     let result = escrow
@@ -305,7 +307,21 @@ async fn gas_of_every_method_in_its_worst_case() -> TestResult {
     let case = "buy_ticket (100th ticket of the event, 102nd of the contract)";
     record(&mut rows, &escrow, case, tgas_used, &result, FollowUp::None)?;
 
-    // Full histories: four tickets move fifteen times between two accounts.
+    // Two one-ticket events on the measured event's window, made after the purchases above so
+    // those keep their place in the token tree. One is paid out at the minimum gas. Nobody
+    // resolves the other: its deadline passes, and the claim of its ticket expires it.
+    let paid_at_minimum = escrow
+        .create_event(&organizer, largest(&verifier, times, 1))
+        .await?;
+    escrow.accept(&verifier, paid_at_minimum).await?;
+    escrow.buy(&buyer, paid_at_minimum, NEAR).await?;
+    let unresolved = escrow
+        .create_event(&organizer, largest(&verifier, times, 1))
+        .await?;
+    escrow.accept(&verifier, unresolved).await?;
+    tickets.push(escrow.buy(&bouncer_a, unresolved, NEAR).await?);
+
+    // Full histories: five tickets move fifteen times between two accounts.
     for round in 0..15 {
         let (from, to) = if round % 2 == 0 {
             (&bouncer_a, &bouncer_b)
@@ -318,7 +334,13 @@ async fn gas_of_every_method_in_its_worst_case() -> TestResult {
             .collect();
         escrow.batch(from, calls).await?.assert_success();
     }
-    let [t1, t2, t3, t4] = [&tickets[0], &tickets[1], &tickets[2], &tickets[3]];
+    let [t1, t2, t3, t4, t5] = [
+        &tickets[0],
+        &tickets[1],
+        &tickets[2],
+        &tickets[3],
+        &tickets[4],
+    ];
 
     let args = transfer_args(&h1, t1, Some("m".repeat(256)));
     let tgas_used = client_tgas("nft_transfer");
@@ -335,6 +357,7 @@ async fn gas_of_every_method_in_its_worst_case() -> TestResult {
             1,
         ),
         ("nft_transfer", transfer_args(&h3, t4, None), 1),
+        ("nft_transfer", transfer_args(&h4, t5, None), 1),
     ];
     escrow.batch(&bouncer_b, calls).await?.assert_success();
 
@@ -487,6 +510,41 @@ async fn gas_of_every_method_in_its_worst_case() -> TestResult {
     let settled = FollowUp::Logged("refund_settled");
     record(&mut rows, &escrow, case, minimum, &result, settled)?;
     assert_eq!(escrow.ticket(t4).await?["status"], "Refunded");
+
+    // A payout at exactly the minimum.
+    chain.advance_to(times[1]).await?;
+    escrow.attest(&verifier, paid_at_minimum).await?;
+    let args = json!({ "event_id": paid_at_minimum });
+    let result = escrow
+        .call(&organizer, "claim_payout", args, ONE_YOCTO, minimum)
+        .await?;
+    let case = "claim_payout at GAS_CLAIM_MIN + on_payout_result (delivered)";
+    let settled = FollowUp::Logged("payout_settled");
+    record(&mut rows, &escrow, case, minimum, &result, settled)?;
+    let accounting = escrow.accounting(paid_at_minimum).await?;
+    assert_eq!(amount(&accounting, "organizer_settled"), NEAR);
+
+    // The deadline passes with no outcome; the claim resolves the event before it claims.
+    chain.advance_to(times[2]).await?;
+    assert_eq!(escrow.event(unresolved).await?["outcome"], "Unresolved");
+    let result = escrow.claim_refund(&h4, t5, minimum).await?;
+    let case = "claim_refund at GAS_CLAIM_MIN + on_refund_result (expires the event first, full history, delivered)";
+    let settled = FollowUp::Logged("refund_settled");
+    record(&mut rows, &escrow, case, minimum, &result, settled)?;
+    let call_logs = &result
+        .receipt_outcomes()
+        .iter()
+        .find(|outcome| outcome.executor_id == escrow.id())
+        .ok_or("no escrow receipt")?
+        .logs;
+    assert!(
+        call_logs
+            .iter()
+            .any(|line| line.contains("\"event\":\"event_resolved\"")),
+        "the claim itself expired the event: {call_logs:?}"
+    );
+    assert_eq!(escrow.event(unresolved).await?["outcome"], "Refundable");
+    assert_eq!(escrow.ticket(t5).await?["status"], "Refunded");
 
     eprintln!(
         "| Case | Gas attached (Tgas) | Call (Tgas) | Callback or resolver (Tgas) | Whole transaction (Tgas) |"
