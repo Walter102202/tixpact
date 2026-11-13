@@ -106,6 +106,12 @@ describe('/organizer: create an event', () => {
       'The price must be above 0 NEAR.',
     ],
     [
+      'the price has 5 decimals',
+      { 'Price in NEAR': '1.00009' },
+      'Price in NEAR',
+      'Use at most 4 decimals.',
+    ],
+    [
       'the capacity is 0',
       { Capacity: '0' },
       'Capacity',
@@ -266,6 +272,33 @@ describe('/organizer: your events and the payout', () => {
     fireEvent.click(collect[0] as HTMLElement);
     expect(await screen.findByText('Sent 4.5 NEAR to org.testnet.')).toBeTruthy();
     expect(services.wallet.sent).toEqual([actions.claimPayout(7)]);
+  });
+
+  it('names the exact amount on the button and once sent', async () => {
+    const data = structuredClone(FIXTURES);
+    const row = data.accounting.find((a) => a.event_id === 7);
+    if (row) row.organizer_available = '4500090000000000000000000';
+    await openOrganizer(
+      testServices({ reader: createFixtureReader(data), wallet: createFixtureWallet(ORGANIZER) }),
+    );
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Collect 4.50009 NEAR to org.testnet' }),
+    );
+    expect(await screen.findByText('Sent 4.50009 NEAR to org.testnet.')).toBeTruthy();
+  });
+
+  it('shows the exact amount on its way to the organizer', async () => {
+    const data = structuredClone(FIXTURES);
+    const row = data.accounting.find((a) => a.event_id === 7);
+    if (row)
+      Object.assign(row, {
+        organizer_available: '0',
+        organizer_pending: '4500090000000000000000000',
+      });
+    await openOrganizer(
+      testServices({ reader: createFixtureReader(data), wallet: createFixtureWallet(ORGANIZER) }),
+    );
+    expect(await screen.findByText(/Sending 4\.50009 NEAR to org\.testnet/)).toBeTruthy();
   });
 
   it('says why there is nothing to collect yet, and when a payout is on its way', async () => {

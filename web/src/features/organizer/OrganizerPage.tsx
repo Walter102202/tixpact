@@ -7,7 +7,7 @@ import { useLoad } from '../../lib/useLoad';
 import { useServices } from '../../services';
 import { LoadState } from '../../ui/LoadState';
 import { TxStatus } from '../../ui/TxStatus';
-import { near, nearExact } from '../events/eventCopy';
+import { nearExact } from '../events/eventCopy';
 import { type OrganizedEvent, OrganizerEvents, readOrganizedEvents } from './OrganizerEvents';
 import { checkTerms, EMPTY_FORM, type Field, type FormValues, parseCapacity } from './terms';
 
@@ -165,7 +165,7 @@ function CreateEventForm({
         })}
 
         <div className="organizer-promise">
-          {budget !== null && <p className="budget">Storage budget: {near(budget)}</p>}
+          {budget !== null && <p className="budget">Storage budget: {nearExact(budget)}</p>}
           <ul>
             <li>
               You receive nothing before {verifier ?? 'the verifier'} confirms the event took place.

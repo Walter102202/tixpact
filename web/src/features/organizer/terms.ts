@@ -17,6 +17,9 @@ export type Field = (typeof FIELDS)[number];
 export type FormValues = Record<Field, string>;
 export type FieldErrors = Partial<Record<Field, string>>;
 
+/** 0.0001 NEAR in yoctoNEAR: the smallest step a price may have. */
+const FOUR_DECIMALS = 10n ** 20n;
+
 export const EMPTY_FORM: FormValues = Object.fromEntries(FIELDS.map((f) => [f, ''])) as FormValues;
 
 /** A `datetime-local` value read in the viewer's zone, or null when it is empty or invalid. */
@@ -77,6 +80,9 @@ export function checkTerms(
   }
   if (price !== null && BigInt(price) === 0n) {
     errors['Price in NEAR'] = 'The price must be above 0 NEAR.';
+  } else if (price !== null && BigInt(price) % FOUR_DECIMALS !== 0n) {
+    // Amounts are shown to 4 decimals; a finer price would be accepted and paid unseen.
+    errors['Price in NEAR'] = 'Use at most 4 decimals.';
   }
 
   const capacity = parseCapacity(values.Capacity, config);

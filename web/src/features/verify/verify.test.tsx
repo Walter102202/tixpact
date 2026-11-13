@@ -1,5 +1,5 @@
 import { act, fireEvent, screen, within } from '@testing-library/react';
-import { actions, FIXTURES, formatDateTime } from '@ticket-escrow/client';
+import { actions, createFixtureReader, FIXTURES, formatDateTime } from '@ticket-escrow/client';
 import { describe, expect, it } from 'vitest';
 import { createFixtureWallet } from '../../lib/near/wallet';
 import { renderAt, TEST_TIME_ZONE, testServices } from '../../test/render';
@@ -51,6 +51,18 @@ describe('/verify/:id shows the terms', () => {
       formatDateTime(event.resolution_deadline_ms, TEST_TIME_ZONE),
     );
     expect(within(terms).getByText(event.terms_hash)).toBeTruthy();
+  });
+
+  it('shows the exact price, even with more decimals than the form allows', async () => {
+    const data = structuredClone(FIXTURES);
+    const event = data.events.find((e) => e.event_id === 2);
+    if (event) event.price = '1000090000000000000000000';
+    renderAt(
+      '/verify/2',
+      testServices({ reader: createFixtureReader(data), wallet: createFixtureWallet(VERIFIER) }),
+    );
+    const terms = await screen.findByRole('region', { name: 'The terms' });
+    expect(terms.textContent).toContain('1.00009 NEAR');
   });
 
   it('shows "There is no event" for an unknown id', async () => {

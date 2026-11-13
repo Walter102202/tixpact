@@ -16,7 +16,7 @@ import { useServices } from '../../services';
 import { AccountLink } from '../../ui/AccountLink';
 import { LoadState } from '../../ui/LoadState';
 import { TxStatus } from '../../ui/TxStatus';
-import { near } from '../events/eventCopy';
+import { nearExact } from '../events/eventCopy';
 import { type VerifierAction, verifierBlockers } from './verifierActions';
 
 interface VerifyData {
@@ -165,7 +165,8 @@ function VerifyDetails({
             <dt>Confirmation deadline</dt>
             <dd>{time(event.resolution_deadline_ms)}</dd>
             <dt>Price</dt>
-            <dd>{near(event.price)}</dd>
+            {/* Exact: the verifier accepts the hash of this price, to the last yoctoNEAR. */}
+            <dd>{nearExact(event.price)}</dd>
             <dt>Capacity</dt>
             <dd>{event.capacity} tickets</dd>
             <dt>Terms hash</dt>

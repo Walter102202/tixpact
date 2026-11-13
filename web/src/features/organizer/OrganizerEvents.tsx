@@ -14,7 +14,7 @@ import type { Load } from '../../lib/useLoad';
 import { useServices } from '../../services';
 import { LoadState } from '../../ui/LoadState';
 import { TxStatus } from '../../ui/TxStatus';
-import { near, nearExact } from '../events/eventCopy';
+import { nearExact } from '../events/eventCopy';
 
 export interface OrganizedEvent {
   event: EventView;
@@ -99,7 +99,7 @@ function OrganizedRow({
   if (pending > 0n) {
     payout = (
       <p>
-        Sending {near(pending.toString())} to {organizer}.
+        Sending {nearExact(pending.toString())} to {organizer}.
       </p>
     );
   } else if (available > 0n && !paid) {
@@ -130,7 +130,7 @@ function OrganizedRow({
   } else if (event.outcome === 'Refundable') {
     payout = <p className="muted">Open for refunds: the organizer receives nothing.</p>;
   } else if (settled > 0n) {
-    payout = <p className="muted">Collected {near(settled.toString())}.</p>;
+    payout = <p className="muted">Collected {nearExact(settled.toString())}.</p>;
   } else {
     payout = <p className="muted">Nothing to collect.</p>;
   }
@@ -156,7 +156,7 @@ function OrganizedRow({
           succeeded={moneyMoved}
           success={() => (
             <p>
-              Sent {near(asked ?? available.toString())} to {organizer}.
+              Sent {nearExact(asked ?? available.toString())} to {organizer}.
             </p>
           )}
         />
