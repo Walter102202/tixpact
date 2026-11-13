@@ -15,6 +15,8 @@
 //! - `tickets.rs`: `buy_ticket`, `ft_on_transfer` (a purchase paid in a token) and the NEP-171
 //!   token surface (`nft_transfer`, `nft_transfer_call` with its private `nft_resolve_transfer`,
 //!   `nft_token`, enumeration, metadata).
+//! - `display.rs`: the token metadata a wallet shows, derived when it is read from the ticket's
+//!   state.
 //! - `views.rs`: `get_config`, `quote_event_budget`, `get_event`, `list_events`,
 //!   `get_accounting`, `get_ticket`, `list_tickets_for_owner`, `get_ticket_history`.
 //! - `settlement.rs`: `claim_refund`, `claim_payout`, their private callbacks, `get_operation` and
@@ -26,6 +28,7 @@
 
 mod accounting;
 mod currency;
+mod display;
 mod errors;
 mod events;
 mod log;

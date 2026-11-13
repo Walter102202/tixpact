@@ -12,15 +12,16 @@ use near_contract_standards::non_fungible_token::core::{
 use near_contract_standards::non_fungible_token::enumeration::NonFungibleTokenEnumeration;
 use near_contract_standards::non_fungible_token::events::{NftMint, NftTransfer};
 use near_contract_standards::non_fungible_token::metadata::{
-    NFT_METADATA_SPEC, NFTContractMetadata, NonFungibleTokenMetadataProvider, TokenMetadata,
+    NFT_METADATA_SPEC, NFTContractMetadata, NonFungibleTokenMetadataProvider,
 };
 use near_contract_standards::non_fungible_token::{Token, TokenId};
 use near_sdk::json_types::U128;
 use near_sdk::{AccountId, Gas, PromiseOrValue, env, near, serde_json};
 
 use crate::accounting::add;
+use crate::display;
 use crate::errors::{Code, ensure, ensure_one_yocto, ensure_text_fits, fail};
-use crate::events::{EventRecord, Outcome};
+use crate::events::Outcome;
 use crate::log;
 use crate::{Contract, ContractExt, HISTORY_CAP, MAX_MEMO_BYTES, MAX_MSG_BYTES, MAX_PAGE};
 
@@ -102,19 +103,6 @@ impl Ticket {
 /// `"<event_id>-<serial>"`.
 pub fn token_id_for(event_id: u32, serial: u32) -> TokenId {
     format!("{event_id}-{serial}")
-}
-
-/// The token metadata shown by wallets, derived from the event so that nothing is stored twice.
-pub fn token_metadata(event: &EventRecord, ticket: &Ticket) -> TokenMetadata {
-    TokenMetadata {
-        title: Some(format!("{} - ticket {}", event.title, ticket.serial)),
-        description: Some(format!(
-            "Ticket {} of {} for {} at {}. Its price stays reserved in the contract until the event \
-             is resolved; if it is cancelled or expires, whoever holds this ticket can claim it.",
-            ticket.serial, event.capacity, event.title, event.venue
-        )),
-        ..TokenMetadata::default()
-    }
 }
 
 impl Contract {
@@ -211,11 +199,12 @@ impl Contract {
         ticket.record(kind, to, env::block_timestamp_ms());
     }
 
-    /// A standard `Token` with metadata derived from the event.
+    /// A standard `Token` whose metadata shows the ticket's state now (`display.rs`).
     fn token_view(&self, token_id: TokenId, owner_id: AccountId) -> Option<Token> {
         let ticket = self.tickets.get(&token_id)?;
         let event = self.events.get(ticket.event_id.checked_sub(1)?)?;
-        let metadata = token_metadata(event, ticket);
+        let unit = self.unit_of(event.currency.as_ref());
+        let metadata = display::token_metadata(event, ticket, unit);
         Some(Token {
             token_id,
             owner_id,

@@ -8,6 +8,7 @@ use near_sdk::{AccountId, NearToken, testing_env};
 use super::*;
 use crate::accounting::quote_event_budget;
 use near_contract_standards::non_fungible_token::core::NonFungibleTokenCore;
+use near_contract_standards::non_fungible_token::metadata::TokenMetadata;
 
 const ESCROW: &str = "escrow.near";
 const ORGANIZER: &str = "org.near";
@@ -916,4 +917,219 @@ fn resolver_returns_the_ticket_on_the_largest_answer() {
         used < GAS_FOR_RESOLVE_TRANSFER,
         "the host charged {used} of the resolver's {GAS_FOR_RESOLVE_TRANSFER}"
     );
+}
+
+#[test]
+fn amounts_are_written_with_the_symbol_and_no_trailing_zeros() {
+    use crate::currency::{NEAR, Unit};
+    use crate::display::format_amount;
+    let tusd = Unit {
+        symbol: "tUSD",
+        decimals: 6,
+    };
+    let whole = Unit {
+        symbol: "PTS",
+        decimals: 0,
+    };
+    assert_eq!(format_amount(PRICE, NEAR), "1.5 NEAR");
+    assert_eq!(format_amount(PRICE / 3, NEAR), "0.5 NEAR");
+    assert_eq!(format_amount(2 * PRICE, NEAR), "3 NEAR");
+    assert_eq!(format_amount(0, NEAR), "0 NEAR");
+    assert_eq!(format_amount(1, NEAR), "0.000000000000000000000001 NEAR");
+    assert_eq!(
+        format_amount(u128::MAX, NEAR),
+        "340282366920938.463463374607431768211455 NEAR"
+    );
+    assert_eq!(format_amount(10_000_000, tusd), "10 tUSD");
+    assert_eq!(format_amount(100_000_000, tusd), "100 tUSD");
+    assert_eq!(format_amount(1_050_000, tusd), "1.05 tUSD");
+    assert_eq!(format_amount(1, tusd), "0.000001 tUSD");
+    assert_eq!(format_amount(120, whole), "120 PTS");
+}
+
+/// The drawn ticket inside a `media` data URL.
+fn decode_svg(media: &str) -> String {
+    use near_sdk::base64::Engine;
+    use near_sdk::base64::engine::general_purpose::STANDARD;
+    let encoded = media
+        .strip_prefix("data:image/svg+xml;base64,")
+        .expect("an SVG data URL");
+    String::from_utf8(STANDARD.decode(encoded).expect("base64")).expect("UTF-8")
+}
+
+/// Ticket "1-1"'s metadata now, with its drawn ticket decoded and its hash checked.
+fn metadata_and_svg(contract: &Contract) -> (TokenMetadata, String) {
+    let token = contract
+        .nft_token("1-1".to_string())
+        .expect("ticket exists");
+    let metadata = token.metadata.expect("metadata is derived");
+    let svg = decode_svg(metadata.media.as_deref().expect("a drawn ticket"));
+    assert!(svg.starts_with("<svg ") && svg.ends_with("</svg>"), "{svg}");
+    assert!(svg.len() <= display::MAX_SVG_BYTES, "{} bytes", svg.len());
+    let hash = metadata.media_hash.clone().expect("a media hash");
+    assert_eq!(hash.0, near_sdk::env::sha256(svg.as_bytes()));
+    (metadata, svg)
+}
+
+/// Checks ticket "1-1" of the default event against one state: the description's last sentence,
+/// the facts in `extra` and the facts on the drawn ticket.
+fn assert_ticket_shows(
+    contract: &Contract,
+    sentence: &str,
+    [status, claim, outcome, word]: [&str; 4],
+) {
+    let (metadata, svg) = metadata_and_svg(contract);
+    assert_eq!(metadata.title.as_deref(), Some("Jazz night - ticket 1"));
+    let description = format!("Ticket 1 of 3 for Jazz night at Teatro Municipal. {sentence}");
+    assert_eq!(metadata.description, Some(description));
+    let extra = format!(
+        "{{\"event_id\":1,\"serial\":1,\"status\":\"{status}\",\"claim\":\"{claim}\",\
+         \"outcome\":\"{outcome}\",\"principal\":\"{PRICE}\",\"currency\":null}}"
+    );
+    assert_eq!(metadata.extra, Some(extra));
+    for fact in ["Jazz night", "Ticket 1", "1.5 NEAR", word] {
+        assert!(
+            svg.contains(&format!(">{fact}<")),
+            "{fact} is not drawn: {svg}"
+        );
+    }
+    assert!(metadata.reference.is_none() && metadata.copies.is_none());
+}
+
+#[test]
+fn metadata_follows_the_ticket_from_purchase_to_refund() {
+    let mut contract = contract_with_a_sold_ticket();
+    assert_ticket_shows(
+        &contract,
+        "1.5 NEAR is reserved in the contract until the event is resolved.",
+        ["Active", "Reserved", "Unresolved", "Reserved"],
+    );
+
+    call_as(ORGANIZER, 1, 1_600_000);
+    contract.cancel_event(1, None);
+    assert_ticket_shows(
+        &contract,
+        "The event was not confirmed: whoever holds this ticket can claim 1.5 NEAR.",
+        ["Active", "Refundable", "Refundable", "Claimable"],
+    );
+
+    call_as(ANA, 1, 1_700_000);
+    let _ = contract.claim_refund("1-1".to_string());
+    assert_ticket_shows(
+        &contract,
+        "A refund of 1.5 NEAR is on its way to the holder.",
+        ["RefundPending", "RefundPending", "Refundable", "Sending"],
+    );
+
+    as_callback();
+    assert!(contract.on_refund_result(1, Ok(())));
+    assert_ticket_shows(
+        &contract,
+        "1.5 NEAR was refunded to the holder.",
+        ["Refunded", "Refunded", "Refundable", "Refunded"],
+    );
+}
+
+#[test]
+fn metadata_says_the_price_went_to_the_organizer_once_confirmed() {
+    let mut contract = contract_with_a_sold_ticket();
+    call_as(VERIFIER, 1, ENDS);
+    contract.attest_completed(1, None);
+    assert_ticket_shows(
+        &contract,
+        "The event was confirmed and the price went to the organizer.",
+        [
+            "Active",
+            "ReleasedToOrganizer",
+            "Completed",
+            "Released to the organizer",
+        ],
+    );
+}
+
+/// Every view of a ticket carries the same derived metadata.
+#[test]
+fn enumeration_views_carry_the_same_metadata() {
+    use near_contract_standards::non_fungible_token::enumeration::NonFungibleTokenEnumeration;
+    let contract = contract_with_a_sold_ticket();
+    let one = contract
+        .nft_token("1-1".to_string())
+        .expect("ticket exists")
+        .metadata;
+    assert!(one.is_some());
+    let all = contract.nft_tokens(None, None);
+    let mine = contract.nft_tokens_for_owner(id(ANA), None, None);
+    assert_eq!(all.len(), 1);
+    assert_eq!(mine.len(), 1);
+    assert_eq!(all[0].metadata, one);
+    assert_eq!(mine[0].metadata, one);
+}
+
+/// The drawn ticket stays under 2 KB for the largest facts the contract accepts, and markup in the
+/// title or the symbol is escaped, never drawn.
+#[test]
+fn the_drawn_ticket_is_small_and_escaped_in_the_worst_case() {
+    use crate::currency::Unit;
+    let contract = contract_with_a_sold_ticket();
+    let mut event = contract.load_event(1);
+    event.capacity = MAX_CAPACITY;
+    let mut ticket = contract.load_ticket(&"1-1".to_string());
+    ticket.serial = MAX_CAPACITY;
+    ticket.principal = u128::MAX;
+    // The longest symbol, every byte escaped.
+    let unit = Unit {
+        symbol: "<<<<<<<<<<<<",
+        decimals: 0,
+    };
+    // The longest title of the character with the longest escape, then one of every kind.
+    let titles = [
+        "\"".repeat(MAX_TITLE_BYTES as usize),
+        "\"<&>'\u{1}".repeat(20),
+    ];
+    for title in titles {
+        event.title = title;
+        for outcome in [Outcome::Unresolved, Outcome::Completed, Outcome::Refundable] {
+            event.outcome = outcome;
+            let metadata = display::token_metadata(&event, &ticket, unit);
+            let svg = decode_svg(metadata.media.as_deref().expect("a drawn ticket"));
+            assert!(svg.len() <= display::MAX_SVG_BYTES, "{} bytes", svg.len());
+            assert!(!svg.contains("<<") && !svg.contains("<&") && !svg.contains('\u{1}'));
+            assert!(svg.contains("&quot;"), "{svg}");
+            assert!(svg.contains('…'), "a long title is cut: {svg}");
+        }
+    }
+    let svg = decode_svg(
+        display::token_metadata(&event, &ticket, unit)
+            .media
+            .as_deref()
+            .expect("a drawn ticket"),
+    );
+    assert!(svg.contains("&quot;&lt;&amp;&gt;&apos; "), "{svg}");
+}
+
+#[test]
+fn a_token_amount_is_written_in_the_token_unit() {
+    use crate::currency::Unit;
+    let contract = contract_with_a_sold_ticket();
+    let mut event = contract.load_event(1);
+    event.currency = Some(id("tusd.near"));
+    let mut ticket = contract.load_ticket(&"1-1".to_string());
+    ticket.principal = 10_000_000;
+    let unit = Unit {
+        symbol: "tUSD",
+        decimals: 6,
+    };
+    let metadata = display::token_metadata(&event, &ticket, unit);
+    let description = metadata.description.expect("a description");
+    assert!(
+        description.ends_with("10 tUSD is reserved in the contract until the event is resolved."),
+        "{description}"
+    );
+    let extra = metadata.extra.expect("extra");
+    assert!(
+        extra.ends_with("\"principal\":\"10000000\",\"currency\":\"tusd.near\"}"),
+        "{extra}"
+    );
+    let svg = decode_svg(metadata.media.as_deref().expect("a drawn ticket"));
+    assert!(svg.contains(">10 tUSD<"), "{svg}");
 }
