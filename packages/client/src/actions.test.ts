@@ -34,7 +34,12 @@ describe('action builders', () => {
     const cases: Array<[ContractCall, ContractCall]> = [
       [
         createEvent(TERMS, QUOTE),
-        { methodName: 'create_event', args: { terms: TERMS }, deposit: QUOTE, gas: tgas(30) },
+        {
+          methodName: 'create_event',
+          args: { terms: { ...TERMS, currency: null } },
+          deposit: QUOTE,
+          gas: tgas(30),
+        },
       ],
       [
         acceptVerification(1, HASH),
@@ -106,6 +111,9 @@ describe('action builders', () => {
       claim_payout: 100,
       nft_transfer: 30,
       nft_transfer_call: 150,
+      ft_transfer_call: 100,
+      storage_deposit: 30,
+      faucet: 30,
     });
   });
 

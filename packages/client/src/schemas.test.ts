@@ -21,6 +21,7 @@ const eventTerms = {
   price: '1500000000000000000000000',
   capacity: 50,
   verifier_id: 'teatro.testnet',
+  currency: null,
 };
 
 const eventView = {
@@ -45,6 +46,7 @@ const eventView = {
   created_at_ms: 1794600000000,
   phase: 'OnSale',
   now_ms: 1794650000000,
+  currency: null,
 };
 
 const ticketView = {
@@ -56,6 +58,7 @@ const ticketView = {
   status: 'Active',
   claim: 'Reserved',
   pending_operation_id: null,
+  currency: null,
 };
 
 const accountingView = {
@@ -68,6 +71,7 @@ const accountingView = {
   organizer_pending: '0',
   organizer_settled: '0',
   operating_budget: '700000000000000000000000',
+  currency: null,
 };
 
 const operationView = {
@@ -78,6 +82,7 @@ const operationView = {
   recipient_id: 'luis.testnet',
   amount: '1500000000000000000000000',
   started_at_ms: 1794900000000,
+  currency: null,
 };
 
 const ticketHistory = {
@@ -89,7 +94,7 @@ const ticketHistory = {
 };
 
 const config = {
-  version: '1.0.0',
+  version: '2.0.0',
   max_capacity: 100,
   max_page: 50,
   max_title_bytes: 120,
@@ -101,6 +106,7 @@ const config = {
   storage_per_event: '50000000000000000000000',
   storage_per_ticket: '13000000000000000000000',
   fault_injection: false,
+  tokens: [{ account_id: 'tusd.testnet', symbol: 'tUSD', decimals: 6 }],
 };
 
 describe('schemas', () => {

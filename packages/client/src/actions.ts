@@ -3,6 +3,7 @@ import {
   EventIdSchema,
   type EventTerms,
   EventTermsSchema,
+  type EventView,
   TermsHashSchema,
   TokenIdSchema,
   YoctoSchema,
@@ -24,6 +25,10 @@ export const GAS_TGAS = {
   claim_payout: 100,
   nft_transfer: 30,
   nft_transfer_call: 150,
+  // Calls on a NEP-141 token (interface v2), not on the escrow contract.
+  ft_transfer_call: 100,
+  storage_deposit: 30,
+  faucet: 30,
 } as const;
 
 export type ContractMethod = keyof typeof GAS_TGAS;
@@ -36,7 +41,15 @@ export interface ContractCall {
   deposit: string;
   /** Gas units, decimal string. */
   gas: string;
+  /**
+   * The account to call when it is not the escrow contract: the token, for the calls of interface v2
+   * on a NEP-141 token. Absent means the escrow contract.
+   */
+  receiverId?: string;
 }
+
+/** A call on another contract than the escrow (a token): it always names its receiver. */
+export type ExternalCall = ContractCall & { receiverId: string };
 
 /** The deposit of calls that only need the wallet's explicit confirmation. */
 export const ONE_YOCTO = '1';
@@ -101,6 +114,60 @@ export function claimRefund(tokenId: string): ContractCall {
 /** Organizer: collect everything available after the event was confirmed. */
 export function claimPayout(eventId: number): ContractCall {
   return call('claim_payout', { event_id: EventIdSchema.parse(eventId) }, ONE_YOCTO);
+}
+
+function external(
+  receiverId: string,
+  methodName: ContractMethod,
+  args: Record<string, unknown>,
+  deposit: string,
+): ExternalCall {
+  return { ...call(methodName, args, deposit), receiverId: AccountIdSchema.parse(receiverId) };
+}
+
+/**
+ * Buyer of an event priced in a token: `ft_transfer_call` on the event's token, sending exactly the
+ * price to the escrow contract with `{"event_id":N}` as the message. 1 yoctoNEAR, 100 Tgas. The
+ * call goes to `event.currency`, not to the escrow. Throws for an event priced in NEAR.
+ * The transaction succeeds even when the purchase is rejected: judge it with `purchaseResult`.
+ */
+export function buyTicketWithToken(
+  contractId: string,
+  event: Pick<EventView, 'event_id' | 'price' | 'currency'>,
+): ExternalCall {
+  if (event.currency === null) {
+    throw new RangeError(`Event ${event.event_id} is priced in NEAR: buy it with buyTicket.`);
+  }
+  return external(
+    event.currency,
+    'ft_transfer_call',
+    {
+      receiver_id: AccountIdSchema.parse(contractId),
+      amount: YoctoSchema.parse(event.price),
+      memo: null,
+      msg: JSON.stringify({ event_id: EventIdSchema.parse(event.event_id) }),
+    },
+    ONE_YOCTO,
+  );
+}
+
+/**
+ * Anyone: register `accountId` with a token (`storage_deposit`, registration only), paying
+ * `deposit` yoctoNEAR, at least the token's `minDeposit` (`tokenRegistration`). A token sends
+ * nothing to an account that is not registered with it.
+ */
+export function registerWithToken(token: string, accountId: string, deposit: string): ExternalCall {
+  return external(
+    token,
+    'storage_deposit',
+    { account_id: AccountIdSchema.parse(accountId), registration_only: true },
+    YoctoSchema.parse(deposit),
+  );
+}
+
+/** The test token only: mint 100 whole units to the caller, who must be registered. 30 Tgas. */
+export function faucet(token: string): ExternalCall {
+  return external(token, 'faucet', {}, '0');
 }
 
 /** Holder: give the ticket, and with it the right to the refund, to another account. */

@@ -475,6 +475,7 @@ describe('the exposure cap over several purchases', () => {
           status: 'Active',
           claim: 'Reserved',
           pending_operation_id: null,
+          currency: null,
         });
         const hash = `MintHash${serial}11111111111111111111111111111111111`;
         minted[hash] = okTx(hash, tokenId);
@@ -573,6 +574,7 @@ describe('the exposure cap against stale reads and lost sends', () => {
           status: 'Active',
           claim: 'Reserved',
           pending_operation_id: null,
+          currency: null,
         });
         const hash = `Mint${serial}Hash1111111111111111111111111111111111`;
         minted[hash] = okTx(hash, tokenId);
