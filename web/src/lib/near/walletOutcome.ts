@@ -20,13 +20,18 @@ export function toConnectorAction(call: ContractCall): ConnectorAction {
 }
 
 const OutcomeSchema = z.object({ transaction_outcome: z.object({ id: z.string().min(1) }) });
+const SignedSchema = z.object({ transaction: z.object({ hash: z.string().min(1) }) });
 
 /**
- * The transaction hash from what `signAndSendTransaction` resolved with. The outcome itself is not
- * trusted for anything else: the page reads the chain by this hash.
+ * The transaction hash from what `signAndSendTransaction` resolved with. A full outcome carries it
+ * twice, as `transaction_outcome.id` and as `transaction.hash`; a wallet that returns only one of
+ * them is still followed. The outcome itself is not trusted for anything else: the page reads the
+ * chain by this hash, so a wrong hash can only end as "not found", never as a false success.
  */
 export function txHashFromOutcome(outcome: unknown): string {
-  const parsed = OutcomeSchema.safeParse(outcome);
-  if (!parsed.success) throw new Error('The wallet did not return a transaction hash.');
-  return parsed.data.transaction_outcome.id;
+  const full = OutcomeSchema.safeParse(outcome);
+  if (full.success) return full.data.transaction_outcome.id;
+  const signed = SignedSchema.safeParse(outcome);
+  if (signed.success) return signed.data.transaction.hash;
+  throw new Error('The wallet did not return a transaction hash.');
 }

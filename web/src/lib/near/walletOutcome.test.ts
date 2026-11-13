@@ -25,6 +25,14 @@ describe('txHashFromOutcome', () => {
     ).toBe('AXBfY5E1CdGAt4TzSk7u1wgqUzaTqPVRdvcFsxjjoPq2');
   });
 
+  it('falls back to the hash of the signed transaction when the outcome carries no outcome id', () => {
+    expect(
+      txHashFromOutcome({
+        transaction: { hash: 'AXBfY5E1CdGAt4TzSk7u1wgqUzaTqPVRdvcFsxjjoPq2' },
+      }),
+    ).toBe('AXBfY5E1CdGAt4TzSk7u1wgqUzaTqPVRdvcFsxjjoPq2');
+  });
+
   it.each([
     ['nothing', undefined],
     ['a string', 'ok'],
