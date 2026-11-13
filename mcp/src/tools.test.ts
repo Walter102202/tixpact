@@ -258,6 +258,15 @@ describe('read tools', () => {
     expect(result.text).toContain('On sale');
   });
 
+  it('list_events never calls an event confirmed when its verifier only accepted the terms', async () => {
+    const client = await connect(deps(null));
+    const { text } = await call(client, 'list_events');
+    expect(text).not.toContain('confirmed by');
+    expect(text).toContain('On sale, 1.5 NEAR per ticket');
+    expect(text).toMatch(/Event 1, Jazz night: .*, verifier \S+ accepted the terms/);
+    expect(text).toMatch(/Event 2, [^\n]*, waiting for \S+ to accept the terms/);
+  });
+
   it('list_events pages with from_index and limit', async () => {
     const client = await connect(deps(null));
     const result = await call(client, 'list_events', { from_index: 2, limit: 3 });

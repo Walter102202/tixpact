@@ -90,9 +90,9 @@ The examples below are the real output of the built server on the fixture chain 
 ```text
 # Events
 
-- Event 1, Jazz night: On sale, 1.5 NEAR per ticket, 4 of 50 sold, starts Nov 14, 2026, 23:46 UTC, confirmed by teatro.testnet
-- Event 2, Poetry reading: Awaiting verifier, 0.5 NEAR per ticket, 0 of 20 sold, starts Nov 16, 2026, 09:53 UTC, awaiting teatro.testnet
-- Event 3, Chamber quartet: Sold out, 2 NEAR per ticket, 2 of 2 sold, starts Nov 15, 2026, 09:53 UTC, confirmed by teatro.testnet
+- Event 1, Jazz night: On sale, 1.5 NEAR per ticket, 4 of 50 sold, starts Nov 14, 2026, 23:46 UTC, verifier teatro.testnet accepted the terms
+- Event 2, Poetry reading: Awaiting verifier, 0.5 NEAR per ticket, 0 of 20 sold, starts Nov 16, 2026, 09:53 UTC, waiting for teatro.testnet to accept the terms
+- Event 3, Chamber quartet: Sold out, 2 NEAR per ticket, 2 of 2 sold, starts Nov 15, 2026, 09:53 UTC, verifier teatro.testnet accepted the terms
 
 More may follow: call list_events with from_index 3.
 ```

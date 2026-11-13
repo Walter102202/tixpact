@@ -50,9 +50,10 @@ function outcomeLine(event: EventView): string {
 }
 
 function eventSummary(event: EventView): string {
+  // Accepting the terms is not confirming the event: the outcome is in the phase and in get_event.
   const confirm = event.verifier_accepted
-    ? `confirmed by ${event.verifier_id}`
-    : `awaiting ${event.verifier_id}`;
+    ? `verifier ${event.verifier_id} accepted the terms`
+    : `waiting for ${event.verifier_id} to accept the terms`;
   return `- Event ${event.event_id}, ${event.title}: ${PHASE_LABELS[event.phase]}, ${near(event.price)} per ticket, ${event.sold} of ${event.capacity} sold, starts ${when(event.starts_at_ms)}, ${confirm}`;
 }
 
