@@ -292,6 +292,12 @@ pub fn vanishing_holder_wasm() -> Vec<u8> {
         .clone()
 }
 
+/// The wasm of the test fixture in `fixtures/ticket-receiver`.
+pub fn ticket_receiver_wasm() -> Vec<u8> {
+    static WASM: OnceLock<Vec<u8>> = OnceLock::new();
+    WASM.get_or_init(|| fixture_wasm("ticket-receiver")).clone()
+}
+
 fn fixture_wasm(name: &str) -> Vec<u8> {
     let manifest = format!(
         "{}/../fixtures/{name}/Cargo.toml",
@@ -449,6 +455,26 @@ impl Escrow<'_> {
         let args =
             json!({ "receiver_id": to, "token_id": token_id, "approval_id": null, "memo": null });
         self.call(from, "nft_transfer", args, ONE_YOCTO, TGAS).await
+    }
+
+    /// An `nft_transfer_call` to `to` with `msg`, sent as `from` with 1 yocto and `tgas`.
+    pub async fn transfer_call(
+        &self,
+        from: &Account,
+        to: &AccountId,
+        token_id: &str,
+        msg: &str,
+        tgas: u64,
+    ) -> TestResult<ExecutionFinalResult> {
+        let args = json!({
+            "receiver_id": to,
+            "token_id": token_id,
+            "approval_id": null,
+            "memo": null,
+            "msg": msg,
+        });
+        self.call(from, "nft_transfer_call", args, ONE_YOCTO, tgas)
+            .await
     }
 
     /// `claim_refund` sent by `holder` with 1 yocto and `tgas`.
@@ -652,6 +678,19 @@ pub fn receipt_failure_texts(result: &ExecutionFinalResult) -> Vec<String> {
         .receipt_failures()
         .into_iter()
         .map(|outcome| format!("{:?}", outcome.clone().into_result()))
+        .collect()
+}
+
+/// The `data` objects of a transaction's NEP-171 events named `name` (`nft_mint`,
+/// `nft_transfer`), in log order, after checking each event's envelope.
+pub fn nep171_events(result: &ExecutionFinalResult, name: &str) -> Vec<Value> {
+    events_named(result, name)
+        .into_iter()
+        .filter(|event| event["standard"] == "nep171")
+        .flat_map(|event| {
+            assert_eq!(event["version"], "1.0.0", "NEP-171 event version: {event}");
+            event["data"].as_array().cloned().unwrap_or_default()
+        })
         .collect()
 }
 
