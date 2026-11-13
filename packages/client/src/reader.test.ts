@@ -432,6 +432,19 @@ describe('readGroupVerifier', () => {
       }
     });
 
+    it('one member alone can replace the factory (Sputnik v3), while calls need 2: needed is 1', () => {
+      const policy = daoPolicy({
+        council: {
+          permissions: ['call:VoteApprove', 'factory_info_update:VoteApprove'],
+          vote_policy: {
+            call: { weight_kind: 'RoleWeight', quorum: '0', threshold: [1, 2] },
+            factory_info_update: byOne,
+          },
+        },
+      });
+      expect(groupVerifierOf(policy)).toEqual({ members: COUNCIL, needed: 1 });
+    });
+
     it('another group that can approve a policy change, an upgrade or a new member gives null', () => {
       for (const permission of [
         'policy:VoteApprove',
