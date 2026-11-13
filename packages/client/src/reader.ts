@@ -1,4 +1,5 @@
-import { FailoverRpcProvider, JsonRpcProvider } from 'near-api-js';
+import { FailoverRpcError, FailoverRpcProvider, JsonRpcProvider } from 'near-api-js';
+import { AccountDoesNotExistError } from 'near-api-js/rpc-errors';
 import { z } from 'zod';
 import {
   type AccountingView,
@@ -77,6 +78,11 @@ export interface Reader {
   getTicketHistory(tokenId: string): Promise<TicketHistory | null>;
   getOperation(operationId: number): Promise<OperationView | null>;
   getAccountProof(accountId: string): Promise<AccountProof>;
+  /**
+   * Whether `accountId` exists, read at `final`. Rejects when no endpoint answered, so an outage
+   * never reads as "missing". Optional, so readers written before it stay valid.
+   */
+  accountExists?(accountId: string): Promise<boolean>;
 }
 
 export type ReaderOptions =
@@ -157,6 +163,12 @@ function parse<S extends z.ZodType>(source: string, schema: S, raw: unknown): z.
   return result.data;
 }
 
+/** Whether a failed read says the account does not exist, from any endpoint of a failover. */
+function saysAccountMissing(error: unknown): boolean {
+  const errors = error instanceof FailoverRpcError ? error.errors : [error];
+  return errors.some((e) => e instanceof AccountDoesNotExistError);
+}
+
 export function createReader(options: ReaderOptions): Reader {
   const { contractId } = options;
   const rpc: ReaderRpc = 'rpc' in options ? options.rpc : createRpc(options.rpcUrls);
@@ -222,6 +234,16 @@ export function createReader(options: ReaderOptions): Reader {
         accessKeys,
         blockHeight: account.block_height,
       };
+    },
+
+    async accountExists(accountId) {
+      try {
+        await rpc.viewAccount({ accountId, blockQuery: FINAL });
+        return true;
+      } catch (error) {
+        if (saysAccountMissing(error)) return false;
+        throw error;
+      }
     },
   };
 }

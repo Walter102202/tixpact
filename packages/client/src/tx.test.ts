@@ -60,6 +60,7 @@ describe('trackTransaction on recorded statuses', () => {
     expect(result.failedReceipt).toEqual({
       receiptId: tx.failedReceiptId,
       executorId: FIXTURE_CONTRACT_ID,
+      step: 'callback',
       error: { code: 'UNKNOWN', message: 'The call ran out of gas before it finished.' },
     });
     expect(stages).toEqual(['sending', 'executed', 'final']);
@@ -71,6 +72,7 @@ describe('trackTransaction on recorded statuses', () => {
     expect(result.ok).toBe(false);
     expect(result.failedReceipt?.receiptId).toBe(tx.failedReceiptId);
     expect(result.failedReceipt?.executorId).toBe('vanishing-holder.testnet');
+    expect(result.failedReceipt?.step).toBe('other');
     expect(result.failedReceipt?.error.message).toBe(
       'Account vanishing-holder.testnet does not exist.',
     );
@@ -89,11 +91,50 @@ describe('trackTransaction on recorded statuses', () => {
     expect(result).toEqual({ ok: true, value: '1-4' });
   });
 
+  it('reads a transfer that returns nothing as ok with no value', async () => {
+    const tx = TX_FIXTURES.transferSucceeded;
+    const { result } = await track(rpc, tx.hash, tx.signerId);
+    expect(result).toEqual({ ok: true });
+  });
+
+  it('reads the recorded organizer and verifier calls as they settled', async () => {
+    const expected = [
+      [TX_FIXTURES.eventCreated, { ok: true, value: 9 }],
+      [TX_FIXTURES.verificationAccepted, { ok: true }],
+      [TX_FIXTURES.eventAttested, { ok: true }],
+      [TX_FIXTURES.eventCancelled, { ok: true }],
+      [TX_FIXTURES.payoutSettled, { ok: true, value: true }],
+    ] as const;
+    for (const [tx, result] of expected) {
+      const tracked = await track(rpc, tx.hash, tx.signerId);
+      expect(tracked.result, tx.hash).toEqual(result);
+    }
+  });
+
+  it('reads a payout whose transfer to the organizer failed as failed, with false', async () => {
+    const tx = TX_FIXTURES.payoutTransferFailed;
+    const { result } = await track(rpc, tx.hash, tx.signerId);
+    expect(result.ok).toBe(false);
+    expect(result.failedReceipt?.receiptId).toBe(tx.failedReceiptId);
+    expect(result.failedReceipt?.executorId).toBe('org.testnet');
+    expect(result.failedReceipt?.step).toBe('other');
+    expect(result.value).toBe(false);
+  });
+
+  it('reads a payout whose confirmation ran out of gas as failed at the callback', async () => {
+    const tx = TX_FIXTURES.payoutCallbackFailed;
+    const { result } = await track(rpc, tx.hash, tx.signerId);
+    expect(result.ok).toBe(false);
+    expect(result.failedReceipt?.receiptId).toBe(tx.failedReceiptId);
+    expect(result.failedReceipt?.step).toBe('callback');
+  });
+
   it('maps a contract panic to its error code', async () => {
     const tx = TX_FIXTURES.buyRejected;
     const { result } = await track(rpc, tx.hash, tx.signerId);
     expect(result.ok).toBe(false);
     expect(result.failedReceipt?.receiptId).toBe(tx.failedReceiptId);
+    expect(result.failedReceipt?.step).toBe('contract');
     expect(result.failedReceipt?.error).toEqual({
       code: 'ERR_SOLD_OUT',
       message: ERROR_MESSAGES.ERR_SOLD_OUT,
@@ -241,6 +282,7 @@ describe('a transaction is ok only when every outcome succeeded', () => {
       failedReceipt: {
         receiptId: settled.hash,
         executorId: 'luis.testnet',
+        step: 'transaction',
         error: { code: 'UNKNOWN', message: 'The account does not have enough NEAR for this.' },
       },
     });

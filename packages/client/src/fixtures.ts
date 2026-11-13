@@ -447,7 +447,17 @@ export function createFixtureReader(data: FixtureData = FIXTURES): Reader {
       ),
     // Fixture mode only shows the contract account, so every account reads as the contract.
     getAccountProof: async () => structuredClone(data.accountProof),
+    // The accounts the fixture data names exist; any other does not.
+    accountExists: async (accountId) => fixtureAccounts(data).has(accountId),
   };
+}
+
+function fixtureAccounts(data: FixtureData): Set<string> {
+  return new Set([
+    data.contractId,
+    ...data.events.flatMap((e) => [e.organizer_id, e.verifier_id]),
+    ...data.tickets.map((t) => t.owner_id),
+  ]);
 }
 
 // Recorded transaction statuses, in the shape `EXPERIMENTAL_tx_status` returns at `FINAL`.
@@ -563,6 +573,45 @@ const claim = (argsBase64: string) => ({
 });
 
 const refund = { operation_id: 8, recipient_id: LUIS, amount: parseNear('1.5') };
+
+/** Base64 of a JSON value; `btoa` exists in browsers and in Node. The JSON here is ASCII. */
+const base64Json = (value: unknown) => btoa(JSON.stringify(value));
+
+/** A call that runs in one contract receipt and succeeds, plus the signer's gas refund. */
+function recordedCall(spec: {
+  hash: string;
+  receiptId: string;
+  refundId: string;
+  signerId: string;
+  method: string;
+  args: Record<string, unknown>;
+  deposit: string;
+  gasTgas: number;
+  /** The call's return value; omitted for a method that returns nothing. */
+  value?: unknown;
+}): RecordedTx {
+  const returned = { SuccessValue: spec.value === undefined ? '' : base64Json(spec.value) };
+  return {
+    hash: spec.hash,
+    signerId: spec.signerId,
+    failedReceiptId: null,
+    status: recordedStatus(
+      spec.hash,
+      spec.signerId,
+      {
+        method: spec.method,
+        argsBase64: base64Json(spec.args),
+        deposit: spec.deposit,
+        gasTgas: spec.gasTgas,
+      },
+      returned,
+      [
+        outcome(spec.receiptId, FIXTURE_CONTRACT_ID, returned, [spec.refundId]),
+        outcome(spec.refundId, spec.signerId, GAS_REFUND),
+      ],
+    ),
+  };
+}
 
 export const TX_FIXTURES = {
   /** Luis claims ticket 8-3: transfer and callback succeed, the call returns `true`. */
@@ -726,6 +775,229 @@ export const TX_FIXTURES = {
           ],
         ),
         outcome('opLesjwoytwsms19sXY6i7aLXzyd7uubgyDcA5vtRun7', ANA, GAS_REFUND),
+      ],
+    ),
+  },
+
+  /** Luis transfers ticket 1-3 to Ana with `nft_transfer`, which returns nothing. */
+  transferSucceeded: {
+    hash: 'CUoB1t9JXg4Zkpvp1YZbVKvRw8GHwtXxNaNkcAeXu4fS',
+    signerId: LUIS,
+    failedReceiptId: null,
+    status: recordedStatus(
+      'CUoB1t9JXg4Zkpvp1YZbVKvRw8GHwtXxNaNkcAeXu4fS',
+      LUIS,
+      {
+        method: 'nft_transfer',
+        argsBase64:
+          'eyJyZWNlaXZlcl9pZCI6ImFuYS50ZXN0bmV0IiwidG9rZW5faWQiOiIxLTMiLCJhcHByb3ZhbF9pZCI6bnVsbCwibWVtbyI6bnVsbH0=',
+        deposit: '1',
+        gasTgas: 30,
+      },
+      { SuccessValue: '' },
+      [
+        outcome(
+          'B6m3vrbcvHPp3nT1j8jZr4dKyu4wD3E9cpXiZ9mJgBDh',
+          FIXTURE_CONTRACT_ID,
+          { SuccessValue: '' },
+          ['7zCNZ8ohT3iFUNbJpWJjkN2s8JVtYy6NU8hT2zTGGsXc'],
+          [
+            `EVENT_JSON:${JSON.stringify({ standard: 'nep171', version: '1.2.0', event: 'nft_transfer', data: [{ old_owner_id: LUIS, new_owner_id: ANA, token_ids: ['1-3'] }] })}`,
+          ],
+        ),
+        outcome('7zCNZ8ohT3iFUNbJpWJjkN2s8JVtYy6NU8hT2zTGGsXc', LUIS, GAS_REFUND),
+      ],
+    ),
+  },
+
+  /** org.testnet creates event 9 with a 0.7 NEAR storage budget; the call returns the new id. */
+  eventCreated: recordedCall({
+    hash: 'cBAMw4BEwDzTqfPABGwF2zBwL2DFR16QNsttNd4aNtGV',
+    receiptId: 'Fu5YrRrGeYWT81t6uxym74CGFishgL5FQqLkg6hJLJqG',
+    refundId: 'jzjuty9bVoeoCFMGRNthr9CBwGagBfo9GZ7zwJcFeYSH',
+    signerId: ORGANIZER,
+    method: 'create_event',
+    args: {
+      terms: {
+        title: 'Tango evening',
+        venue: 'Centro Cultural GAM',
+        starts_at_ms: NOW + 5 * DAY,
+        ends_at_ms: NOW + 5 * DAY + 3 * HOUR,
+        resolution_deadline_ms: NOW + 7 * DAY + 3 * HOUR,
+        price: parseNear('1.5'),
+        capacity: 50,
+        verifier_id: VERIFIER,
+      },
+    },
+    deposit: parseNear('0.7'),
+    gasTgas: 30,
+    value: 9,
+  }),
+
+  /** teatro.testnet accepts the terms of event 2. */
+  verificationAccepted: recordedCall({
+    hash: '4dWDv3YEZGDybMDVTUyYUuyMqfs7fz3eozv4QgqFDudS',
+    receiptId: 'rfY2Reo3Pp92V9pnea42n58tJSkd8qfCMDngtf2VV7mt',
+    refundId: 's1My3Hbv45ezSJPg6n8YLfzQsVD5jKyqUJAg9M2vnMZ5',
+    signerId: VERIFIER,
+    method: 'accept_verification',
+    args: { event_id: 2, terms_hash: `${'5e'.repeat(31)}02` },
+    deposit: '1',
+    gasTgas: 30,
+  }),
+
+  /** teatro.testnet confirms that event 5 took place. */
+  eventAttested: recordedCall({
+    hash: '6fcnGL13viFr8K839J56MpYq9eY2Do3UGz9yh7gt929o',
+    receiptId: 'oLg8osCkciFxQrrTMe5JxurAacLnTPciNxBavhMxYDJn',
+    refundId: 'ZuX4dwogCMBHHmMH5fZBHj44Y6Y6LUjaTEyKZCUt8d4j',
+    signerId: VERIFIER,
+    method: 'attest_completed',
+    args: { event_id: 5, evidence_ref: null },
+    deposit: '1',
+    gasTgas: 30,
+  }),
+
+  /** teatro.testnet cancels event 1. */
+  eventCancelled: recordedCall({
+    hash: 'SUYUyaGw7u81yCyPe1CiaiPAd4CknQ77jvJRtHEhDZPx',
+    receiptId: 'uZBxZWVHi4CAjsFJgnhpjeD7ZW9b2kTfAdjS5S7VpQRb',
+    refundId: 'YPSN2BsH3cphKk1JkAQUJhMEw9vKYF1Y2WT3zwYDtpxX',
+    signerId: VERIFIER,
+    method: 'cancel_event',
+    args: { event_id: 1, reason_ref: null },
+    deposit: '1',
+    gasTgas: 30,
+  }),
+
+  /** org.testnet collects the 4.5 NEAR of event 7: transfer and callback succeed, returns `true`. */
+  payoutSettled: {
+    hash: 'oCy3kGVMBjhP1iR2PHDCAHbC63Y87CUFZS4wZ9NRg15W',
+    signerId: ORGANIZER,
+    failedReceiptId: null,
+    status: recordedStatus(
+      'oCy3kGVMBjhP1iR2PHDCAHbC63Y87CUFZS4wZ9NRg15W',
+      ORGANIZER,
+      { method: 'claim_payout', argsBase64: btoa('{"event_id":7}'), deposit: '1', gasTgas: 100 },
+      { SuccessValue: 'dHJ1ZQ==' },
+      [
+        outcome(
+          'Qrp1D37e3eJoM8aFgtRjzquiNWUK7ozuD7NWbT5VU9CB',
+          FIXTURE_CONTRACT_ID,
+          { SuccessReceiptId: 'mFKZN7J5w4zHhwoKoRkFqTAnXAfBEVniHNfaJPo3rLBa' },
+          [
+            'J8PCKHbKaU24uaTB7PoYM5K5MTqDg8FJcLBmTXAerBnb',
+            'mFKZN7J5w4zHhwoKoRkFqTAnXAfBEVniHNfaJPo3rLBa',
+          ],
+          [
+            eventJson('payout_requested', {
+              operation_id: 9,
+              event_id: 7,
+              amount: parseNear('4.5'),
+            }),
+          ],
+        ),
+        outcome('J8PCKHbKaU24uaTB7PoYM5K5MTqDg8FJcLBmTXAerBnb', ORGANIZER, { SuccessValue: '' }),
+        outcome(
+          'mFKZN7J5w4zHhwoKoRkFqTAnXAfBEVniHNfaJPo3rLBa',
+          FIXTURE_CONTRACT_ID,
+          { SuccessValue: 'dHJ1ZQ==' },
+          ['3JfEfkgjYEmHEtctmpVrNg6FnGNtdkTsGh8JuPEoLC2B'],
+          [eventJson('payout_settled', { operation_id: 9, event_id: 7, amount: parseNear('4.5') })],
+        ),
+        outcome('3JfEfkgjYEmHEtctmpVrNg6FnGNtdkTsGh8JuPEoLC2B', ORGANIZER, GAS_REFUND),
+      ],
+    ),
+  },
+
+  /**
+   * org.testnet collects event 7, but deletes its account before the transfer runs: the transfer
+   * fails, the callback makes the 4.5 NEAR available again and returns `false`.
+   */
+  payoutTransferFailed: {
+    hash: 'xXHb577AHA1YXyzsEKTHCwpTRBB7HG6V42TuhwzAzXY',
+    signerId: ORGANIZER,
+    failedReceiptId: 'C2NdT9VcAzT1XB1f7sUqbwuUMi5A9Z2CtGKctCjwLynb',
+    status: recordedStatus(
+      'xXHb577AHA1YXyzsEKTHCwpTRBB7HG6V42TuhwzAzXY',
+      ORGANIZER,
+      { method: 'claim_payout', argsBase64: btoa('{"event_id":7}'), deposit: '1', gasTgas: 100 },
+      { SuccessValue: 'ZmFsc2U=' },
+      [
+        outcome(
+          'B7aQhYmvifQQYmDD5uDCqFBWBivcKDiXVnKzTqDbaryo',
+          FIXTURE_CONTRACT_ID,
+          { SuccessReceiptId: 'EM8ZAxeZcCztBUeVEFDfZKAo92mmreEef76Wv4thnzpF' },
+          [
+            'C2NdT9VcAzT1XB1f7sUqbwuUMi5A9Z2CtGKctCjwLynb',
+            'EM8ZAxeZcCztBUeVEFDfZKAo92mmreEef76Wv4thnzpF',
+          ],
+          [
+            eventJson('payout_requested', {
+              operation_id: 10,
+              event_id: 7,
+              amount: parseNear('4.5'),
+            }),
+          ],
+        ),
+        outcome(
+          'C2NdT9VcAzT1XB1f7sUqbwuUMi5A9Z2CtGKctCjwLynb',
+          ORGANIZER,
+          {
+            Failure: {
+              ActionError: { index: 0, kind: { AccountDoesNotExist: { account_id: ORGANIZER } } },
+            },
+          },
+          ['H7F4QSXhZ2gRQMPkGgpC79xtkr3kDMeGpCDvy6pbhmXm'],
+        ),
+        outcome(
+          'EM8ZAxeZcCztBUeVEFDfZKAo92mmreEef76Wv4thnzpF',
+          FIXTURE_CONTRACT_ID,
+          { SuccessValue: 'ZmFsc2U=' },
+          [],
+          [eventJson('payout_failed', { operation_id: 10, event_id: 7, amount: parseNear('4.5') })],
+        ),
+        // The failed transfer's deposit comes back to the contract in a later receipt.
+        outcome('H7F4QSXhZ2gRQMPkGgpC79xtkr3kDMeGpCDvy6pbhmXm', FIXTURE_CONTRACT_ID, GAS_REFUND),
+      ],
+    ),
+  },
+
+  /**
+   * org.testnet collects event 7: the transfer succeeds, the callback runs out of gas, so the
+   * contract still shows the payout in flight.
+   */
+  payoutCallbackFailed: {
+    hash: 'YNfotakvYX3WXn4BxwhsdKZ4SDuscupkraV53it4dfQ',
+    signerId: ORGANIZER,
+    failedReceiptId: 'GBXQMzsDkK29gssNKbB9DF3tJYDCvFgE7NhDKgrGqG19',
+    status: recordedStatus(
+      'YNfotakvYX3WXn4BxwhsdKZ4SDuscupkraV53it4dfQ',
+      ORGANIZER,
+      { method: 'claim_payout', argsBase64: btoa('{"event_id":7}'), deposit: '1', gasTgas: 100 },
+      OUT_OF_GAS,
+      [
+        outcome(
+          '7nZqrEh6k7V2pbVFyoEb1EeifT5Eiz4aZx1N85E7gDE2',
+          FIXTURE_CONTRACT_ID,
+          { SuccessReceiptId: 'GBXQMzsDkK29gssNKbB9DF3tJYDCvFgE7NhDKgrGqG19' },
+          [
+            '2LbxrV1Y2WJWANY1eRxexAMHYnQ1vWAULVCp4NQG35VW',
+            'GBXQMzsDkK29gssNKbB9DF3tJYDCvFgE7NhDKgrGqG19',
+          ],
+          [
+            eventJson('payout_requested', {
+              operation_id: 11,
+              event_id: 7,
+              amount: parseNear('4.5'),
+            }),
+          ],
+        ),
+        outcome('2LbxrV1Y2WJWANY1eRxexAMHYnQ1vWAULVCp4NQG35VW', ORGANIZER, { SuccessValue: '' }),
+        outcome('GBXQMzsDkK29gssNKbB9DF3tJYDCvFgE7NhDKgrGqG19', FIXTURE_CONTRACT_ID, OUT_OF_GAS, [
+          '54QJTq5wiaMHUZJqpDe2DU2z9yTRyghX2k2FrWUNLqWf',
+        ]),
+        outcome('54QJTq5wiaMHUZJqpDe2DU2z9yTRyghX2k2FrWUNLqWf', ORGANIZER, GAS_REFUND),
       ],
     ),
   },

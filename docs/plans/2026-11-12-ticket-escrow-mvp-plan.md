@@ -517,31 +517,31 @@ Needs Walter's go for three things: installing the Rust toolchain in his WSL, cr
 
 **Files:** `web/src/{main,App}.tsx`, `web/src/lib/near/{connector,useWallet,useTx}.ts`, `web/src/features/events/*`, `web/src/styles/*`, tests beside the code.
 
-- [ ] Failing tests (Testing Library, fixture mode): `/` lists the fixture events with price, verifier and phase; `/events/1` shows price, the reserved amount, "Confirmed by" account or "Awaiting verifier", start, end, deadline in the viewer's time zone with the UTC offset written out (`docs/decisions/2026-11-12-times-shown-in-the-viewers-zone.md`) and the promise text; the buy button reads "Buy for 1.5 NEAR" and is disabled with the reason outside `OnSale`; a rejected wallet popup leaves the page unchanged with a dismissible notice.
-- [ ] Implement the shell (header with account, network badge "testnet"), the wallet hook, the transaction hook built on `trackTransaction`, the two routes.
-- [ ] Run lint, typecheck, test, build. Expected: green. Commit `feat(web): event pages and ticket purchase`, tick, push.
+- [x] Failing tests (Testing Library, fixture mode): `/` lists the fixture events with price, verifier and phase; `/events/1` shows price, the reserved amount, "Confirmed by" account or "Awaiting verifier", start, end, deadline in the viewer's time zone with the UTC offset written out (`docs/decisions/2026-11-12-times-shown-in-the-viewers-zone.md`) and the promise text; the buy button reads "Buy for 1.5 NEAR" and is disabled with the reason outside `OnSale`; a rejected wallet popup leaves the page unchanged with a dismissible notice.
+- [x] Implement the shell (header with account, network badge "testnet"), the wallet hook, the transaction hook built on `trackTransaction`, the two routes.
+- [x] Run lint, typecheck, test, build. Expected: green. Commit `feat(web): event pages and ticket purchase`, tick, push.
 
 ### Task W2: my tickets, ticket page, transfer, refund
 
 **Files:** `web/src/features/tickets/*`.
 
-- [ ] Failing tests: `/tickets` shows each ticket with holder, principal and claim word; `/tickets/1-3` shows the history list and the reserved amount; transfer form shows the full destination account and the sentence "You will lose the right to the refund", and is disabled after the start; the claim button reads "Claim 1.5 NEAR to <account>" only when `claim` is `Refundable`, or when `claim` is `Reserved` and the event's `phase` is `Expirable` (then the page also says "The deadline passed without confirmation"; `docs/decisions/2026-11-12-claim-shown-when-event-is-expirable.md`); Review Focus 1: with a recorded outcome whose callback receipt failed, the page shows "The payment did not complete" with the failed step and never "Refunded"; with `RefundPending` it shows "Sending" and no second button.
-- [ ] Implement. Run. Expected: green. Commit `feat(web): tickets, transfers and refund claims with honest pending states`, tick, push.
+- [x] Failing tests: `/tickets` shows each ticket with holder, principal and claim word; `/tickets/1-3` shows the history list and the reserved amount; transfer form shows the full destination account and the sentence "You will lose the right to the refund", and is disabled after the start; the claim button reads "Claim 1.5 NEAR to <account>" only when `claim` is `Refundable`, or when `claim` is `Reserved` and the event's `phase` is `Expirable` (then the page also says "The deadline passed without confirmation"; `docs/decisions/2026-11-12-claim-shown-when-event-is-expirable.md`); Review Focus 1: with a recorded outcome whose callback receipt failed, the page shows "The payment did not complete" with the failed step and never "Refunded"; with `RefundPending` it shows "Sending" and no second button.
+- [x] Implement. Run. Expected: green. Commit `feat(web): tickets, transfers and refund claims with honest pending states`, tick, push.
 
 ### Task W3: organizer and verifier
 
 **Files:** `web/src/features/organizer/*`, `web/src/features/verify/*`.
 
-- [ ] Failing tests: `/organizer` form validates the terms client-side with the contract's limits, shows the storage budget from `quoteEventBudget`, and the three sentences the organizer must see (no payout before confirmation; no confirmation by the deadline means refunds; the budget is not ticket money); `/verify/1` shows the terms and enables "Accept", "Confirm the event took place" or "Declare cancelled" only for the verifier account and only in their windows, with the reason otherwise; organizer payout button "Collect 4.5 NEAR" only when `organizer_available` is above zero.
-- [ ] Implement. Run. Expected: green. Commit `feat(web): organizer and verifier flows`, tick, push.
+- [x] Failing tests: `/organizer` form validates the terms client-side with the contract's limits, shows the storage budget from `quoteEventBudget`, and the three sentences the organizer must see (no payout before confirmation; no confirmation by the deadline means refunds; the budget is not ticket money); `/verify/1` shows the terms and enables "Accept", "Confirm the event took place" or "Declare cancelled" only for the verifier account and only in their windows, with the reason otherwise; organizer payout button "Collect 4.5 NEAR" only when `organizer_available` is above zero.
+- [x] Implement. Run. Expected: green. Commit `feat(web): organizer and verifier flows`, tick, push.
 
 ### Task W4: proof page and state sweep
 
 **Files:** `web/src/features/proof/*`.
 
-- [ ] Failing tests: `/proof` shows the contract account, code hash, number of access keys ("0 keys: nobody can change this contract" or "N keys: this deployment can still be changed"), contract balance, the sum of reserved principal from `get_accounting` over all events, the block height of the read, and links to the explorer; with the RPC failing it shows "Could not read the chain" and no stale numbers.
-- [ ] Implement, then sweep every route for loading, empty and error states, keyboard reach, focus, 375 px, and console errors.
-- [ ] Run. Expected: green. Commit `feat(web): proof page and complete states`, tick, push. End the report with `STATUS: DONE`.
+- [x] Failing tests: `/proof` shows the contract account, code hash, number of access keys ("0 keys: nobody can change this contract" or "N keys: this deployment can still be changed"), contract balance, the sum of reserved principal from `get_accounting` over all events, the block height of the read, and links to the explorer; with the RPC failing it shows "Could not read the chain" and no stale numbers.
+- [x] Implement, then sweep every route for loading, empty and error states, keyboard reach, focus, 375 px, and console errors.
+- [x] Run. Expected: green. Commit `feat(web): proof page and complete states`, tick, push. End the report with `STATUS: DONE`.
 
 ---
 

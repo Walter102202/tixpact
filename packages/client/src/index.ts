@@ -27,9 +27,11 @@ export type {
   ViewAccountParams,
 } from './reader.js';
 export { createReader, createRpc } from './reader.js';
+export { canClaimRefund } from './rules.js';
 export * from './schemas.js';
 export type {
   FailedReceipt,
+  FailedStep,
   ReadUntilChangedOptions,
   TrackOptions,
   TxResult,

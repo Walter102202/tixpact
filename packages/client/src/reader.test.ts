@@ -1,6 +1,7 @@
-import { FailoverRpcProvider } from 'near-api-js';
+import { FailoverRpcError, FailoverRpcProvider } from 'near-api-js';
+import { AccountDoesNotExistError } from 'near-api-js/rpc-errors';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { FIXTURES } from './fixtures.js';
+import { createFixtureReader, FIXTURES } from './fixtures.js';
 import { createReader, createRpc, type ReaderRpc } from './reader.js';
 import type { TxStatusRpc } from './tx.js';
 
@@ -134,6 +135,48 @@ describe('createReader', () => {
     const { rpc } = fakeRpc({}, [{ keys: [] }]);
     const reader = createReader({ contractId: CONTRACT, rpc });
     expect((await reader.getAccountProof(CONTRACT)).accessKeys).toBe(0);
+  });
+});
+
+describe('accountExists', () => {
+  const missing = () => new AccountDoesNotExistError('teatro-typo.testnet', 'x', 190_000_123);
+  const readerWith = (viewAccount: ReaderRpc['viewAccount']) => {
+    const { rpc } = fakeRpc({});
+    return createReader({ contractId: CONTRACT, rpc: { ...rpc, viewAccount } });
+  };
+
+  it('is true for an account the node shows, read at final finality', async () => {
+    const { rpc, calls } = fakeRpc({});
+    const reader = createReader({ contractId: CONTRACT, rpc });
+    expect(await reader.accountExists?.('teatro.testnet')).toBe(true);
+    expect(calls).toEqual([
+      { kind: 'viewAccount', params: { accountId: 'teatro.testnet', blockQuery: FINAL } },
+    ]);
+  });
+
+  it('is false when the node says the account does not exist', async () => {
+    const reader = readerWith(() => Promise.reject(missing()));
+    expect(await reader.accountExists?.('teatro-typo.testnet')).toBe(false);
+  });
+
+  it('is false when one endpoint of the failover says so and another timed out', async () => {
+    const failed = new FailoverRpcError(2, [new Error('timed out'), missing()]);
+    const reader = readerWith(() => Promise.reject(failed));
+    expect(await reader.accountExists?.('teatro-typo.testnet')).toBe(false);
+  });
+
+  it('throws when no endpoint answered, so a caller never reads "missing" from an outage', async () => {
+    const failed = new FailoverRpcError(2, [new Error('timed out'), new Error('fetch failed')]);
+    const reader = readerWith(() => Promise.reject(failed));
+    await expect(reader.accountExists?.('teatro.testnet')).rejects.toBe(failed);
+  });
+
+  it('knows the fixture accounts in fixture mode', async () => {
+    const reader = createFixtureReader();
+    for (const id of ['org.testnet', 'teatro.testnet', 'luis.testnet', 'ana.testnet', CONTRACT]) {
+      expect(await reader.accountExists?.(id), id).toBe(true);
+    }
+    expect(await reader.accountExists?.('teatro-typo.testnet')).toBe(false);
   });
 });
 
