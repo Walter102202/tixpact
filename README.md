@@ -1,12 +1,12 @@
 # Ticket Escrow on NEAR
 
-Event tickets whose price stays reserved in a NEAR contract until a verifier agreed in advance confirms the event took place; only then can the organizer collect it. If the event is cancelled, or the deadline passes and nobody confirmed it, whoever holds the ticket takes the money back without needing the organizer, the ticketing site or us. Each ticket is an NFT, so the refund right travels with it.
+Event tickets whose price stays reserved in a NEAR contract until a verifier agreed in advance confirms the event took place; only then can the organizer collect it. If the event is cancelled, or the deadline passes and nobody confirmed it, whoever holds the ticket takes the money back without needing the organizer, the ticketing site or us. Each ticket is an NFT, so the refund right travels with it. The same ticket opens the door: its holder signs a five-minute entry pass with their wallet, and the attendant's page checks it against the chain.
 
 Why NEAR: the verifier is an account name a buyer can read before paying, the contract's keys can be deleted so that nobody can change it afterwards, and fees are low enough for each holder to claim their own refund ([more](#what-near-does-here)).
 
 Built at NEAR HACKATHON 2026. It runs on **testnet**, it is **not audited**, and it must not hold real money. The web app carries a working name, TixPact.
 
-**Status on 2026-11-13.** The contract named below holds the released build. It still has one access key, and the proof page and `scripts/verify-deployment.mjs` say so; deleting that key is the last step before the submission. Every contract call here was signed from scripts, the command line and the agent; the web app reads this contract, and signing from a browser wallet has not been walked through yet.
+**Status on 2026-11-13.** The contract named below holds the released build. It still has one access key, and the proof page and `scripts/verify-deployment.mjs` say so; deleting that key is the last step before the submission. Every contract call here was signed from scripts, the command line and the agent; the web app reads this contract, and signing from a browser wallet has not been walked through yet. The entry pass was signed with the NEAR CLI and admitted by the door page reading this contract ([output](docs/proof-entry-pass.md)); signing one from a browser wallet, and scanning it with a phone's camera, have not been walked through either.
 
 | | |
 |---|---|
@@ -81,7 +81,14 @@ Each step says what to do and what you should see.
    CONTRACT_ID=ticket-escrow.testnet pnpm --filter @ticket-escrow/mcp smoke
    ```
 
-   You should see `Tools (10): list_events, get_event, ...`, the events, the contract's code hash and balance next to what it owes, and `Smoke passed.` It runs without a key, so nothing is signed. To connect Claude Code, or to let the agent buy within a cap, see [`docs/mcp.md`](docs/mcp.md).
+   You should see `Tools (11): list_events, get_event, ...`, the events, the contract's code hash and balance next to what it owes, and `Smoke passed.` It runs without a key, so nothing is signed. To connect Claude Code, or to let the agent buy within a cap, see [`docs/mcp.md`](docs/mcp.md).
+7. **Show a ticket at the door.** Start the web app on its built-in demo data:
+
+   ```bash
+   VITE_FIXTURES=1 pnpm --filter @ticket-escrow/web dev
+   ```
+
+   In the banner, pick the demo account `ana.testnet`. Open `/tickets/1-1` and press **Show entry pass**: you should see a QR code and a countdown that starts just under five minutes (`Admits for 4:58`). Follow **Open the door check in a new tab**: you should see `Demo: would admit`, the five checks marked `ok` and the time of the check. Press **Check again**: `Demo: would not admit`, with `Already admitted on this device at ...` under it. The same check on the real contract, from the command line, is in [`docs/proof-entry-pass.md`](docs/proof-entry-pass.md), with a pass you can check again yourself.
 
 ## Claims and where each is proven
 
@@ -108,6 +115,7 @@ Tests are sandbox tests in [`contract/tests/`](contract/tests/), one function pe
 | A verifier who lies is believed. This is a limit, stated and tested. | `t21_false_attestation_is_a_trust_limit` | |
 | The verifier can be a group: one member alone neither accepts the terms nor confirms the event. | `scripts/group-verifier.sh` | [`docs/proof-group-verifier.md`](docs/proof-group-verifier.md) |
 | The ticket is a standard NFT that wallets and explorers understand. | `t22_standard_token_surface` | |
+| An entry pass admits only the account that holds the ticket now, for five minutes; a changed, replayed or forged pass, a refunded ticket and a ticket given away after signing are refused. | `packages/client/src/pass.test.ts` | [`docs/proof-entry-pass.md`](docs/proof-entry-pass.md) |
 | The whole flow works from the command line alone. | `scripts/direct-calls.sh` | |
 | The deployed contract is not a test build, holds at least what it owes, and its access keys are counted from the chain (zero once the last key is deleted). | `scripts/verify-deployment.mjs` | |
 | An agent cannot spend above its caps or call anything else. | `mcp/src/policy.test.ts`, `mcp/src/tools.test.ts` | [`docs/mcp.md`](docs/mcp.md#verification) |
@@ -115,7 +123,8 @@ Tests are sandbox tests in [`contract/tests/`](contract/tests/), one function pe
 ## What NEAR does here
 
 - **Named accounts with removable keys.** The verifier is an account name a buyer can read before paying. The contract account's keys are deleted at the end, after which nobody, including us, can change the code or move its balance.
-- **An account can be a group.** The verifier is any account, and on NEAR an account can be a Sputnik DAO whose calls are decided by votes. On testnet an event was accepted, and later confirmed, only when two of three members had voted, with no change to this contract ([proof](docs/proof-group-verifier.md)).
+- **An account can be a group.** The verifier is any account, and on NEAR an account can be a Sputnik DAO whose calls are decided by votes. On testnet an event was accepted, and later confirmed, only when two of three members had voted, with no change to this contract ([proof](docs/proof-group-verifier.md)). The event page reads the DAO's rules from the chain and says so next to the verifier: "a group of 3; its rules now: 2 must agree", with the members' names.
+- **Messages signed by the wallet (NEP-413).** An entry pass is a message the holder's wallet signs: no transaction and no fee. The door verifies the signature and reads three facts from the chain at that moment: the key is a full-access key of the account, the account holds the ticket, and the ticket was not refunded.
 - **Asynchronous payments handled as such.** On NEAR a transfer runs in a later block and can fail on its own. Every payment here debits the right first, records a pending operation, and settles it in a private callback: confirmed on success, restored on failure, never retried blindly.
 - **The NFT standards (NEP-171, 177, 181).** The ticket's ownership record is the standard one, and it is the only one: the refund cannot follow a stale copy.
 - **Storage staking.** State costs balance, so the organizer prepays a measured budget for the whole event and ticket money is never used for it.
@@ -123,9 +132,28 @@ Tests are sandbox tests in [`contract/tests/`](contract/tests/), one function pe
 - **Low fees.** Each holder pays the fee of their own claim (measured per method in [`docs/gas.md`](docs/gas.md)), which is what makes "no operator, no batch payout" practical.
 - **A sandbox that controls time and state.** The tests move the clock past deadlines, delete accounts in the middle of a payment and force a balance shortfall.
 
+## The ticket at the door
+
+The ticket that holds the refund right is also what gets its holder in.
+
+- **The holder** opens `/tickets/<id>/pass` and their wallet signs a short message: the contract, the ticket and the time. Nothing is sent to the chain. The page shows it as a QR code that admits for five minutes.
+- **The attendant** opens `/door` on their own device and scans the code, or pastes the pass. The page answers **Admit** or **Do not admit** and lists five checks:
+
+| Check | What must be true |
+|---|---|
+| `signature` | The pass names this contract and the signature is the wallet's. |
+| `key` | The signing key is a full-access key of the account, read from the chain now. |
+| `holder` | That account holds the ticket now. |
+| `ticket` | The ticket is active and was not refunded. |
+| `fresh` | It was signed less than five minutes ago. |
+
+A ticket given away after the pass was signed, a refunded ticket and an old screenshot do not admit. The device remembers the tickets it admitted, so the same ticket shown twice is refused the second time on that device.
+
+There is no server: the same check runs from the command line (`node scripts/pass.mjs verify '<pass>'`), and the agent signs a pass for a ticket it holds (`show_entry_pass`). What a pass does not stop, starting with a link shared with a friend at another door, is in the [threat model](docs/threat-model.md#entry-pass).
+
 ## An agent that buys and claims for you
 
-[`mcp/`](mcp/) is a local MCP server: an AI agent with its own testnet account reads events and tickets, buys, gives tickets away, and claims refunds. Guide and real output: [`docs/mcp.md`](docs/mcp.md).
+[`mcp/`](mcp/) is a local MCP server: an AI agent with its own testnet account reads events and tickets, buys, gives tickets away, claims refunds, and signs the entry pass of a ticket it holds. Guide and real output: [`docs/mcp.md`](docs/mcp.md).
 
 - **Caps checked before anything is signed.** A price cap per ticket and a cap on the money it has in tickets at one time. It can call one contract and four methods, and nothing else. `mcp/src/policy.test.ts`
 - **It cannot do what the contract forbids.** It cannot confirm an event or claim a ticket it does not hold; the contract's rules apply to it as to anyone.
@@ -154,7 +182,8 @@ Nothing in the product is decided by an AI or by a server of ours. There is no b
 5. **The refund is the same amount of NEAR, not the same value** in any currency.
 6. **The whole price is locked**, so an organizer cannot fund the event with ticket sales.
 7. **Not audited, testnet only.** A bug cannot be patched: a new version is a new deployment. The build is not reproducible: the deployed code hash is public and equals what our machine builds from this source (`scripts/verify-deployment.mjs --wasm <file>` compares them), but another machine produces different bytes. Our CI runner prints the hash of its own build, and it is a different one.
-8. **Out of scope:** entry at the door, proof of attendance, paid resale, identity.
+8. **An entry pass proves a key, not a person.** Whoever holds the unlocked wallet is admitted. A pass shared within its five minutes admits at any device that has not seen the ticket: duplicates are caught per device, because there is no server to share the record. The attendant must open the door page from their own bookmark; a link the holder shows could lead to a copy that admits anyone. The page's own camera scanner appears only in browsers that have `BarcodeDetector`, and has not been tried on a physical phone; elsewhere the attendant pastes the pass.
+9. **Out of scope:** proof of attendance, paid resale, identity.
 
 The full list is in the [threat model](docs/threat-model.md#limits).
 
@@ -164,12 +193,14 @@ The full list is in the [threat model](docs/threat-model.md#limits).
 contract/          Rust contract (near-sdk 5.30.1): events, tickets, per-event ledger, settlement
 contract/tests/    Sandbox tests t01...t24 against a local node (t20 and t23 are the two scripts: direct-calls.sh, verify-deployment.mjs)
 fixtures/          Hostile test contracts: a holder that deletes itself, a ticket receiver that misbehaves in several ways
-packages/client/   TypeScript: typed views and calls, transaction tracking, the words shown to people
-web/               React app (Vite): events, tickets, transfers, claims, an organizer and verifier desk, the proof page
+packages/client/   TypeScript: typed views and calls, transaction tracking, the words shown to people, the entry pass
+web/               React app (Vite): events, tickets, transfers, claims, an organizer and verifier desk, the proof page,
+                   the entry pass and the door page
 mcp/               MCP server: an agent with its own account and a spending cap
 scripts/           gate.sh (all checks), demo-scenario.mjs (writes docs/proof.md), direct-calls.sh, verify-deployment.mjs,
                    demo-event.sh (one event with a deadline minutes away, to play the refund from the web app),
-                   group-verifier.sh (an event whose verifier is a DAO: two of three must vote)
+                   group-verifier.sh (an event whose verifier is a DAO: two of three must vote),
+                   pass.mjs (make an entry pass with the NEAR CLI and check one, without the website)
 docs/              design, threat model, proof, gas, the agent guide, toolchain, one file per decision
 ```
 
@@ -237,7 +268,7 @@ near contract call-function as-read-only ticket-escrow.testnet list_events json-
 
 - **AI.** The code, tests and documents were written with Claude Code (Anthropic) working as a small team of agents under Walter Guzmán's direction: one integrator session, one session per track, and a separate reviewer session before each merge. Every review finding was checked against the code before it was applied. No AI runs inside the product.
 - **Contract.** `near-sdk` and `near-contract-standards` 5.30.1. Tests: `near-sandbox`, `near-api`, `cargo-near-build`, `tokio`, `testresult`.
-- **Web and client.** React, Vite, `near-api-js`, `@hot-labs/near-connect`, Zod. Tests: Vitest, Testing Library, jsdom. Lint and format: Biome.
+- **Web and client.** React, Vite, `near-api-js`, `@hot-labs/near-connect`, Zod; for the entry pass, `@noble/curves` and `@noble/hashes` (strict Ed25519 and SHA-256) and `uqr` (the QR code). Tests: Vitest, Testing Library, jsdom. Lint and format: Biome.
 - **Agent.** `@modelcontextprotocol/sdk`.
 - **Services.** Public testnet RPC endpoints (FastNEAR, dRPC), the testnet faucet, the NearBlocks explorer for links.
 
