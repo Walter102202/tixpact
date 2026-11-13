@@ -1,4 +1,5 @@
-# CI gates for every push and pull request. Three parallel jobs; all three must pass before a merge.
+# CI gates for every push and pull request. Every job must pass before a merge.
+# The contract job (build, clippy, sandbox tests) is added in the commit that adds the contract crate.
 name: CI
 
 on:
@@ -16,24 +17,6 @@ permissions:
   contents: read
 
 jobs:
-  contract:
-    name: contract (build, clippy, sandbox tests)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      # rustup reads rust-toolchain.toml and installs the pinned toolchain, components and target.
-      - run: rustup show
-      - uses: Swatinem/rust-cache@v2
-      - name: Install cargo-near
-        env:
-          CARGO_NEAR_VERSION: 0.23.0
-        run: |
-          curl --proto '=https' --tlsv1.2 -LsSf \
-            "https://github.com/near/cargo-near/releases/download/cargo-near-v${CARGO_NEAR_VERSION}/cargo-near-installer.sh" | sh
-          cargo near --version
-      - run: bash scripts/gate.sh contract
-
   web:
     name: web (lint, typecheck, test, build)
     runs-on: ubuntu-latest

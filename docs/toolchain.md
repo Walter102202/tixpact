@@ -30,7 +30,7 @@ The exact, verified commands for building and testing this repository. Everythin
   Created by the integrator with `git worktree add .claude/worktrees/<letter> -b track/<letter> main`, followed by `pnpm install --frozen-lockfile` inside it.
 - Git commands run with Windows Git (Git Bash or PowerShell), never from inside WSL: a worktree's `.git` file holds a Windows path.
 - Nothing is removed: no worktree, branch or stash is deleted without Walter's written OK.
-- Remote: none yet. Commit locally. When the integrator announces the remote, every commit is pushed to its branch right away.
+- Remote: `origin` on GitHub (private until the submission). Every commit is pushed to its branch right away: `git push -u origin track/<letter>` the first time, `git push` afterwards. Never force-push.
 
 ## Ports
 
