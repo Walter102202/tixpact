@@ -445,7 +445,10 @@ async fn t22_standard_token_surface() -> TestResult {
         "{description}"
     );
     for field in ["media", "media_hash", "extra"] {
-        assert!(token_metadata[field].is_string(), "{field}: {token_metadata}");
+        assert!(
+            token_metadata[field].is_string(),
+            "{field}: {token_metadata}"
+        );
     }
     for field in [
         "copies",

@@ -871,7 +871,10 @@ pub fn assert_purchase_rejected(result: &ExecutionFinalResult, escrow: &AccountI
         .json()
         .expect("ft_transfer_call returns the amount used");
     assert_eq!(used, "0", "the token used nothing");
-    assert!(nep171_events(result, "nft_mint").is_empty(), "no ticket minted");
+    assert!(
+        nep171_events(result, "nft_mint").is_empty(),
+        "no ticket minted"
+    );
     assert!(events_named(result, "ticket_purchased").is_empty());
 }
 

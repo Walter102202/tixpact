@@ -1,11 +1,11 @@
-//! Stable error codes (plan, "Frozen interface", "Error codes").
+//! Stable error codes (plan, "Frozen interface (v1)", "Error codes", and the two codes v2 adds).
 //!
 //! Every panic this contract raises on purpose starts with one of these codes, followed by `: ` and
 //! one sentence. Clients match on the code, never on the sentence.
 
 use near_sdk::{NearToken, env};
 
-/// The error codes of the frozen interface, in plan order.
+/// The error codes of the frozen interface, in plan order; v2 adds the last two.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Code {
     NotFound,
@@ -29,6 +29,8 @@ pub enum Code {
     InsufficientLiquidity,
     InsufficientGas,
     ApprovalsDisabled,
+    WrongCurrency,
+    BadMessage,
 }
 
 impl Code {
@@ -56,6 +58,8 @@ impl Code {
             Self::InsufficientLiquidity => "ERR_INSUFFICIENT_LIQUIDITY",
             Self::InsufficientGas => "ERR_INSUFFICIENT_GAS",
             Self::ApprovalsDisabled => "ERR_APPROVALS_DISABLED",
+            Self::WrongCurrency => "ERR_WRONG_CURRENCY",
+            Self::BadMessage => "ERR_BAD_MESSAGE",
         }
     }
 }
@@ -120,11 +124,13 @@ mod tests {
             Code::InsufficientLiquidity,
             Code::InsufficientGas,
             Code::ApprovalsDisabled,
+            Code::WrongCurrency,
+            Code::BadMessage,
         ];
         let mut names: Vec<&str> = all.iter().map(|code| code.as_str()).collect();
         assert!(names.iter().all(|name| name.starts_with("ERR_")));
         names.sort_unstable();
         names.dedup();
-        assert_eq!(names.len(), 21);
+        assert_eq!(names.len(), 23);
     }
 }

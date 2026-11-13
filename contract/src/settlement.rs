@@ -63,7 +63,10 @@ pub struct OperationView {
     pub event_id: u32,
     pub token_id: Option<TokenId>,
     pub recipient_id: AccountId,
+    /// In the smallest unit of `currency`.
     pub amount: U128,
+    /// The event's currency: `null` for NEAR, otherwise the token account.
+    pub currency: Option<AccountId>,
     pub started_at_ms: u64,
 }
 
@@ -167,10 +170,16 @@ impl Contract {
         ticket.status = TicketStatus::RefundPending;
         ticket.pending_operation_id = Some(operation_id);
         ticket.record(HistoryKind::RefundRequested, &holder, now_ms);
+        let currency = event.currency.clone();
         self.save_ticket(&token_id, ticket);
         self.save_event(event_id, event);
         self.ensure_liquidity(amount);
-        log::settlement("refund_requested", operation_id, &operation);
+        log::settlement(
+            "refund_requested",
+            operation_id,
+            &operation,
+            currency.as_ref(),
+        );
 
         let callback = Self::ext(env::current_account_id())
             .with_static_gas(GAS_FOR_CALLBACK)
@@ -222,9 +231,15 @@ impl Contract {
         };
         let operation_id = self.open_operation(operation.clone());
         event.payout_operation_id = Some(operation_id);
+        let currency = event.currency.clone();
         self.save_event(event_id, event);
         self.ensure_liquidity(amount);
-        log::settlement("payout_requested", operation_id, &operation);
+        log::settlement(
+            "payout_requested",
+            operation_id,
+            &operation,
+            currency.as_ref(),
+        );
 
         let callback = Self::ext(env::current_account_id())
             .with_static_gas(GAS_FOR_CALLBACK)
@@ -258,13 +273,23 @@ impl Contract {
             event.ledger.settle_refund(operation.amount);
             ticket.status = TicketStatus::Refunded;
             ticket.record(HistoryKind::RefundSettled, &operation.recipient_id, now_ms);
-            log::settlement("refund_settled", operation_id, &operation);
+            log::settlement(
+                "refund_settled",
+                operation_id,
+                &operation,
+                event.currency.as_ref(),
+            );
         } else {
             event.ledger.restore_refund(operation.amount);
             self.total_held = add(self.total_held, operation.amount);
             ticket.status = TicketStatus::Active;
             ticket.record(HistoryKind::RefundFailed, &operation.recipient_id, now_ms);
-            log::settlement("refund_failed", operation_id, &operation);
+            log::settlement(
+                "refund_failed",
+                operation_id,
+                &operation,
+                event.currency.as_ref(),
+            );
         }
         ticket.pending_operation_id = None;
         self.save_ticket(&token_id, ticket);
@@ -291,11 +316,21 @@ impl Contract {
         let delivered = transfer.is_ok();
         if delivered {
             event.ledger.settle_payout(operation.amount);
-            log::settlement("payout_settled", operation_id, &operation);
+            log::settlement(
+                "payout_settled",
+                operation_id,
+                &operation,
+                event.currency.as_ref(),
+            );
         } else {
             event.ledger.restore_payout(operation.amount);
             self.total_held = add(self.total_held, operation.amount);
-            log::settlement("payout_failed", operation_id, &operation);
+            log::settlement(
+                "payout_failed",
+                operation_id,
+                &operation,
+                event.currency.as_ref(),
+            );
         }
         event.payout_operation_id = None;
         self.save_event(operation.event_id, event);
@@ -305,6 +340,12 @@ impl Contract {
     /// An operation in flight, or `null` once it is settled or restored.
     pub fn get_operation(&self, operation_id: u64) -> Option<OperationView> {
         let operation = self.operations.get(&operation_id)?;
+        let currency = operation
+            .event_id
+            .checked_sub(1)
+            .and_then(|index| self.events.get(index))?
+            .currency
+            .clone();
         Some(OperationView {
             operation_id,
             kind: operation.kind,
@@ -312,6 +353,7 @@ impl Contract {
             token_id: operation.token_id.clone(),
             recipient_id: operation.recipient_id.clone(),
             amount: U128(operation.amount),
+            currency,
             started_at_ms: operation.started_at_ms,
         })
     }

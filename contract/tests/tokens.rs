@@ -228,7 +228,10 @@ async fn buy_with(
 }
 
 /// The `ft_transfer` calls the escrow made in a transaction.
-async fn ft_transfers_by(escrow: &Escrow<'_>, result: &ExecutionFinalResult) -> TestResult<Vec<Call>> {
+async fn ft_transfers_by(
+    escrow: &Escrow<'_>,
+    result: &ExecutionFinalResult,
+) -> TestResult<Vec<Call>> {
     Ok(escrow
         .chain
         .calls_from(result, &escrow.id())
@@ -306,7 +309,15 @@ async fn t25_token_purchase_reserves_exact_price() -> TestResult {
     let cast = chain.cast().await?;
     let tusd = token(&chain, TUSD_ID, &[&escrow], &cast.mallory).await?;
     let funds = fund(&tusd, &cast.ana).await?;
-    let (event_id, _) = on_sale(&escrow, &cast, [600, 1_200, 1_800], 2, Some(TUSD_ID), TUSD_PRICE).await?;
+    let (event_id, _) = on_sale(
+        &escrow,
+        &cast,
+        [600, 1_200, 1_800],
+        2,
+        Some(TUSD_ID),
+        TUSD_PRICE,
+    )
+    .await?;
     let event = escrow.event(event_id).await?;
     assert_eq!(event["currency"], TUSD_ID);
     assert_eq!(event["price"], TUSD_PRICE.to_string());
@@ -317,7 +328,11 @@ async fn t25_token_purchase_reserves_exact_price() -> TestResult {
             .transfer_call(&cast.ana, &escrow.id(), wrong, &purchase_msg(event_id))
             .await?;
         assert_purchase_rejected(&result, &escrow.id(), "ERR_WRONG_DEPOSIT");
-        assert_eq!(tusd.balance_of(&cast.ana.0).await?, funds, "{wrong}: all back");
+        assert_eq!(
+            tusd.balance_of(&cast.ana.0).await?,
+            funds,
+            "{wrong}: all back"
+        );
         assert_eq!(tusd.balance_of(&escrow.id()).await?, 0);
     }
     assert_eq!(supply(&escrow).await?, 0, "no ticket");
@@ -352,7 +367,10 @@ async fn t25_token_purchase_reserves_exact_price() -> TestResult {
     assert_eq!(tusd.balance_of(&cast.ana.0).await?, funds - TUSD_PRICE);
     assert_eq!(tusd.balance_of(&escrow.id()).await?, TUSD_PRICE);
     let near_spent = near_before - chain.balance(&cast.ana.0).await?;
-    assert!(near_spent < GAS_FEE_BOUND, "Ana paid only gas in NEAR: {near_spent}");
+    assert!(
+        near_spent < GAS_FEE_BOUND,
+        "Ana paid only gas in NEAR: {near_spent}"
+    );
 
     let ticket = escrow.ticket(&token_id).await?;
     assert_eq!(ticket["owner_id"], cast.ana.0.as_str());
@@ -382,14 +400,26 @@ async fn rejected_token_purchases_return_every_token() -> TestResult {
     let times = chain.times_from_now([600, 1_200, 1_800]).await?;
     let terms = priced_terms(&cast.verifier, times, 1, Some(TUSD_ID), TUSD_PRICE);
     let unaccepted = escrow.create_event(&cast.organizer, terms).await?;
-    let (one_seat, _) = on_sale(&escrow, &cast, [600, 1_200, 1_800], 1, Some(TUSD_ID), TUSD_PRICE).await?;
-    let (soon, soon_times) = on_sale(&escrow, &cast, [30, 60, 600], 3, Some(TUSD_ID), TUSD_PRICE).await?;
+    let (one_seat, _) = on_sale(
+        &escrow,
+        &cast,
+        [600, 1_200, 1_800],
+        1,
+        Some(TUSD_ID),
+        TUSD_PRICE,
+    )
+    .await?;
+    let (soon, soon_times) =
+        on_sale(&escrow, &cast, [30, 60, 600], 3, Some(TUSD_ID), TUSD_PRICE).await?;
 
     let attempt = |msg: String| {
         let tusd = &tusd;
         let escrow = &escrow;
         let ana = &cast.ana;
-        async move { tusd.transfer_call(ana, &escrow.id(), TUSD_PRICE, &msg).await }
+        async move {
+            tusd.transfer_call(ana, &escrow.id(), TUSD_PRICE, &msg)
+                .await
+        }
     };
     let mut cases: Vec<(String, &str)> = vec![
         ("not json".to_string(), "ERR_BAD_MESSAGE"),
@@ -402,7 +432,11 @@ async fn rejected_token_purchases_return_every_token() -> TestResult {
     for (msg, code) in cases.drain(..) {
         let result = attempt(msg.clone()).await?;
         assert_purchase_rejected(&result, &escrow.id(), code);
-        assert_eq!(tusd.balance_of(&cast.ana.0).await?, funds, "{msg}: all back");
+        assert_eq!(
+            tusd.balance_of(&cast.ana.0).await?,
+            funds,
+            "{msg}: all back"
+        );
     }
 
     // Sold out.
@@ -444,12 +478,26 @@ async fn t26_only_the_event_currency_buys() -> TestResult {
     let terms = priced_terms(&cast.verifier, times, 3, Some(UNLISTED_ID), TUSD_PRICE);
     let deposit = NearToken::from_yoctonear(escrow.quote(3).await?);
     let result = escrow
-        .call(&cast.organizer, "create_event", json!({ "terms": terms }), deposit, 100)
+        .call(
+            &cast.organizer,
+            "create_event",
+            json!({ "terms": terms }),
+            deposit,
+            100,
+        )
         .await?;
     assert_fails_with(&result, "ERR_INVALID_TERMS");
     assert_eq!(escrow.event(1).await?, Value::Null, "no event was created");
 
-    let (usd_event, _) = on_sale(&escrow, &cast, [600, 1_200, 1_800], 3, Some(TUSD_ID), TUSD_PRICE).await?;
+    let (usd_event, _) = on_sale(
+        &escrow,
+        &cast,
+        [600, 1_200, 1_800],
+        3,
+        Some(TUSD_ID),
+        TUSD_PRICE,
+    )
+    .await?;
     let (near_event, _) = on_sale(&escrow, &cast, [600, 1_200, 1_800], 3, None, PRICE).await?;
     let to_usd = purchase_msg(usd_event);
     let to_near = purchase_msg(near_event);
@@ -461,7 +509,13 @@ async fn t26_only_the_event_currency_buys() -> TestResult {
     assert_purchase_rejected(&result, &escrow.id(), "ERR_WRONG_CURRENCY");
     assert_eq!(teur.balance_of(&cast.ana.0).await?, eur_funds);
     let result = hostile
-        .forge_on_transfer(&cast.mallory, &escrow.id(), &cast.mallory.0, TUSD_PRICE, &to_usd)
+        .forge_on_transfer(
+            &cast.mallory,
+            &escrow.id(),
+            &cast.mallory.0,
+            TUSD_PRICE,
+            &to_usd,
+        )
         .await?;
     assert_fails_with(&result, "ERR_WRONG_CURRENCY");
 
@@ -472,7 +526,13 @@ async fn t26_only_the_event_currency_buys() -> TestResult {
     assert_purchase_rejected(&result, &escrow.id(), "ERR_WRONG_CURRENCY");
     assert_eq!(unlisted.balance_of(&cast.ana.0).await?, fake_funds);
     let result = unlisted
-        .forge_on_transfer(&cast.mallory, &escrow.id(), &cast.ana.0, TUSD_PRICE, &to_usd)
+        .forge_on_transfer(
+            &cast.mallory,
+            &escrow.id(),
+            &cast.ana.0,
+            TUSD_PRICE,
+            &to_usd,
+        )
         .await?;
     assert_fails_with(&result, "ERR_WRONG_CURRENCY");
 
@@ -490,7 +550,13 @@ async fn t26_only_the_event_currency_buys() -> TestResult {
         let before = chain.balance(&cast.luis.0).await?;
         let args = json!({ "event_id": usd_event });
         let result = escrow
-            .call(&cast.luis, "buy_ticket", args, NearToken::from_yoctonear(deposit), 100)
+            .call(
+                &cast.luis,
+                "buy_ticket",
+                args,
+                NearToken::from_yoctonear(deposit),
+                100,
+            )
             .await?;
         assert_fails_with(&result, "ERR_WRONG_CURRENCY");
         let spent = before - chain.balance(&cast.luis.0).await?;
@@ -505,7 +571,13 @@ async fn t26_only_the_event_currency_buys() -> TestResult {
     assert_purchase_rejected(&result, &escrow.id(), "ERR_WRONG_CURRENCY");
     assert_eq!(teur.balance_of(&cast.ana.0).await?, eur_funds);
     let result = hostile
-        .forge_on_transfer(&cast.mallory, &escrow.id(), &cast.mallory.0, PRICE, &to_near)
+        .forge_on_transfer(
+            &cast.mallory,
+            &escrow.id(),
+            &cast.mallory.0,
+            PRICE,
+            &to_near,
+        )
         .await?;
     assert_fails_with(&result, "ERR_WRONG_CURRENCY");
 
@@ -522,7 +594,10 @@ async fn t26_only_the_event_currency_buys() -> TestResult {
 
     // The event's own currency buys, on both events.
     let token_id = buy_with(&tusd, &escrow, &cast.ana, usd_event, TUSD_PRICE).await?;
-    assert_eq!(escrow.ticket(&token_id).await?["owner_id"], cast.ana.0.as_str());
+    assert_eq!(
+        escrow.ticket(&token_id).await?["owner_id"],
+        cast.ana.0.as_str()
+    );
     assert_eq!(tusd.balance_of(&cast.ana.0).await?, usd_funds - TUSD_PRICE);
     escrow.buy(&cast.luis, near_event, PRICE).await?;
     assert_eq!(supply(&escrow).await?, 2);
@@ -537,7 +612,15 @@ async fn t27_token_refund_follows_the_holder() -> TestResult {
     let tusd = token(&chain, TUSD_ID, &[&escrow], &cast.mallory).await?;
     let funds = fund(&tusd, &cast.ana).await?;
     tusd.register(&cast.luis, &cast.luis.0).await?;
-    let (event_id, _) = on_sale(&escrow, &cast, [600, 1_200, 1_800], 3, Some(TUSD_ID), TUSD_PRICE).await?;
+    let (event_id, _) = on_sale(
+        &escrow,
+        &cast,
+        [600, 1_200, 1_800],
+        3,
+        Some(TUSD_ID),
+        TUSD_PRICE,
+    )
+    .await?;
     let token_id = buy_with(&tusd, &escrow, &cast.ana, event_id, TUSD_PRICE).await?;
     escrow
         .transfer(&cast.ana, &cast.luis.0, &token_id)
@@ -546,13 +629,17 @@ async fn t27_token_refund_follows_the_holder() -> TestResult {
     escrow.cancel(&cast.organizer, event_id).await?;
 
     // Ana sold the ticket: the right went with it.
-    let result = escrow.claim_refund(&cast.ana, &token_id, CLAIM_TGAS).await?;
+    let result = escrow
+        .claim_refund(&cast.ana, &token_id, CLAIM_TGAS)
+        .await?;
     assert_fails_with(&result, "ERR_UNAUTHORIZED");
     assert!(token_moves(&result, &tusd.id).is_empty());
 
     // Luis is paid exactly the price, in the token, and no NEAR leaves the contract.
     let near_before = chain.balance(&cast.luis.0).await?;
-    let result = escrow.claim_refund(&cast.luis, &token_id, CLAIM_TGAS).await?;
+    let result = escrow
+        .claim_refund(&cast.luis, &token_id, CLAIM_TGAS)
+        .await?;
     let paid: bool = result.clone().assert_success().json()?;
     assert!(paid);
     assert_eq!(
@@ -565,7 +652,10 @@ async fn t27_token_refund_follows_the_holder() -> TestResult {
     );
     assert_one_ft_transfer(&escrow, &result, TUSD_ID, &cast.luis.0, TUSD_PRICE, true).await?;
     assert!(
-        chain.transfers_from(&result, &escrow.id()).await?.is_empty(),
+        chain
+            .transfers_from(&result, &escrow.id())
+            .await?
+            .is_empty(),
         "no NEAR transfer"
     );
     let near_after = chain.balance(&cast.luis.0).await?;
@@ -592,11 +682,18 @@ async fn t27_token_refund_follows_the_holder() -> TestResult {
     assert_eq!(amount(&accounting, "principal_reserved"), 0);
     assert_eq!(
         history_kinds(&escrow, &token_id).await?,
-        ["Purchased", "Transferred", "RefundRequested", "RefundSettled"]
+        [
+            "Purchased",
+            "Transferred",
+            "RefundRequested",
+            "RefundSettled"
+        ]
     );
 
     // Once is all.
-    let result = escrow.claim_refund(&cast.luis, &token_id, CLAIM_TGAS).await?;
+    let result = escrow
+        .claim_refund(&cast.luis, &token_id, CLAIM_TGAS)
+        .await?;
     assert_fails_with(&result, "ERR_ALREADY_REFUNDED");
     assert!(ft_transfers_by(&escrow, &result).await?.is_empty());
     assert_eq!(tusd.balance_of(&cast.luis.0).await?, TUSD_PRICE);
@@ -610,7 +707,15 @@ async fn t28_unregistered_holder_gets_the_right_back_once() -> TestResult {
     let cast = chain.cast().await?;
     let tusd = token(&chain, TUSD_ID, &[&escrow], &cast.mallory).await?;
     fund(&tusd, &cast.ana).await?;
-    let (event_id, _) = on_sale(&escrow, &cast, [600, 1_200, 1_800], 3, Some(TUSD_ID), TUSD_PRICE).await?;
+    let (event_id, _) = on_sale(
+        &escrow,
+        &cast,
+        [600, 1_200, 1_800],
+        3,
+        Some(TUSD_ID),
+        TUSD_PRICE,
+    )
+    .await?;
     let token_id = buy_with(&tusd, &escrow, &cast.ana, event_id, TUSD_PRICE).await?;
     // Luis can receive the ticket without being registered with the token.
     escrow
@@ -621,7 +726,9 @@ async fn t28_unregistered_holder_gets_the_right_back_once() -> TestResult {
     assert!(!tusd.is_registered(&cast.luis.0).await?);
 
     // The token refuses the transfer; the right comes back, once.
-    let result = escrow.claim_refund(&cast.luis, &token_id, CLAIM_TGAS).await?;
+    let result = escrow
+        .claim_refund(&cast.luis, &token_id, CLAIM_TGAS)
+        .await?;
     let paid: bool = result.clone().assert_success().json()?;
     assert!(!paid, "no money moved");
     assert_one_ft_transfer(&escrow, &result, TUSD_ID, &cast.luis.0, TUSD_PRICE, false).await?;
@@ -642,13 +749,18 @@ async fn t28_unregistered_holder_gets_the_right_back_once() -> TestResult {
     assert_eq!(amount(&accounting, "refunds_settled"), 0);
     assert_eq!(tusd.balance_of(&escrow.id()).await?, TUSD_PRICE);
     assert_eq!(
-        history_kinds(&escrow, &token_id).await?.last().map(String::as_str),
+        history_kinds(&escrow, &token_id)
+            .await?
+            .last()
+            .map(String::as_str),
         Some("RefundFailed")
     );
 
     // Registered, Luis claims again and is paid the price.
     tusd.register(&cast.luis, &cast.luis.0).await?;
-    let result = escrow.claim_refund(&cast.luis, &token_id, CLAIM_TGAS).await?;
+    let result = escrow
+        .claim_refund(&cast.luis, &token_id, CLAIM_TGAS)
+        .await?;
     let paid: bool = result.clone().assert_success().json()?;
     assert!(paid);
     assert_one_ft_transfer(&escrow, &result, TUSD_ID, &cast.luis.0, TUSD_PRICE, true).await?;
@@ -661,7 +773,9 @@ async fn t28_unregistered_holder_gets_the_right_back_once() -> TestResult {
     assert_eq!(amount(&accounting, "principal_reserved"), 0);
     assert_eq!(escrow.ticket(&token_id).await?["status"], "Refunded");
 
-    let result = escrow.claim_refund(&cast.luis, &token_id, CLAIM_TGAS).await?;
+    let result = escrow
+        .claim_refund(&cast.luis, &token_id, CLAIM_TGAS)
+        .await?;
     assert_fails_with(&result, "ERR_ALREADY_REFUNDED");
     assert_eq!(tusd.balance_of(&cast.luis.0).await?, TUSD_PRICE);
     Ok(())
@@ -680,7 +794,8 @@ async fn t29_token_payout_failure_paths() -> TestResult {
     hostile.register(&cast.organizer, &cast.organizer.0).await?;
     let host_price = 5 * HOST;
     let offsets = [60, 70, 900];
-    let (unregistered, times) = on_sale(&escrow, &cast, offsets, 2, Some(TUSD_ID), TUSD_PRICE).await?;
+    let (unregistered, times) =
+        on_sale(&escrow, &cast, offsets, 2, Some(TUSD_ID), TUSD_PRICE).await?;
     let (failing, _) = on_sale(&escrow, &cast, offsets, 2, Some(HOSTILE_ID), host_price).await?;
     let (pending, _) = on_sale(&faulty, &cast, offsets, 2, Some(TUSD_ID), TUSD_PRICE).await?;
     buy_with(&tusd, &escrow, &cast.ana, unregistered, TUSD_PRICE).await?;
@@ -750,7 +865,11 @@ async fn t29_token_payout_failure_paths() -> TestResult {
     let before = tusd.balance_of(organizer).await?;
     let result = faulty.claim_payout(&cast.organizer, pending).await?;
     assert_one_ft_transfer(&faulty, &result, TUSD_ID, organizer, TUSD_PRICE, true).await?;
-    assert_eq!(failed_receipts_on(&result, &faulty.id()), 1, "the callback failed");
+    assert_eq!(
+        failed_receipts_on(&result, &faulty.id()),
+        1,
+        "the callback failed"
+    );
     assert!(events_named(&result, "payout_settled").is_empty());
     assert!(events_named(&result, "payout_failed").is_empty());
     assert_eq!(tusd.balance_of(organizer).await? - before, TUSD_PRICE);
@@ -768,7 +887,10 @@ async fn t29_token_payout_failure_paths() -> TestResult {
     assert_eq!(operation["token_id"], Value::Null);
     let result = faulty.claim_payout(&cast.organizer, pending).await?;
     assert_fails_with(&result, "ERR_PAYOUT_PENDING");
-    assert!(ft_transfers_by(&faulty, &result).await?.is_empty(), "no second transfer");
+    assert!(
+        ft_transfers_by(&faulty, &result).await?.is_empty(),
+        "no second transfer"
+    );
     assert_eq!(tusd.balance_of(organizer).await? - before, TUSD_PRICE);
     Ok(())
 }
@@ -802,7 +924,12 @@ async fn t30_currencies_do_not_share_money() -> TestResult {
     chain.advance_to(times[1]).await?;
     escrow.attest(&cast.verifier, a).await?;
     escrow.attest(&cast.verifier, c).await?;
-    for (event_id, currency) in [(a, Value::Null), (b, json!(TEUR_ID)), (c, json!(TUSD_ID)), (d, Value::Null)] {
+    for (event_id, currency) in [
+        (a, Value::Null),
+        (b, json!(TEUR_ID)),
+        (c, json!(TUSD_ID)),
+        (d, Value::Null),
+    ] {
         assert_eq!(escrow.accounting(event_id).await?["currency"], currency);
     }
 
@@ -842,23 +969,42 @@ async fn t30_currencies_do_not_share_money() -> TestResult {
     let paid: bool = result.clone().assert_success().json()?;
     assert!(paid, "the tUSD payout");
     assert_one_ft_transfer(&escrow, &result, TUSD_ID, organizer, TUSD_PRICE, true).await?;
-    assert!(chain.transfers_from(&result, &escrow.id()).await?.is_empty());
+    assert!(
+        chain
+            .transfers_from(&result, &escrow.id())
+            .await?
+            .is_empty()
+    );
     assert_eq!(tusd.balance_of(organizer).await?, TUSD_PRICE);
 
-    for (holder, ticket, funds) in [(&cast.luis, &luis_b, luis_eur), (&cast.mallory, &mallory_b, mallory_eur)] {
+    for (holder, ticket, funds) in [
+        (&cast.luis, &luis_b, luis_eur),
+        (&cast.mallory, &mallory_b, mallory_eur),
+    ] {
         let near_before = chain.balance(&holder.0).await?;
         let result = escrow.claim_refund(holder, ticket, CLAIM_TGAS).await?;
         let paid: bool = result.clone().assert_success().json()?;
         assert!(paid, "the tEUR refund of {ticket}");
         assert_one_ft_transfer(&escrow, &result, TEUR_ID, &holder.0, PRICE, true).await?;
-        assert!(chain.transfers_from(&result, &escrow.id()).await?.is_empty());
-        assert_eq!(teur.balance_of(&holder.0).await?, funds, "{ticket}: the price came back in tEUR");
+        assert!(
+            chain
+                .transfers_from(&result, &escrow.id())
+                .await?
+                .is_empty()
+        );
+        assert_eq!(
+            teur.balance_of(&holder.0).await?,
+            funds,
+            "{ticket}: the price came back in tEUR"
+        );
         let near_after = chain.balance(&holder.0).await?;
         assert!(near_after <= near_before, "{ticket}: no NEAR was paid");
     }
 
     let before = chain.balance(&cast.mallory.0).await?;
-    let result = escrow.claim_refund(&cast.mallory, &mallory_d, CLAIM_TGAS).await?;
+    let result = escrow
+        .claim_refund(&cast.mallory, &mallory_d, CLAIM_TGAS)
+        .await?;
     let paid: bool = result.clone().assert_success().json()?;
     assert!(paid, "the NEAR refund");
     assert!(ft_transfers_by(&escrow, &result).await?.is_empty());
@@ -869,10 +1015,22 @@ async fn t30_currencies_do_not_share_money() -> TestResult {
     // Every currency is settled from its own money.
     assert_eq!(teur.balance_of(&escrow.id()).await?, 0);
     assert_eq!(tusd.balance_of(&escrow.id()).await?, 0);
-    assert_eq!(amount(&escrow.accounting(a).await?, "organizer_settled"), PRICE);
-    assert_eq!(amount(&escrow.accounting(b).await?, "refunds_settled"), 2 * PRICE);
-    assert_eq!(amount(&escrow.accounting(c).await?, "organizer_settled"), TUSD_PRICE);
-    assert_eq!(amount(&escrow.accounting(d).await?, "refunds_settled"), PRICE);
+    assert_eq!(
+        amount(&escrow.accounting(a).await?, "organizer_settled"),
+        PRICE
+    );
+    assert_eq!(
+        amount(&escrow.accounting(b).await?, "refunds_settled"),
+        2 * PRICE
+    );
+    assert_eq!(
+        amount(&escrow.accounting(c).await?, "organizer_settled"),
+        TUSD_PRICE
+    );
+    assert_eq!(
+        amount(&escrow.accounting(d).await?, "refunds_settled"),
+        PRICE
+    );
     Ok(())
 }
 
@@ -890,7 +1048,15 @@ async fn t31_a_failing_token_never_pays_twice() -> TestResult {
         .deploy_fixture("twice.sandbox", 20, vanishing_holder_wasm())
         .await?;
     hostile.register(&cast.ana, &holder.0).await?;
-    let (event_id, _) = on_sale(&escrow, &cast, [600, 1_200, 1_800], 1, Some(HOSTILE_ID), price).await?;
+    let (event_id, _) = on_sale(
+        &escrow,
+        &cast,
+        [600, 1_200, 1_800],
+        1,
+        Some(HOSTILE_ID),
+        price,
+    )
+    .await?;
     let token_id = buy_with(&hostile, &escrow, &cast.ana, event_id, price).await?;
     escrow
         .transfer(&cast.ana, &holder.0, &token_id)
@@ -899,10 +1065,25 @@ async fn t31_a_failing_token_never_pays_twice() -> TestResult {
     escrow.cancel(&cast.organizer, event_id).await?;
     let claim_twice = || {
         let args = json!({ "ticket_contract": escrow.id(), "token_id": token_id });
-        chain.call(&holder, &holder.0, "claim_twice", args, NO_DEPOSIT, FIXTURE_TGAS)
+        chain.call(
+            &holder,
+            &holder.0,
+            "claim_twice",
+            args,
+            NO_DEPOSIT,
+            FIXTURE_TGAS,
+        )
     };
+    let escrow_id = escrow.id();
     let claim_once = || {
-        forward(&chain, &holder, &escrow.id(), "claim_refund", json!({ "token_id": token_id }), ONE_YOCTO)
+        forward(
+            &chain,
+            &holder,
+            &escrow_id,
+            "claim_refund",
+            json!({ "token_id": token_id }),
+            ONE_YOCTO,
+        )
     };
     let assert_right_is_whole = |when: &'static str| {
         let escrow = &escrow;
@@ -925,7 +1106,10 @@ async fn t31_a_failing_token_never_pays_twice() -> TestResult {
     hostile.set_mode(&cast.mallory, "fail").await?;
     let result = claim_twice().await?;
     let failures = receipt_failure_texts(&result);
-    let locked = failures.iter().filter(|text| text.contains("ERR_TICKET_LOCKED")).count();
+    let locked = failures
+        .iter()
+        .filter(|text| text.contains("ERR_TICKET_LOCKED"))
+        .count();
     assert_eq!(locked, 1, "{failures:?}");
     assert_eq!(failed_receipts_on(&result, &hostile.id), 1, "{failures:?}");
     assert_eq!(ft_transfers_by(&escrow, &result).await?.len(), 1);
@@ -985,7 +1169,15 @@ async fn a_token_that_pays_but_answers_oddly_never_pays_twice() -> TestResult {
     let hostile = token(&chain, HOSTILE_ID, &[&escrow], &cast.mallory).await?;
     fund(&hostile, &cast.ana).await?;
     let price = 5 * HOST;
-    let (event_id, _) = on_sale(&escrow, &cast, [600, 1_200, 1_800], 2, Some(HOSTILE_ID), price).await?;
+    let (event_id, _) = on_sale(
+        &escrow,
+        &cast,
+        [600, 1_200, 1_800],
+        2,
+        Some(HOSTILE_ID),
+        price,
+    )
+    .await?;
     let mut statuses = Vec::new();
     for (mode, holder) in [("garbage", &cast.luis), ("long", &cast.mallory)] {
         hostile.register(holder, &holder.0).await?;
@@ -1010,14 +1202,18 @@ async fn a_token_that_pays_but_answers_oddly_never_pays_twice() -> TestResult {
             }],
             "{mode}: paid once"
         );
-        assert!(events_named(&result, "refund_failed").is_empty(), "{mode}: never restored");
+        assert!(
+            events_named(&result, "refund_failed").is_empty(),
+            "{mode}: never restored"
+        );
         let status = escrow.ticket(token_id).await?["status"].clone();
         assert!(
             status == "Refunded" || status == "RefundPending",
             "{mode}: the right came back after the payment: {status}"
         );
         let again = escrow.claim_refund(holder, token_id, CLAIM_TGAS).await?;
-        let failure = failure_text(&again).ok_or_else(|| format!("{mode}: a second claim succeeded"))?;
+        let failure =
+            failure_text(&again).ok_or_else(|| format!("{mode}: a second claim succeeded"))?;
         assert!(
             failure.contains("ERR_ALREADY_REFUNDED") || failure.contains("ERR_TICKET_LOCKED"),
             "{mode}: {failure}"
@@ -1047,7 +1243,15 @@ async fn a_token_answer_does_not_stop_the_confirmation() -> TestResult {
     let hostile = token(&chain, HOSTILE_ID, &[&escrow], &cast.mallory).await?;
     fund(&hostile, &cast.ana).await?;
     let price = 5 * HOST;
-    let (event_id, _) = on_sale(&escrow, &cast, [600, 1_200, 1_800], 2, Some(HOSTILE_ID), price).await?;
+    let (event_id, _) = on_sale(
+        &escrow,
+        &cast,
+        [600, 1_200, 1_800],
+        2,
+        Some(HOSTILE_ID),
+        price,
+    )
+    .await?;
     let tickets = [
         buy_with(&hostile, &escrow, &cast.ana, event_id, price).await?,
         buy_with(&hostile, &escrow, &cast.ana, event_id, price).await?,
@@ -1057,8 +1261,16 @@ async fn a_token_answer_does_not_stop_the_confirmation() -> TestResult {
         hostile.set_mode(&cast.mallory, mode).await?;
         let result = escrow.claim_refund(&cast.ana, token_id, CLAIM_TGAS).await?;
         assert_eq!(token_moves(&result, &hostile.id).len(), 1, "{mode}: paid");
-        assert_eq!(events_named(&result, "refund_settled").len(), 1, "{mode}: confirmed");
-        assert_eq!(escrow.ticket(token_id).await?["status"], "Refunded", "{mode}");
+        assert_eq!(
+            events_named(&result, "refund_settled").len(),
+            1,
+            "{mode}: confirmed"
+        );
+        assert_eq!(
+            escrow.ticket(token_id).await?["status"],
+            "Refunded",
+            "{mode}"
+        );
     }
     let accounting = escrow.accounting(event_id).await?;
     assert_eq!(amount(&accounting, "refunds_settled"), 2 * price);
@@ -1087,7 +1299,11 @@ async fn shown(escrow: &Escrow<'_>, token_id: &str) -> TestResult<Shown> {
         .strip_prefix("data:image/svg+xml;base64,")
         .ok_or_else(|| format!("media is not an SVG data URL: {media}"))?;
     let svg = BASE64.decode(encoded)?;
-    assert!(svg.len() <= 2048, "{token_id}: the SVG has {} bytes", svg.len());
+    assert!(
+        svg.len() <= 2048,
+        "{token_id}: the SVG has {} bytes",
+        svg.len()
+    );
     let media_hash = metadata["media_hash"].as_str().ok_or("no media_hash")?;
     assert_eq!(
         BASE64.decode(media_hash)?,
@@ -1098,7 +1314,10 @@ async fn shown(escrow: &Escrow<'_>, token_id: &str) -> TestResult<Shown> {
     assert!(svg.contains("<svg"), "{token_id}: {svg}");
     Ok(Shown {
         title: metadata["title"].as_str().unwrap_or_default().to_string(),
-        description: metadata["description"].as_str().unwrap_or_default().to_string(),
+        description: metadata["description"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
         extra: near_sdk::serde_json::from_str(extra)?,
         svg,
     })
@@ -1110,7 +1329,14 @@ fn described(serial: u32, capacity: u32, sentence: &str) -> String {
 }
 
 /// The `extra` JSON of a ticket.
-fn extra(event_id: u32, status: &str, claim: &str, outcome: &str, principal: u128, currency: Option<&str>) -> Value {
+fn extra(
+    event_id: u32,
+    status: &str,
+    claim: &str,
+    outcome: &str,
+    principal: u128,
+    currency: Option<&str>,
+) -> Value {
     json!({
         "event_id": event_id, "serial": 1, "status": status, "claim": claim, "outcome": outcome,
         "principal": principal.to_string(), "currency": currency,
@@ -1138,7 +1364,13 @@ async fn t32_metadata_follows_the_state() -> TestResult {
     let (half, _) = on_sale(&escrow, &cast, offsets, 2, None, NEAR / 2).await?;
     let (pending, _) = on_sale(&faulty, &cast, offsets, 2, Some(TEUR_ID), 2 * NEAR).await?;
     // The worst title for the drawing: 120 bytes that all need escaping in XML.
-    let mut worst = priced_terms(&cast.verifier, chain.times_from_now(offsets).await?, 2, None, NEAR + 1);
+    let mut worst = priced_terms(
+        &cast.verifier,
+        chain.times_from_now(offsets).await?,
+        2,
+        None,
+        NEAR + 1,
+    );
     worst["title"] = json!("<&>\"'\u{20}".repeat(20));
     let worst_event = escrow.create_event(&cast.organizer, worst).await?;
     escrow.accept(&cast.verifier, worst_event).await?;
@@ -1155,14 +1387,29 @@ async fn t32_metadata_follows_the_state() -> TestResult {
     assert_eq!(reserved.title, "Jazz night - ticket 1");
     assert_eq!(
         reserved.description,
-        described(1, 3, "10.5 tUSD is reserved in the contract until the event is resolved.")
+        described(
+            1,
+            3,
+            "10.5 tUSD is reserved in the contract until the event is resolved."
+        )
     );
     assert_eq!(
         reserved.extra,
-        extra(refunded, "Active", "Reserved", "Unresolved", usd_price, Some(TUSD_ID))
+        extra(
+            refunded,
+            "Active",
+            "Reserved",
+            "Unresolved",
+            usd_price,
+            Some(TUSD_ID)
+        )
     );
     for fact in ["Jazz night", "10.5 tUSD", "Reserved"] {
-        assert!(reserved.svg.contains(fact), "the drawing shows {fact}: {}", reserved.svg);
+        assert!(
+            reserved.svg.contains(fact),
+            "the drawing shows {fact}: {}",
+            reserved.svg
+        );
     }
     for (token_id, amount_text) in [
         (&tiny_ticket, "0.000001 tUSD"),
@@ -1171,12 +1418,24 @@ async fn t32_metadata_follows_the_state() -> TestResult {
         (&worst_ticket, "1.000000000000000000000001 NEAR"),
     ] {
         let ticket = shown(&escrow, token_id).await?;
-        let sentence = format!("{amount_text} is reserved in the contract until the event is resolved.");
-        assert!(ticket.description.ends_with(&sentence), "{}", ticket.description);
-        assert!(ticket.svg.contains(amount_text), "{token_id}: {}", ticket.svg);
+        let sentence =
+            format!("{amount_text} is reserved in the contract until the event is resolved.");
+        assert!(
+            ticket.description.ends_with(&sentence),
+            "{}",
+            ticket.description
+        );
+        assert!(
+            ticket.svg.contains(amount_text),
+            "{token_id}: {}",
+            ticket.svg
+        );
     }
     let worst_svg = shown(&escrow, &worst_ticket).await?.svg;
-    assert!(!worst_svg.contains("<&>"), "the title is escaped: {worst_svg}");
+    assert!(
+        !worst_svg.contains("<&>"),
+        "the title is escaped: {worst_svg}"
+    );
 
     // The enumeration views show the same metadata as `nft_token`.
     let listed: Vec<Value> = escrow
@@ -1196,11 +1455,22 @@ async fn t32_metadata_follows_the_state() -> TestResult {
     let refundable = shown(&escrow, &refunded_ticket).await?;
     assert_eq!(
         refundable.description,
-        described(1, 3, "The event was not confirmed: whoever holds this ticket can claim 10.5 tUSD.")
+        described(
+            1,
+            3,
+            "The event was not confirmed: whoever holds this ticket can claim 10.5 tUSD."
+        )
     );
     assert_eq!(
         refundable.extra,
-        extra(refunded, "Active", "Refundable", "Refundable", usd_price, Some(TUSD_ID))
+        extra(
+            refunded,
+            "Active",
+            "Refundable",
+            "Refundable",
+            usd_price,
+            Some(TUSD_ID)
+        )
     );
     assert!(refundable.svg.contains("Refundable"), "{}", refundable.svg);
     assert_ne!(refundable.svg, reserved.svg);
@@ -1217,7 +1487,14 @@ async fn t32_metadata_follows_the_state() -> TestResult {
     );
     assert_eq!(
         done.extra,
-        extra(refunded, "Refunded", "Refunded", "Refundable", usd_price, Some(TUSD_ID))
+        extra(
+            refunded,
+            "Refunded",
+            "Refunded",
+            "Refundable",
+            usd_price,
+            Some(TUSD_ID)
+        )
     );
     assert!(done.svg.contains("Refunded"), "{}", done.svg);
 
@@ -1233,9 +1510,20 @@ async fn t32_metadata_follows_the_state() -> TestResult {
     );
     assert_eq!(
         on_its_way.extra,
-        extra(pending, "RefundPending", "RefundPending", "Refundable", 2 * NEAR, Some(TEUR_ID))
+        extra(
+            pending,
+            "RefundPending",
+            "RefundPending",
+            "Refundable",
+            2 * NEAR,
+            Some(TEUR_ID)
+        )
     );
-    assert!(on_its_way.svg.contains("RefundPending"), "{}", on_its_way.svg);
+    assert!(
+        on_its_way.svg.contains("RefundPending"),
+        "{}",
+        on_its_way.svg
+    );
 
     // ReleasedToOrganizer.
     chain.advance_to(times[1]).await?;
@@ -1243,13 +1531,28 @@ async fn t32_metadata_follows_the_state() -> TestResult {
     let released = shown(&escrow, &completed_ticket).await?;
     assert_eq!(
         released.description,
-        described(1, 2, "The event was confirmed and the price went to the organizer.")
+        described(
+            1,
+            2,
+            "The event was confirmed and the price went to the organizer."
+        )
     );
     assert_eq!(
         released.extra,
-        extra(completed, "Active", "ReleasedToOrganizer", "Completed", PRICE, None)
+        extra(
+            completed,
+            "Active",
+            "ReleasedToOrganizer",
+            "Completed",
+            PRICE,
+            None
+        )
     );
-    assert!(released.svg.contains("ReleasedToOrganizer"), "{}", released.svg);
+    assert!(
+        released.svg.contains("ReleasedToOrganizer"),
+        "{}",
+        released.svg
+    );
     Ok(())
 }
 
@@ -1258,10 +1561,15 @@ async fn t32_metadata_follows_the_state() -> TestResult {
 /// price, capacity, currency)`. An account id encodes like a string.
 fn expected_terms_hash(organizer: &AccountId, terms: &Value) -> TestResult<String> {
     let text = |field: &str| -> TestResult<String> {
-        Ok(terms[field].as_str().ok_or_else(|| format!("no {field}"))?.to_string())
+        Ok(terms[field]
+            .as_str()
+            .ok_or_else(|| format!("no {field}"))?
+            .to_string())
     };
     let time = |field: &str| -> TestResult<u64> {
-        terms[field].as_u64().ok_or_else(|| format!("no {field}").into())
+        terms[field]
+            .as_u64()
+            .ok_or_else(|| format!("no {field}").into())
     };
     let tuple = (
         organizer.to_string(),
@@ -1295,7 +1603,10 @@ async fn t33_terms_hash_covers_the_currency() -> TestResult {
         let event_id = escrow.create_event(&cast.organizer, terms.clone()).await?;
         let event = escrow.event(event_id).await?;
         assert_eq!(event["currency"], json!(currency));
-        let hash = event["terms_hash"].as_str().ok_or("no terms_hash")?.to_string();
+        let hash = event["terms_hash"]
+            .as_str()
+            .ok_or("no terms_hash")?
+            .to_string();
         assert_eq!(
             hash,
             expected_terms_hash(&cast.organizer.0, &terms)?,
@@ -1369,10 +1680,19 @@ async fn new_takes_a_fixed_list_of_tokens() -> TestResult {
         .push(spec("tgbp.sandbox", "tGBP", 6));
     let bad_lists = [
         ("five tokens", five),
-        ("a duplicate", json!([spec(TUSD_ID, "tUSD", 6), spec(TUSD_ID, "tUSD2", 6)])),
+        (
+            "a duplicate",
+            json!([spec(TUSD_ID, "tUSD", 6), spec(TUSD_ID, "tUSD2", 6)]),
+        ),
         ("an empty symbol", json!([spec(TUSD_ID, "", 6)])),
-        ("a symbol of 13 bytes", json!([spec(TUSD_ID, "THIRTEENBYTES", 6)])),
-        ("a symbol that is not ASCII", json!([spec(TUSD_ID, "t\u{dc}SD", 6)])),
+        (
+            "a symbol of 13 bytes",
+            json!([spec(TUSD_ID, "THIRTEENBYTES", 6)]),
+        ),
+        (
+            "a symbol that is not ASCII",
+            json!([spec(TUSD_ID, "t\u{dc}SD", 6)]),
+        ),
         ("25 decimals", json!([spec(TUSD_ID, "tUSD", 25)])),
     ];
     let account = chain.accounts(&["refused.sandbox"], 50).await?.remove(0);
@@ -1382,11 +1702,20 @@ async fn new_takes_a_fixed_list_of_tokens() -> TestResult {
             .with_init_call("new", json!({ "tokens": tokens }))?
             .with_signer(chain.signer.clone())
             .send_to(&chain.network)
-            .await?;
+            .await?
+            .into_full()
+            .ok_or("send_to returned before the transaction ran")?;
         let failure = failure_text(&result).ok_or_else(|| format!("{why}: accepted"))?;
-        assert!(failure.contains("Smart contract panicked: ERR_"), "{why}: {failure}");
+        assert!(
+            failure.contains("Smart contract panicked: ERR_"),
+            "{why}: {failure}"
+        );
     }
-    let view = Account(account.0.clone()).view().fetch_from(&chain.network).await?.data;
+    let view = Account(account.0.clone())
+        .view()
+        .fetch_from(&chain.network)
+        .await?
+        .data;
     assert!(
         !matches!(
             view.contract_state,

@@ -249,14 +249,20 @@ impl Contract {
 
 #[near]
 impl Contract {
-    /// Buys the next ticket of an event for exactly its price. The buyer is its first holder; the
-    /// whole deposit is the ticket's principal and nothing is refunded by the mint (`t17`).
+    /// Buys the next ticket of an event priced in NEAR for exactly its price. The buyer is its first
+    /// holder; the whole deposit is the ticket's principal and nothing is refunded by the mint
+    /// (`t17`). An event priced in a token is bought through `ft_transfer_call` on that token.
     #[payable]
     pub fn buy_ticket(&mut self, event_id: u32) -> TokenId {
         let buyer = env::predecessor_account_id();
         let now_ms = env::block_timestamp_ms();
         let deposit = env::attached_deposit().as_yoctonear();
         let mut event = self.load_event(event_id);
+        ensure(
+            event.currency.is_none(),
+            Code::WrongCurrency,
+            "this event is priced in a token: buy it with ft_transfer_call on that token",
+        );
         ensure(
             event.outcome == Outcome::Unresolved,
             Code::AlreadyResolved,
@@ -311,9 +317,18 @@ impl Contract {
         };
         ticket.record(HistoryKind::Purchased, &buyer, now_ms);
         self.save_ticket(&token_id, ticket);
-        log::ticket_purchased(event_id, &token_id, &buyer, deposit);
+        log::ticket_purchased(event_id, &token_id, &buyer, deposit, None);
         self.save_event(event_id, event);
         token_id
+    }
+
+    /// Buys the next ticket of an event priced in a token. The token contract calls it while it
+    /// runs the buyer's `ft_transfer_call` with `msg` `{"event_id":<id>}`; `sender_id` becomes
+    /// the first holder. Returns `"0"`: the whole amount is kept. Every rejection panics, so the
+    /// token returns the whole amount to the buyer.
+    pub fn ft_on_transfer(&mut self, sender_id: AccountId, amount: U128, msg: String) -> U128 {
+        let _ = (sender_id, amount, msg);
+        env::panic_str("not implemented")
     }
 }
 
