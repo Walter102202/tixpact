@@ -1,6 +1,6 @@
 # Design
 
-How the contract works and why it is built this way. The exact method signatures, JSON shapes and error codes are in the [plan's frozen interface](plans/2026-11-12-ticket-escrow-mvp-plan.md#frozen-interface-v1); every way to cheat we could think of, with the test that stops it, is in the [threat model](threat-model.md).
+How the contract works and why it is built this way. The exact method signatures, JSON shapes and error codes are in the frozen interface, [version 1](plans/2026-11-12-ticket-escrow-mvp-plan.md#frozen-interface-v1) and [what version 2 adds](plans/2026-11-13-pass-group-verifier-dollars.md#frozen-interface-v2); every way to cheat we could think of, with the test that stops it, is in the [threat model](threat-model.md).
 
 ## The idea in one paragraph
 
@@ -65,6 +65,8 @@ What the holder is owed is derived as `claim`: `Reserved`, `Refundable`, `Refund
 
 Each ticket keeps a short history (first entry and the latest fifteen, with a count of what was dropped), enough to show a buyer where a ticket has been without letting the history grow without bound.
 
+The token says what it is worth right now. The NFT metadata that wallets and explorers read (`nft_token`, NEP-177) is not stored: the contract writes it at each call from the event and the ticket. The description ends with one sentence chosen by the claim, for example "0.5 NEAR is reserved in the contract until the event is resolved." or "The event was not confirmed: whoever holds this ticket can claim 0.5 NEAR."; `extra` carries the same facts as JSON; `media` is a small ticket drawn as SVG from those facts, with its hash. A ticket seen in a wallet after a cancellation reads as refundable without anyone having updated it, because there is nothing to update (`t32_metadata_follows_the_state`).
+
 ## The money
 
 Each event has its own ledger. This identity holds after every call and every callback, and the tests read it back after each step:
@@ -119,6 +121,19 @@ sequenceDiagram
 
 The organizer's payout uses the same path (`claim_payout`, `on_payout_result`, `t18_payout_failure_paths`). Nobody is paid in a loop: each holder claims their own ticket, so the cost of a cancellation does not grow with the number of tickets and one bad recipient cannot block the others.
 
+## Prices in a dollar token
+
+A refund of the same amount of NEAR is not a refund of the same value. So an event can be priced in a token instead (NEP-141), such as a dollar token. The rules R1 to R11 do not change. What changes is how money arrives and leaves.
+
+- **Which tokens.** The deployment lists the tokens it accepts when it is created (`new(tokens)`, at most four), with the symbol and decimals it will show for each. Nobody can add one later: there is no method for it. An event names its currency in its terms (`currency`, `null` for NEAR), the verifier's acceptance covers it (`t33_terms_hash_covers_the_currency`), and every amount of that event is in that currency.
+- **Buying.** A contract cannot pull tokens from a buyer. The buyer asks the token to transfer the price to the contract and call it (`ft_transfer_call`, with `{"event_id":7}` as the message). The contract's `ft_on_transfer` applies R4 and three more checks: the caller is the event's token, the amount is exactly the price, and the message parses. If anything is wrong it fails, and the token returns the whole amount to the buyer (`t25_token_purchase_reserves_exact_price`, `t26_only_the_event_currency_buys`). Because of that, the buyer's transaction succeeds even when nothing was bought; the web and the agent decide from the receipts whether a ticket was issued.
+- **Paying.** Refunds and payouts call the token's `ft_transfer` and then the same private callback as before. A token only pays accounts registered with it, so a holder the token does not know is not paid, and the callback gives the right back, once (`t28_unregistered_holder_gets_the_right_back_once`). The holder registers (a storage deposit of about a thousandth of a NEAR) and claims again. A token that fails or lies about a transfer never causes a second payment (`t29_token_payout_failure_paths`, `t31_a_failing_token_never_pays_twice`).
+- **Separate money.** One event's ledger is in one currency, and the identity above holds per event. NEAR events and token events cannot pay each other (`t30_currencies_do_not_share_money`). The balance check before a NEAR transfer counts NEAR events only. For a token the contract cannot read its own balance inside the same call, so a shortfall would fail the transfer and restore the right instead of being rejected up front.
+- **Storage stays in NEAR.** The organizer's operating budget is NEAR for every event, whatever its currency.
+- **Before sales.** The contract account must itself be registered with each token, or the token rejects every purchase. That is a deployment step, and `scripts/verify-deployment.mjs` fails when it is missing or when the contract holds less of a token than its events say.
+
+On testnet the token is `tUSD`, a test dollar that anyone can mint from its faucet (`fixtures/test-token`), so it is worth nothing. On mainnet that place would be taken by a real dollar token, which brings its own trust: see the limits in the threat model.
+
 ## Tickets sent to other contracts
 
 `nft_transfer_call` lets a ticket be sent to a contract (a marketplace, a vault) that may accept it or hand it back. Between the transfer and that answer, the ticket's holder is not settled, so the ticket is locked: it cannot be transferred again or refunded until the resolver runs (`t12_transfer_call_receiver_outcomes`, including a receiver that tries to claim the refund from inside its own callback). The resolver ignores the time window, so a ticket that left before the start can still come back after it (`t13_resolver_ignores_time_window`), and it treats a failed, malformed or oversized answer as "return the ticket".
@@ -127,9 +142,12 @@ The organizer's payout uses the same path (`claim_payout`, `on_payout_result`, `
 
 - **Accounts with names and removable keys.** The verifier is a named account buyers can read and recognise before paying. The contract account's keys can be deleted, after which no one, including us, can change the code or move its balance: `scripts/verify-deployment.mjs` reads the code hash and the empty key list from the chain.
 - **Asynchronous receipts and callbacks.** The settlement design above is written for them rather than against them: a pending-operation record, a private callback with fixed gas, and an explicit result for each payment.
-- **The NFT standards (NEP-171, 177, 181).** The ticket is a standard token that wallets, explorers and other contracts already understand, and its ownership record is the one the refund follows.
+- **An account can be a group.** The contract only asks that the verifier is an account. That account can be a contract whose calls are decided by votes: `scripts/group-verifier.sh` uses a Sputnik DAO where two of three members must agree, with no change to the ticket contract ([proof](proof-group-verifier.md)).
+- **The NFT standards (NEP-171, 177, 181).** The ticket is a standard token that wallets, explorers and other contracts already understand, and its ownership record is the one the refund follows. Its metadata is computed from the ticket's state at each read.
+- **The token standards (NEP-141, 145).** A price in dollars uses the same transfer-and-call mechanism any token on NEAR has, and the same asynchronous settlement as a NEAR payment.
+- **Signed messages (NEP-413).** A holder proves they hold a ticket by signing a message with their wallet, off chain and for free; anyone can check it against the chain. That is the entry pass.
 - **Storage staking.** State costs balance, so the organizer prepays a measured budget and ticket money is never used for it.
-- **Structured events (NEP-297).** Every step logs an event (`ticket_escrow` v1.0.0), so an indexer could rebuild the whole history; the web does not need one.
+- **Structured events (NEP-297).** Every step logs an event (`ticket_escrow` v2.0.0), so an indexer could rebuild the whole history; the web does not need one.
 - **Fees low enough to act alone.** Each holder pays the network fee of their own claim (measured per method in `docs/gas.md`), which is what makes "no batch payout, no operator" practical.
 - **A sandbox that controls time and state.** The tests move the block time past deadlines, delete accounts mid-flow and force a balance shortfall, so the failure paths above are exercised, not argued.
 
@@ -137,7 +155,7 @@ The organizer's payout uses the same path (`claim_payout`, `on_payout_result`, `
 
 | Decision | Why | Cost |
 |---|---|---|
-| One contract, native NEAR, fixed price, no platform fee | Fewer mechanisms to get wrong in the time available | No stable-value pricing, no card payments |
+| One contract, fixed price, no platform fee; NEAR or a token from a list fixed at deployment | Fewer mechanisms to get wrong in the time available, and nobody who can add a currency later | A new token means a new deployment; no card payments |
 | The whole price is reserved | The reserve must be there when a refund is due | The organizer cannot fund production with ticket sales before the event |
 | A named verifier per event, accepted before sales | Somebody must say whether a physical event happened; make it explicit | Trust in that account; a silent verifier means refunds, even for an event that took place |
 | Anyone can expire, each holder claims | No dependency on the organizer or on us | The holder needs an account, gas and network access |
@@ -150,8 +168,8 @@ Smaller decisions taken while building are recorded one per file in [`docs/decis
 
 ## Limits
 
-This is a hackathon prototype on testnet. It has not been audited and must not hold real money. The verifier can lie; a failed callback can leave one payment pending for good; a lost key is a lost ticket; the web and the RPC can be wrong or down (the contract can always be called directly); and the value of NEAR against any currency is not our concern here. The full list, with what each means for a user, is in the [threat model](threat-model.md#limits).
+This is a hackathon prototype on testnet. It has not been audited and must not hold real money. The verifier can lie; a failed callback can leave one payment pending for good; a lost key is a lost ticket; the web and the RPC can be wrong or down (the contract can always be called directly); a price in NEAR is refunded in NEAR, whatever it is worth by then; and a price in a token is only as good as that token. The full list, with what each means for a user, is in the [threat model](threat-model.md#limits).
 
 ## After the prototype
 
-Paid resale with the price split enforced in the same transaction, entry at the door (a ticket is not proof of identity), a verifier that is a group with its own voting rules, refund claims that anyone can trigger on a holder's behalf, release of storage deposits once an event is fully settled, and an audited recovery path for payments left pending.
+Paid resale with the price split enforced in the same transaction, admissions shared between doors (today each device remembers only what it admitted), refund claims that anyone can trigger on a holder's behalf, release of storage deposits once an event is fully settled, and an audited recovery path for payments left pending.

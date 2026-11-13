@@ -6,14 +6,14 @@ Written before any contract code. It answers one question: who could keep or tak
 
 | Asset | Where it lives | Who may move it |
 |---|---|---|
-| The principal `P` of each ticket (the price paid) | The contract's balance, tracked per event | To the current holder if the event is `Refundable`; to the organizer if it is `Completed`. Nobody else, never both. |
+| The principal `P` of each ticket (the price paid) | The contract's balance in the event's currency (NEAR, or its balance in the event's token), tracked per event | To the current holder if the event is `Refundable`; to the organizer if it is `Completed`. Nobody else, never both. |
 | The right to that principal | The ticket token (NEP-171); the token's owner is the only record of who holds it | The holder, by transferring the ticket under R6 |
 | The event outcome | Contract state, written once | The accepted verifier (complete), the organizer or the verifier (cancel), anyone after the deadline (expire) |
 | Each event's operating budget (prepaid storage) | Contract balance, tracked per event | Nobody. It pays for storage only. |
 
 ## Who can attack
 
-A previous holder, the current holder, a buyer, the organizer, the verifier, a contract that receives a ticket, any account calling any method, and whoever holds a key of the contract account.
+A previous holder, the current holder, a buyer, the organizer, the verifier, a contract that receives a ticket, a token or an account posing as one, any account calling any method, and whoever holds a key of the contract account.
 
 ## Threats and what stops them
 
@@ -64,6 +64,21 @@ A previous holder, the current holder, a buyer, the organizer, the verifier, a c
 | C2 | Re-enter during the transfer: claim the refund or move the ticket before the transfer resolves | The ticket is locked before the transfer and until its resolver runs | R8 | `t12_transfer_call_receiver_outcomes` (`reenter`) |
 | C3 | Stretch the transfer across the start time to end up with a ticket moved late | The resolver finishes the transfer it started and clears the lock regardless of time | R6, R8 | `t13_resolver_ignores_time_window` |
 
+### A token, or an account posing as one
+
+Events can be priced in a token (NEP-141) from a list fixed at deployment. A purchase reaches the contract as a call from the token (`ft_on_transfer`), and refunds and payouts leave as calls to it (`ft_transfer`).
+
+| # | Attack | What stops it | Rule | Test |
+|---|---|---|---|---|
+| T1 | Call `ft_on_transfer` directly, or from a worthless token, to be issued a ticket without paying the event's currency | The caller must be the event's own token; a token the deployment does not list cannot price an event at all | R4 | `t26_only_the_event_currency_buys` |
+| T2 | Pay a token-priced event with NEAR, or a NEAR event with a token | `buy_ticket` rejects a token-priced event and `ft_on_transfer` rejects a NEAR one | R4 | `t26_only_the_event_currency_buys` |
+| T3 | Send less than the price, more than the price or a message that does not name an event, and keep a ticket or lose the difference | Anything but exactly the price with a readable message fails, and the token returns the whole amount to the buyer | R1, R4 | `t25_token_purchase_reserves_exact_price` |
+| T4 | Hold the ticket from an account the token cannot pay (not registered with it), so the refund leaves the books and never arrives | The token rejects the transfer and the callback restores the right exactly once; the holder registers and claims again | R7 | `t28_unregistered_holder_gets_the_right_back_once` |
+| T5 | The token fails a payout, or answers nonsense, to make the contract pay twice or lose track of a payment | Reserve first: the right is debited before the call and restored only by the private callback on a confirmed failure. A second claim during the call finds nothing | R7, R8 | `t29_token_payout_failure_paths`, `t31_a_failing_token_never_pays_twice` |
+| T6 | Use a payout in one currency to drain what is held in another | Each event's ledger is in one currency and a payment is made in that currency only | R9 | `t30_currencies_do_not_share_money` |
+| T7 | Change an event's currency after the verifier accepted it | The currency is part of the terms the verifier's acceptance covers, and terms never change | R5 | `t33_terms_hash_covers_the_currency` |
+| T8 | Add a token after deployment, for example one the attacker can mint | There is no method to add one: the list is given once, at `new` | R10 | `scripts/verify-deployment.mjs` prints the list |
+
 ### Any account
 
 | # | Attack | What stops it | Rule | Test |
@@ -90,8 +105,11 @@ What this design does not solve. The README repeats these in plain words.
 
    The transfer resolver has the same limit. If `nft_resolve_transfer` fails, the receiver contract holds the ticket and its status stays `TransferPending` for good: nobody can claim its refund or move it, and if the event becomes refundable its principal stays in the contract. Its static gas covers twice the published fee for reading the longest answer a receiver can send (4 MiB) plus its own measured work (`docs/gas.md`), and `t12_transfer_call_receiver_outcomes` returns a ticket after a 4 MiB answer. Only a protocol change that raised those costs past that margin could cause it.
 4. **A lost key.** Whoever loses access to the account that holds a ticket loses the refund. Nobody can reassign it.
-5. **A refund is the same amount of NEAR, not the same value.** The price of NEAR can move between purchase and refund.
+5. **A refund is the same amount of the same currency, not the same value.** The price of NEAR can move between purchase and refund. An event priced in a dollar token avoids that, and takes on limit 10 instead.
 6. **Until the keys are deleted.** Before the final deployment the deployer's key can change the code. The proof page and `scripts/verify-deployment.mjs` show the key list so anyone can check it is empty.
 7. **The web is not the contract.** A hostile copy of the site could show false states. Every claim can be checked without the site: `scripts/direct-calls.sh` runs the whole flow from the command line, and each screen links to the explorer.
 8. **Not audited, testnet only.** The storage and gas constants are measured, not proven, and protocol parameters can change.
 9. **Out of scope.** Entry control at the venue, proof that a holder attended, resale price limits and identity checks.
+10. **A token is trusted.** A token is another contract, and the ticket contract believes what it answers. A token that says a transfer failed after paying, or that it paid when it did not, cannot be caught from inside the contract. Real dollar tokens also have an issuer who can freeze an account or change the token's code; if the contract's balance were frozen, refunds in that token would fail and stay claimable, but nobody could force the issuer. This is why the list of tokens is fixed at deployment and shown to buyers. The token on testnet, `tUSD`, has no owner and anyone can mint it, so it is worth nothing.
+11. **For a token the contract cannot check its balance before paying.** With NEAR it refuses a payment that would touch money held for others. With a token it learns of a shortfall only when the transfer fails, and then restores the right. The per-event ledgers still keep one event from being credited with another's money.
+12. **An account the token does not know cannot be paid until it registers.** The claim pays nothing and loses nothing; registering costs about a thousandth of a NEAR. A holder who never registers is never paid.
