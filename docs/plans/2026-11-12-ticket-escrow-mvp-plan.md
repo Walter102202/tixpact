@@ -15,7 +15,7 @@
 - Deadline: submissions close 2026-11-14T23:59:00Z = 20:59 America/Santiago. Internal cutoff 17:00 Santiago. One submission, not editable afterwards.
 - First judges are Claude Code and Codex: they check that the repository runs and does what the README says, then humans decide. Every claim in the README maps to a named test or a testnet transaction. Nothing is claimed that cannot be reproduced.
 - Testnet only. Never mainnet, never real funds. Amounts are `u128` yoctoNEAR in the contract and decimal strings in JSON; no floating point touches money anywhere (TypeScript uses `bigint`).
-- The word "NFT" never appears in the product UI, the X post or the video. The ticket is "ticket". NEP-171 is named once, in the technical section of the README and in `docs/`.
+- Wording: the product talks about a "ticket" and leads with the problem it solves. It also says plainly that each ticket is an NFT (NEP-171) wherever that helps the reader: the README, the ticket and proof pages, the X post and the video (the `nfts` track rewards exactly this). Never lead with the word or use it as the pitch.
 - No AI and no off-chain service can confirm an event, change a holder or move reserved funds. The MCP agent only spends its own account, within its own caps.
 - All committed text in English (code, comments, README, UI copy, docs). Walter's chat language is Spanish.
 - Repository: GitHub `Walter102202/<name>` private until Saturday morning, then public with an MIT `LICENSE`. Every commit is pushed to its branch immediately. No force-push, nothing deleted (branches, worktrees, files, accounts, keys) without Walter's written OK in the chat.
@@ -625,6 +625,6 @@ Human-gated steps slipped in both earlier hackathon projects, so each one is ask
 ## Self-review notes
 
 - Spec coverage: D01–D15 map to R1–R11 and the track decisions; T01–T24 map to the acceptance table (T20 and T23 as scripts). Spec section 15 (commercial validation) and 16 (names) are out of this plan by design.
-- Deviations from the spec, each to be recorded in `docs/decisions/` during Phase 0: no global cap on events (spec 11.5 proposed 10); the storage budget is prepaid in full at creation, so "purchase without budget" becomes "creation below the quote" in T02; a bounded per-ticket history view is added (the hackathon track asks for it); an MCP agent track is added; the word "NFT" is kept out of everything a person sees.
+- Deviations from the spec, each to be recorded in `docs/decisions/` during Phase 0: no global cap on events (spec 11.5 proposed 10); the storage budget is prepaid in full at creation, so "purchase without budget" becomes "creation below the quote" in T02; a bounded per-ticket history view is added (the hackathon track asks for it); an MCP agent track is added; user-facing text says "ticket" first and names the NFT standard where it helps.
 - Researched and rejected on 2026-11-12: one account per event or per ticket through global contracts (publishing burns about 25 testnet NEAR per 250 KB and the idea is common among competitors); NEAR Intents payments (mainnet only, cannot call a contract with a deposit); meta-transactions and social login (not in the time available).
 - UNTESTED items are named as such in "Known traps" and in the spikes; Phase 0 and the first task of each track resolve them before anything depends on them.
