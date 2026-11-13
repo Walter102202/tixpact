@@ -10,6 +10,7 @@ import { replaceHash, useHash } from '../../lib/router';
 import { useLoad } from '../../lib/useLoad';
 import { useServices } from '../../services';
 import { LoadState } from '../../ui/LoadState';
+import { DoorScanner } from './DoorScanner';
 import {
   type Admission,
   admissionOf,
@@ -83,6 +84,7 @@ function DoorIntro({ unreadable }: { unreadable: boolean }) {
         {fixtureMode ? 'demo data, not the chain' : 'the chain'}; it is sent nowhere else.
       </p>
       <CheckingSite />
+      <DoorScanner onPass={(pass) => replaceHash(`p=${encodePass(pass)}`)} />
       {unreadable && (
         <p className="tx tx-notice" role="alert">
           This link does not carry a readable entry pass. Ask the holder to show it again.
