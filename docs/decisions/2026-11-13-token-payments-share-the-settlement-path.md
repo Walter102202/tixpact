@@ -1,6 +1,6 @@
 # Token payments go through the same reserve-first path as NEAR, and a listed token is trusted
 
-Date: 2026-11-13. Author: lane C2. Status: accepted.
+Date: 2026-11-13. Author: lane C2. Status: accepted; the second half of its last bullet (a token that answers a value leaves the operation pending) is replaced by `2026-11-13-a-payment-that-went-through-settles.md`.
 
 ## Context
 

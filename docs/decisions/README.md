@@ -80,6 +80,7 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | After a token transaction, the web says what happened to whom: a refused refund or payout in plain words, one result per account, test money named as such, the price on the create button | `2026-11-13-web-token-results-after-review.md` |
 | 2026-11-13 | The token list given to `new` is checked strictly (`ERR_LIMIT` over 4, `ERR_INVALID_TERMS` otherwise); the currency is stored once, in the event | `2026-11-13-token-list-checks-at-new.md` |
 | 2026-11-13 | The ticket's metadata is derived when read: the web's claim words, a title cut at 26 characters, escaped text, an image under 2 KB | `2026-11-13-the-ticket-draws-its-state.md` |
+| 2026-11-13 | The token tests read interface v2 strictly where money moves, make one check fail at a time, and never accept a right restored after a payment | `2026-11-13-token-tests-read-the-interface-this-way.md` |
 | 2026-11-13 | Token payments go through the v1 reserve-first path with `ft_transfer`; `ft_on_transfer` checks its caller first; a token claim needs 60 Tgas; a listed token is trusted | `2026-11-13-token-payments-share-the-settlement-path.md` |
 | 2026-11-13 | A changed account in an entry pass fails the `key` check, not `signature`: NEP-413 does not sign the account | `2026-11-13-entry-pass-account-bound-by-the-key-check.md` |
 | 2026-11-13 | The entry pass hash uses `@noble/hashes` 2.4.0, declared by the client package (already in the lockfile through near-api-js) | `2026-11-13-entry-pass-sha256-from-noble-hashes.md` |
@@ -97,3 +98,9 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | The group verifier also counts `factory_info_update` (Sputnik v3: replaces the factory, which can then replace the DAO's code) | `2026-11-13-group-verifier-counts-factory-info-update.md` |
 | 2026-11-13 | The door looks the signing key up in the account's key list (`view_access_key_list`), so a missing key is an answer, not a failover error | `2026-11-13-pass-key-read-from-the-key-list.md` |
 | 2026-11-13 | The ticket page shows the ticket as wallets show it: the contract's picture in an `<img>`, checked against its hash, and its sentence | `2026-11-13-web-ticket-as-wallets-show-it.md` |
+| 2026-11-13 | A payment whose receipt succeeded settles whatever the token answers: callbacks read the answer bounded at 0 bytes and restore only on a confirmed failure | `2026-11-13-a-payment-that-went-through-settles.md` |
+| 2026-11-13 | A token's `ft_transfer` gets exactly 20 Tgas (no share of unused gas, which bounds its answer); a token claim needs 60 Tgas | `2026-11-13-the-token-gets-exactly-its-static-gas.md` |
+| 2026-11-13 | A token's longest answer must still settle: measured at 300 Tgas, the long-answer tests stay strict | `2026-11-13-long-token-answers-must-settle.md` |
+| 2026-11-13 | Replaced by the next line: a token's `ft_transfer` gets exactly 20 Tgas (no share of unused gas, which bounds its answer) | `2026-11-13-the-token-gets-exactly-its-static-gas.md` |
+| 2026-11-13 | A token's `ft_transfer` gets at least 20 Tgas and the default share of unused gas, the only remedy an immutable contract has for a costly token; a token claim needs 60 Tgas | `2026-11-13-the-token-gets-at-least-its-static-gas.md` |
+| 2026-11-13 | Only the contract account can call `new(tokens)` (`#[private]`); deploy and init go in one transaction | `2026-11-13-only-the-contract-account-calls-new.md` |

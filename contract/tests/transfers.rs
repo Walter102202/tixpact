@@ -428,7 +428,9 @@ async fn t22_standard_token_surface() -> TestResult {
     );
     let second = escrow.buy(&cast.luis, event_id, PRICE).await?;
 
-    // `nft_token`: the standard token, with metadata derived from the event.
+    // `nft_token`: the standard token, with metadata derived from the event. Since v2 the
+    // description, `extra` and the drawn ticket (`media`, `media_hash`) follow the ticket's state
+    // (`tokens.rs`, `t32_metadata_follows_the_state`); every other field stays null.
     let token: Value = escrow
         .view("nft_token", json!({ "token_id": first }))
         .await?;

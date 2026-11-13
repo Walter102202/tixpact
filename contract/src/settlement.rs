@@ -22,8 +22,8 @@ use crate::log;
 use crate::tickets::{HistoryKind, TicketStatus};
 use crate::{Contract, ContractExt};
 
-/// Static gas of `on_refund_result` and `on_payout_result`. Measured worst case 2.43 Tgas
-/// (`docs/gas.md`); the contract cannot be upgraded, so this keeps five times that or more,
+/// Static gas of `on_refund_result` and `on_payout_result`. Measured worst case 2.52 Tgas, a
+/// token refund (2.47 for NEAR, `docs/gas.md`); the contract cannot be upgraded, so this keeps five times that or more,
 /// rounded up to the next multiple of 5 Tgas. The `fault-injection` test build lowers it so far
 /// that the callback runs out of gas after its transfer (`t11`, `t18`).
 pub const GAS_FOR_CALLBACK: Gas = if cfg!(feature = "fault-injection") {
@@ -33,18 +33,23 @@ pub const GAS_FOR_CALLBACK: Gas = if cfg!(feature = "fault-injection") {
 };
 
 /// Least prepaid gas `claim_refund` and `claim_payout` accept: the callback's static gas plus five
-/// times the most the claim itself burns (3.24 Tgas measured, for a claim that expires its event
+/// times the most the claim itself burns (3.28 Tgas measured, for a claim that expires its event
 /// first, `docs/gas.md`), rounded up to the next multiple of 10 Tgas. Below it the call fails as a
 /// whole (Review Focus 3).
 pub const GAS_CLAIM_MIN: Gas = Gas::from_tgas(40);
 
-/// Static gas of the `ft_transfer` that pays a refund or a payout of an event priced in a token.
-/// Re-measured in C7 (`docs/gas.md`).
+/// The least gas the `ft_transfer` that pays a refund or a payout of an event priced in a token
+/// gets. It also gets the default share of the claimant's unused gas, on purpose: the contract
+/// cannot be upgraded, so if a token's `ft_transfer` ever needs more, attaching more gas to the
+/// claim is the only remedy. The test token's worst `ft_transfer` burns 1.73 Tgas; five times that,
+/// rounded up to 5 Tgas, is 10 Tgas, and 20 Tgas leaves room for a real token doing more work
+/// (`docs/gas.md`, `docs/decisions/2026-11-13-the-token-gets-at-least-its-static-gas.md`).
 pub const GAS_FT_TRANSFER: Gas = Gas::from_tgas(20);
 
-/// Least prepaid gas a claim on an event priced in a token accepts: besides the callback's static
-/// gas it reserves `GAS_FT_TRANSFER` for the token. Same rule as `GAS_CLAIM_MIN`; re-measured in
-/// C7.
+/// Least prepaid gas a claim on an event priced in a token accepts: `GAS_FT_TRANSFER` plus the
+/// callback's static gas plus five times the most the claim itself burns (3.44 Tgas measured, for
+/// a claim that expires its event first, `docs/gas.md`): 52.2 Tgas, rounded up to the next
+/// multiple of 10 Tgas. Below it the call fails as a whole.
 pub const GAS_TOKEN_CLAIM_MIN: Gas = Gas::from_tgas(60);
 
 /// What an operation in flight pays.
@@ -82,6 +87,15 @@ pub struct OperationView {
     /// The event's currency: `null` for NEAR, otherwise the token account.
     pub currency: Option<AccountId>,
     pub started_at_ms: u64,
+}
+
+/// Whether a payment arrived: anything but a confirmed failure (R7). A native transfer answers
+/// nothing and so does a standard `ft_transfer`; a token that answers a value still ran its
+/// transfer, because only a failed receipt is reverted. The callbacks read the answer bounded at
+/// 0 bytes, so a value arrives as `TooLong`, never as something to deserialize, and counts as
+/// delivered: giving the right back after a payment that went through would let it be paid twice.
+fn delivered(payment: &Result<(), PromiseError>) -> bool {
+    !matches!(payment, Err(PromiseError::Failed))
 }
 
 /// The least gas a claim on an event priced in `currency` needs. Checked before anything is
@@ -138,8 +152,9 @@ impl Contract {
 
     /// A transfer of `amount` of `currency` to `recipient_id`, then `callback` on this
     /// contract. NEAR goes by native transfer. A token goes by `ft_transfer` on the token, with the
-    /// 1 yoctoNEAR the claimant attached (the standard requires it) and `GAS_FT_TRANSFER`; a
-    /// recipient the token does not know makes it fail, and the callback restores the right.
+    /// 1 yoctoNEAR the claimant attached (the standard requires it), at least `GAS_FT_TRANSFER` and
+    /// the default share of unused gas; a recipient the token does not know makes it fail, and the
+    /// callback restores the right.
     fn transfer_then(
         currency: Option<AccountId>,
         recipient_id: AccountId,
@@ -302,13 +317,14 @@ impl Contract {
         Self::transfer_then(currency, caller, amount, callback)
     }
 
-    /// Callback of `claim_refund`. Settles the refund if the transfer arrived; restores the
-    /// holder's right if it failed. Removes the operation and returns whether money moved.
+    /// Callback of `claim_refund`. Settles the refund unless the transfer is confirmed failed,
+    /// in which case it restores the holder's right (`delivered`). Removes the operation and
+    /// returns whether money moved.
     #[private]
     pub fn on_refund_result(
         &mut self,
         operation_id: u64,
-        #[callback_result] transfer: Result<(), PromiseError>,
+        #[callback_result(max_bytes = 0)] transfer: Result<(), PromiseError>,
     ) -> bool {
         let Some(operation) = self.operations.remove(&operation_id) else {
             return false;
@@ -322,7 +338,7 @@ impl Contract {
         let now_ms = env::block_timestamp_ms();
         let mut event = self.load_event(operation.event_id);
         let mut ticket = self.load_ticket(&token_id);
-        let delivered = transfer.is_ok();
+        let delivered = delivered(&transfer);
         if delivered {
             event.ledger.settle_refund(operation.amount);
             ticket.status = TicketStatus::Refunded;
@@ -353,13 +369,14 @@ impl Contract {
         delivered
     }
 
-    /// Callback of `claim_payout`. Settles the payout if the transfer arrived; makes the amount
-    /// available again if it failed. Removes the operation and returns whether money moved.
+    /// Callback of `claim_payout`. Settles the payout unless the transfer is confirmed failed,
+    /// in which case it makes the amount available again (`delivered`). Removes the operation
+    /// and returns whether money moved.
     #[private]
     pub fn on_payout_result(
         &mut self,
         operation_id: u64,
-        #[callback_result] transfer: Result<(), PromiseError>,
+        #[callback_result(max_bytes = 0)] transfer: Result<(), PromiseError>,
     ) -> bool {
         let Some(operation) = self.operations.remove(&operation_id) else {
             return false;
@@ -369,7 +386,7 @@ impl Contract {
             return false;
         }
         let mut event = self.load_event(operation.event_id);
-        let delivered = transfer.is_ok();
+        let delivered = delivered(&transfer);
         if delivered {
             event.ledger.settle_payout(operation.amount);
             log::settlement(

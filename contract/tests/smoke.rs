@@ -22,6 +22,8 @@ async fn deploys_and_reports_config() -> testresult::TestResult<()> {
     assert_eq!(config["version"], "2.0.0");
     assert_eq!(config["max_capacity"], 100);
     assert_eq!(config["fault_injection"], false);
+    // The tokens given to `new` (plan v2, "Currencies").
+    assert_eq!(config["tokens"], common::listed_tokens());
 
     // The quote for one ticket is the event's own storage plus one ticket's.
     let per_event: u128 = config["storage_per_event"].as_str().unwrap_or("").parse()?;
@@ -61,7 +63,7 @@ async fn new_accounts_can_sign_at_once() -> testresult::TestResult<()> {
     // A second `new` is rejected by the contract, which proves the call was signed, sent and run.
     for account in &accounts {
         contract
-            .call_function("new", ())
+            .call_function("new", near_sdk::serde_json::json!({ "tokens": [] }))
             .transaction()
             .with_signer(account.0.clone(), chain.signer.clone())
             .send_to(&chain.network)
