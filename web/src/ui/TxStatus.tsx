@@ -40,11 +40,14 @@ export function TxStatus({
   tx,
   failureTitle = 'The transaction did not complete.',
   failureNote,
+  succeeded = (result) => result.ok,
   success,
 }: {
   tx: TxControl;
   failureTitle?: string;
   failureNote?: string;
+  /** What counts as success; a claim also needs the contract to say money moved (`moneyMoved`). */
+  succeeded?: (result: TxResult) => boolean;
   success: (result: TxResult) => ReactNode;
 }) {
   const { view, dismiss } = tx;
@@ -89,7 +92,7 @@ export function TxStatus({
       );
     case 'done': {
       const { result } = view;
-      if (!result.ok) {
+      if (!succeeded(result)) {
         return (
           <div className="tx tx-failed" role="alert">
             <strong>{failureTitle}</strong>

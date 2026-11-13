@@ -1,0 +1,302 @@
+import {
+  actions,
+  canClaimRefund,
+  type EventView,
+  formatDateTime,
+  moneyMoved,
+  type OperationView,
+  type TicketHistory,
+  type TicketView,
+  TokenIdSchema,
+} from '@ticket-escrow/client';
+import { useState } from 'react';
+import { useTx } from '../../lib/near/useTx';
+import { useWallet } from '../../lib/near/useWallet';
+import { Link } from '../../lib/router';
+import { useLoad } from '../../lib/useLoad';
+import { useServices } from '../../services';
+import { LoadState } from '../../ui/LoadState';
+import { TxStatus } from '../../ui/TxStatus';
+import { near, outcomeLine } from '../events/eventCopy';
+import { ClaimPanel } from './ClaimPanel';
+import { TransferPanel } from './TransferPanel';
+import { claimWord, historyText } from './ticketCopy';
+
+export interface TicketData {
+  ticket: TicketView;
+  event: EventView;
+  history: TicketHistory | null;
+  /** The settlement in flight for this ticket, when there is one. */
+  operation: OperationView | null;
+}
+
+export interface Reread {
+  reread: () => Promise<TicketData>;
+  apply: (data: TicketData) => void;
+}
+
+export function TicketPage({ id }: { id: string }) {
+  const { reader } = useServices();
+  const tokenId = TokenIdSchema.safeParse(id).success ? id : null;
+
+  async function read(): Promise<TicketData | null> {
+    if (tokenId === null) return null;
+    const ticket = await reader.getTicket(tokenId);
+    if (ticket === null) return null;
+    const [event, history, operation] = await Promise.all([
+      reader.getEvent(ticket.event_id),
+      reader.getTicketHistory(tokenId),
+      ticket.pending_operation_id === null
+        ? Promise.resolve(null)
+        : reader.getOperation(ticket.pending_operation_id),
+    ]);
+    if (event === null) throw new Error(`event ${ticket.event_id} of ticket ${tokenId} is missing`);
+    return { ticket, event, history, operation };
+  }
+
+  const load = useLoad(`ticket:${id}`, read);
+  return (
+    <LoadState load={load} loadingText="Reading the ticket from the contract…">
+      {(data) =>
+        data === null ? (
+          <section className="page">
+            <h1>Not found</h1>
+            <p>There is no ticket {id}.</p>
+          </section>
+        ) : (
+          <TicketDetails
+            data={data}
+            reread={async () => (await read()) ?? data}
+            apply={(fresh) => load.set(fresh)}
+          />
+        )
+      }
+    </LoadState>
+  );
+}
+
+/** The fact that says where this ticket's price is now. */
+function moneyFact(ticket: TicketView): string {
+  switch (ticket.claim) {
+    case 'Reserved':
+    case 'Refundable':
+      return 'Reserved in the contract';
+    case 'RefundPending':
+      return 'Being refunded';
+    case 'Refunded':
+      return 'Refunded';
+    case 'ReleasedToOrganizer':
+      return 'Paid to the organizer';
+  }
+}
+
+function TicketDetails({ data, reread, apply }: { data: TicketData } & Reread) {
+  const { contractId, timeZone } = useServices();
+  const { accountId } = useWallet();
+  const claimTx = useTx();
+  const transferTx = useTx();
+  const [sentTo, setSentTo] = useState<string | null>(null);
+  const { ticket, event, history } = data;
+  const time = (ms: number) => formatDateTime(ms, timeZone);
+
+  const isHolder = accountId !== null && accountId === ticket.owner_id;
+  const claimable = canClaimRefund(ticket, event);
+  const live = claimable || ticket.claim === 'Reserved';
+  const busy = claimTx.busy || transferTx.busy;
+  const paid = claimTx.view.kind === 'done' && moneyMoved(claimTx.view.result);
+  const transferred = transferTx.view.kind === 'done' && transferTx.view.result.ok;
+
+  return (
+    <article className="page ticket-page">
+      <p className="eyebrow">
+        <Link to={`/events/${event.event_id}`}>{event.title}</Link>
+      </p>
+      <h1>Ticket {ticket.token_id}</h1>
+      <p className="lead">
+        A NEAR NFT (NEP-171) on the contract {contractId}. Whoever holds it holds the right to its
+        refund.
+      </p>
+
+      <div className="event-layout">
+        <div>
+          <dl className="facts">
+            <dt>Event</dt>
+            <dd>
+              <Link to={`/events/${event.event_id}`}>{event.title}</Link>
+            </dd>
+            <dt>Holder</dt>
+            <dd className="account-id">{ticket.owner_id}</dd>
+            <dt>Price paid</dt>
+            <dd>{near(ticket.principal)}</dd>
+            <dt>{moneyFact(ticket)}</dt>
+            <dd>{near(ticket.principal)}</dd>
+            <dt>Confirmation deadline</dt>
+            <dd>{time(event.resolution_deadline_ms)}</dd>
+          </dl>
+          <History history={history} time={time} />
+        </div>
+
+        <section className="card state-card" aria-label="Where the money is">
+          <p className={`claim-word claim-${ticket.claim}`}>{claimWord(ticket, event)}</p>
+          <StateText data={data} time={time} />
+
+          {accountId !== null && !isHolder && live && (
+            <p className="muted">
+              Only the holder, {ticket.owner_id}, can transfer or claim this ticket.
+            </p>
+          )}
+
+          <ClaimPanel
+            ticket={ticket}
+            claimable={claimable && !paid}
+            isHolder={isHolder}
+            signedIn={accountId !== null}
+            busy={busy}
+            tx={claimTx}
+            refresh={{ before: data, read: reread, apply }}
+          />
+          <TxStatus
+            tx={claimTx}
+            failureTitle="The payment did not complete."
+            failureNote="The state above was read again from the contract."
+            succeeded={moneyMoved}
+            success={() => (
+              <p>
+                Refunded {near(ticket.principal)} to {ticket.owner_id}.
+              </p>
+            )}
+          />
+
+          {isHolder && ticket.claim === 'Reserved' && !transferred && (
+            <TransferPanel
+              data={data}
+              busy={busy}
+              onSend={(account) => {
+                setSentTo(account);
+                void transferTx.run(actions.transferTicket(ticket.token_id, account), {
+                  before: data,
+                  read: reread,
+                  apply,
+                });
+              }}
+            />
+          )}
+          <TxStatus
+            tx={transferTx}
+            failureTitle="The transfer did not complete."
+            failureNote="The holder shown above was read again from the contract."
+            success={() => (
+              <p>
+                Ticket {ticket.token_id} now belongs to {sentTo}.
+              </p>
+            )}
+          />
+        </section>
+      </div>
+    </article>
+  );
+}
+
+function StateText({ data, time }: { data: TicketData; time: (ms: number) => string }) {
+  const { ticket, event, history, operation } = data;
+  const amount = near(ticket.principal);
+
+  if (canClaimRefund(ticket, event)) {
+    return (
+      <>
+        <p className="state-headline">{outcomeLine(event)}</p>
+        <p>{amount} goes back to whoever holds the ticket, when they claim it.</p>
+      </>
+    );
+  }
+  if (ticket.status === 'TransferPending') {
+    return (
+      <p>
+        The ticket was sent to {ticket.owner_id}, a contract that has not answered yet. Until it
+        does, the ticket cannot be transferred or claimed.
+      </p>
+    );
+  }
+  switch (ticket.claim) {
+    case 'Reserved':
+      return (
+        <p>
+          {amount} stays reserved in the contract until {event.verifier_id} confirms the event, or
+          the deadline passes on {time(event.resolution_deadline_ms)}.
+        </p>
+      );
+    case 'Refundable':
+      return <p>{amount} is reserved for this ticket.</p>;
+    case 'RefundPending': {
+      const recipient = operation?.recipient_id ?? ticket.owner_id;
+      return (
+        <>
+          <p>
+            {near(operation?.amount ?? ticket.principal)} is on its way to {recipient}
+            {operation ? `, since ${time(operation.started_at_ms)}` : ''}.
+          </p>
+          <p className="muted">
+            The contract marks the ticket as paid once the transfer is confirmed. Until then the
+            ticket is locked, so it cannot be paid twice.
+          </p>
+        </>
+      );
+    }
+    case 'Refunded': {
+      const settled = [...(history?.entries ?? [])]
+        .reverse()
+        .find((e) => e.kind === 'RefundSettled');
+      return (
+        <p>
+          {amount} was sent back to {settled?.account_id ?? ticket.owner_id}
+          {settled ? ` on ${time(settled.at_ms)}` : ''}.
+        </p>
+      );
+    }
+    case 'ReleasedToOrganizer':
+      return (
+        <>
+          <p className="state-headline">{outcomeLine(event)}</p>
+          <p>The price of this ticket was released to the organizer.</p>
+        </>
+      );
+  }
+}
+
+function History({
+  history,
+  time,
+}: {
+  history: TicketHistory | null;
+  time: (ms: number) => string;
+}) {
+  if (history === null || history.entries.length === 0) return null;
+  const [first, ...rest] = history.entries;
+  return (
+    <section className="history" aria-labelledby="history-heading">
+      <h2 id="history-heading">History</h2>
+      <ol aria-labelledby="history-heading" className="history-list">
+        {first && <HistoryItem text={historyText(first)} at={time(first.at_ms)} />}
+        {history.dropped > 0 && (
+          <li className="history-gap">
+            {history.dropped} earlier {history.dropped === 1 ? 'entry is' : 'entries are'} not kept
+            by the contract.
+          </li>
+        )}
+        {rest.map((entry, i) => (
+          // Entries have no id; their position in this read is stable.
+          // biome-ignore lint/suspicious/noArrayIndexKey: see above.
+          <HistoryItem key={i} text={historyText(entry)} at={time(entry.at_ms)} />
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function HistoryItem({ text, at }: { text: string; at: string }) {
+  return (
+    <li>
+      <span>{text}</span> <span className="muted">{at}</span>
+    </li>
+  );
+}

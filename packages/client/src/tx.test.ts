@@ -91,6 +91,12 @@ describe('trackTransaction on recorded statuses', () => {
     expect(result).toEqual({ ok: true, value: '1-4' });
   });
 
+  it('reads a transfer that returns nothing as ok with no value', async () => {
+    const tx = TX_FIXTURES.transferSucceeded;
+    const { result } = await track(rpc, tx.hash, tx.signerId);
+    expect(result).toEqual({ ok: true });
+  });
+
   it('maps a contract panic to its error code', async () => {
     const tx = TX_FIXTURES.buyRejected;
     const { result } = await track(rpc, tx.hash, tx.signerId);

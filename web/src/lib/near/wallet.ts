@@ -28,6 +28,7 @@ export const FIXTURE_ACCOUNT = 'luis.testnet';
 const RECORDED: Partial<Record<ContractCall['methodName'], RecordedTx>> = {
   buy_ticket: TX_FIXTURES.buySucceeded,
   claim_refund: TX_FIXTURES.refundSettled,
+  nft_transfer: TX_FIXTURES.transferSucceeded,
 };
 
 export function createFixtureWallet(accountId: string | null = FIXTURE_ACCOUNT): FixtureWallet {

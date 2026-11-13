@@ -407,7 +407,131 @@ section,
   margin-top: 8px;
 }
 
+/* Tickets */
+.ticket-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ticket-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 32px;
+  align-items: center;
+  padding: 20px 0;
+  border-top: 1px solid var(--border-soft);
+}
+.ticket-row p {
+  margin: 0;
+}
+.ticket-row-title {
+  font-family: var(--font-sans);
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: 0;
+  margin: 0;
+}
+.claim-word {
+  font-weight: 500;
+  color: var(--foreground);
+}
+.state-card .claim-word {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 32px;
+  letter-spacing: -0.03em;
+  margin: 0 0 8px;
+}
+.claim-Refundable,
+.claim-Refunded {
+  color: var(--success);
+}
+.claim-RefundPending {
+  color: var(--warning);
+}
+.state-headline {
+  font-weight: 500;
+  color: var(--foreground);
+}
+.claim-panel {
+  margin-top: 16px;
+}
+.history {
+  padding: 32px 0 0;
+}
+.history h2 {
+  font-size: 24px;
+}
+.history-list {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+.history-list li {
+  padding: 6px 0;
+  color: var(--foreground);
+}
+.history-gap {
+  list-style: none;
+  color: var(--muted-foreground);
+  font-style: italic;
+}
+.transfer-panel {
+  margin-top: 24px;
+  padding: 24px 0 0;
+  border-top: 1px solid var(--border-soft);
+}
+.transfer-panel h2 {
+  font-size: 22px;
+}
+.transfer-panel form {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+.transfer-panel label {
+  color: var(--foreground);
+  font-weight: 500;
+}
+.input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  font: 400 16px / 1.2 var(--font-mono);
+  color: var(--foreground);
+  background: #fff;
+}
+.input:disabled {
+  background: var(--secondary);
+  color: var(--muted-foreground);
+}
+.input[aria-invalid="true"] {
+  border-color: var(--error);
+}
+.field-error {
+  color: var(--error);
+  margin: 0;
+}
+.confirm {
+  margin-top: 16px;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--warning);
+  background: var(--warning-bg);
+  color: var(--foreground);
+}
+.account-full {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+}
+
 @media (max-width: 760px) {
+  .ticket-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .hero,
   .event-layout {
     grid-template-columns: minmax(0, 1fr);

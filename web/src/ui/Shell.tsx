@@ -4,7 +4,10 @@ import { useWallet } from '../lib/near/useWallet';
 import { Link } from '../lib/router';
 import { useServices } from '../services';
 
-const NAV: Array<{ to: string; label: string }> = [{ to: '/', label: 'Events' }];
+const NAV: Array<{ to: string; label: string }> = [
+  { to: '/', label: 'Events' },
+  { to: '/tickets', label: 'My tickets' },
+];
 
 export function Shell({ children }: { children: ReactNode }) {
   const { fixtureMode, network } = useServices();

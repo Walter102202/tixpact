@@ -729,6 +729,37 @@ export const TX_FIXTURES = {
       ],
     ),
   },
+
+  /** Luis transfers ticket 1-3 to Ana with `nft_transfer`, which returns nothing. */
+  transferSucceeded: {
+    hash: 'CUoB1t9JXg4Zkpvp1YZbVKvRw8GHwtXxNaNkcAeXu4fS',
+    signerId: LUIS,
+    failedReceiptId: null,
+    status: recordedStatus(
+      'CUoB1t9JXg4Zkpvp1YZbVKvRw8GHwtXxNaNkcAeXu4fS',
+      LUIS,
+      {
+        method: 'nft_transfer',
+        argsBase64:
+          'eyJyZWNlaXZlcl9pZCI6ImFuYS50ZXN0bmV0IiwidG9rZW5faWQiOiIxLTMiLCJhcHByb3ZhbF9pZCI6bnVsbCwibWVtbyI6bnVsbH0=',
+        deposit: '1',
+        gasTgas: 30,
+      },
+      { SuccessValue: '' },
+      [
+        outcome(
+          'B6m3vrbcvHPp3nT1j8jZr4dKyu4wD3E9cpXiZ9mJgBDh',
+          FIXTURE_CONTRACT_ID,
+          { SuccessValue: '' },
+          ['7zCNZ8ohT3iFUNbJpWJjkN2s8JVtYy6NU8hT2zTGGsXc'],
+          [
+            `EVENT_JSON:${JSON.stringify({ standard: 'nep171', version: '1.2.0', event: 'nft_transfer', data: [{ old_owner_id: LUIS, new_owner_id: ANA, token_ids: ['1-3'] }] })}`,
+          ],
+        ),
+        outcome('7zCNZ8ohT3iFUNbJpWJjkN2s8JVtYy6NU8hT2zTGGsXc', LUIS, GAS_REFUND),
+      ],
+    ),
+  },
 } satisfies Record<string, RecordedTx>;
 
 /** A `TxStatusRpc` that answers from recorded statuses, whatever stage is asked for. */

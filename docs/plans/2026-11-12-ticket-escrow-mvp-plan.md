@@ -525,8 +525,8 @@ Needs Walter's go for three things: installing the Rust toolchain in his WSL, cr
 
 **Files:** `web/src/features/tickets/*`.
 
-- [ ] Failing tests: `/tickets` shows each ticket with holder, principal and claim word; `/tickets/1-3` shows the history list and the reserved amount; transfer form shows the full destination account and the sentence "You will lose the right to the refund", and is disabled after the start; the claim button reads "Claim 1.5 NEAR to <account>" only when `claim` is `Refundable`, or when `claim` is `Reserved` and the event's `phase` is `Expirable` (then the page also says "The deadline passed without confirmation"; `docs/decisions/2026-11-12-claim-shown-when-event-is-expirable.md`); Review Focus 1: with a recorded outcome whose callback receipt failed, the page shows "The payment did not complete" with the failed step and never "Refunded"; with `RefundPending` it shows "Sending" and no second button.
-- [ ] Implement. Run. Expected: green. Commit `feat(web): tickets, transfers and refund claims with honest pending states`, tick, push.
+- [x] Failing tests: `/tickets` shows each ticket with holder, principal and claim word; `/tickets/1-3` shows the history list and the reserved amount; transfer form shows the full destination account and the sentence "You will lose the right to the refund", and is disabled after the start; the claim button reads "Claim 1.5 NEAR to <account>" only when `claim` is `Refundable`, or when `claim` is `Reserved` and the event's `phase` is `Expirable` (then the page also says "The deadline passed without confirmation"; `docs/decisions/2026-11-12-claim-shown-when-event-is-expirable.md`); Review Focus 1: with a recorded outcome whose callback receipt failed, the page shows "The payment did not complete" with the failed step and never "Refunded"; with `RefundPending` it shows "Sending" and no second button.
+- [x] Implement. Run. Expected: green. Commit `feat(web): tickets, transfers and refund claims with honest pending states`, tick, push.
 
 ### Task W3: organizer and verifier
 

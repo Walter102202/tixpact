@@ -1,4 +1,5 @@
 import { type EventView, formatDateTime, PHASE_LABELS, PROMISE_TEXT } from '@ticket-escrow/client';
+import { readAllPages } from '../../lib/pages';
 import { Link } from '../../lib/router';
 import { useLoad } from '../../lib/useLoad';
 import { useServices } from '../../services';
@@ -22,7 +23,9 @@ const STEPS = [
 
 export function HomePage() {
   const { reader, timeZone } = useServices();
-  const events = useLoad('events', () => reader.listEvents(0, 50));
+  const events = useLoad('events', () =>
+    readAllPages((from, limit) => reader.listEvents(from, limit)),
+  );
   return (
     <>
       <section className="hero">

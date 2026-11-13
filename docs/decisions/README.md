@@ -47,3 +47,4 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-12 | The web uses a 60-line history router instead of a routing library | `2026-11-12-web-routes-without-a-router-library.md` |
 | 2026-11-12 | Without a contract id the web runs on demo data, and says so on every page | `2026-11-12-web-demo-data-without-a-contract-id.md` |
 | 2026-11-12 | Web test pins, the `process` replacement and the wallet-error wording | `2026-11-12-web-build-pins-and-the-process-shim.md` |
+| 2026-11-12 | The ticket page: when the claim and the transfer are offered, and what counts as paid | `2026-11-12-web-ticket-page-claims-and-transfers.md` |
