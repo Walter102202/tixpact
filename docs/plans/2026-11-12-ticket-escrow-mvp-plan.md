@@ -318,7 +318,7 @@ Enums:
 - `outcome`: `Unresolved`, `Completed`, `Refundable`. `outcome_reason`: `Attested`, `Cancelled`, `Expired`.
 - `phase` (derived from time, for display): `AwaitingVerifier`, `OnSale`, `SoldOut`, `InProgress`, `AwaitingAttestation`, `Expirable`, `Completed`, `Refundable`. An event never accepted by `starts_at_ms` shows `InProgress` onward like any other and simply has no tickets.
 - Ticket `status` (stored): `Active`, `TransferPending`, `RefundPending`, `Refunded`.
-- Ticket `claim` (derived): `Reserved` (event unresolved), `Refundable` (event refundable, status `Active`), `RefundPending`, `Refunded`, `ReleasedToOrganizer` (event completed).
+- Ticket `claim` (derived): `Reserved` (event unresolved), `Refundable` (event refundable, status `Active` or `TransferPending`), `RefundPending`, `Refunded`, `ReleasedToOrganizer` (event completed). A ticket locked by a transfer to a contract keeps the claim of its event and shows the lock in `status`, so a client offers the refund only when `claim` allows it and `status` is `Active` (decision `2026-11-12-codes-for-cases-the-interface-does-not-name.md`).
 - Operation `kind`: `Refund`, `Payout`. History `kind`: `Purchased`, `Transferred`, `TransferReturned`, `RefundRequested`, `RefundSettled`, `RefundFailed`. The history keeps the first entry and the latest fifteen; `dropped` counts the rest.
 
 Accounting identity, true after every call and every callback:
