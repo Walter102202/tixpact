@@ -7,8 +7,9 @@
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
+use near_api::types::transaction::actions::FunctionCallAction;
 use near_api::types::transaction::result::ExecutionFinalResult;
-use near_api::types::{PublicKey, Reference};
+use near_api::types::{Action, PublicKey, Reference};
 use near_api::{Account, AccountId, Chain, Contract, NearGas, NearToken, NetworkConfig, Signer};
 use near_sandbox::Sandbox;
 use near_sandbox::config::{
@@ -80,12 +81,22 @@ impl TestChain {
 
     /// Deploys the ticket escrow to [`ESCROW_ID`] and initializes it.
     pub async fn deploy_escrow(&self) -> TestResult<Contract> {
-        self.deploy_escrow_code(ESCROW_ID, escrow_wasm()).await
+        self.deploy_escrow_code(ESCROW_ID, false).await
     }
 
-    /// Deploys an escrow build (`escrow_wasm` or `faulty_escrow_wasm`) to `id` with 50 NEAR and
-    /// initializes it.
-    pub async fn deploy_escrow_code(&self, id: &str, wasm: Vec<u8>) -> TestResult<Contract> {
+    /// Deploys the normal build, or the `fault-injection` one, to `id` with 50 NEAR, initializes
+    /// it, and checks that `get_config` reports the build that was asked for. A swapped build
+    /// fails here, before any test relies on it.
+    pub async fn deploy_escrow_code(
+        &self,
+        id: &str,
+        fault_injection: bool,
+    ) -> TestResult<Contract> {
+        let wasm = if fault_injection {
+            faulty_escrow_wasm()
+        } else {
+            escrow_wasm()
+        };
         let account = self.accounts(&[id], 50).await?.remove(0);
         Contract::deploy(account.0.clone())
             .use_code(wasm)
@@ -94,7 +105,18 @@ impl TestChain {
             .send_to(&self.network)
             .await?
             .assert_success();
-        Ok(account.as_contract())
+        let contract = account.as_contract();
+        let config: Value = contract
+            .call_function("get_config", ())
+            .read_only()
+            .fetch_from(&self.network)
+            .await?
+            .data;
+        assert_eq!(
+            config["fault_injection"], fault_injection,
+            "{id} runs the wrong build"
+        );
+        Ok(contract)
     }
 
     /// Creates `id` with `near` NEAR and deploys a fixture to it. Fixtures have no init method.
@@ -231,12 +253,16 @@ impl TestChain {
 
     /// Deploys the escrow at [`ESCROW_ID`] and returns it with its call helpers.
     pub async fn escrow(&self) -> TestResult<Escrow<'_>> {
-        self.escrow_with(ESCROW_ID, escrow_wasm()).await
+        let contract = self.deploy_escrow_code(ESCROW_ID, false).await?;
+        Ok(Escrow {
+            chain: self,
+            contract,
+        })
     }
 
-    /// Deploys an escrow build at `id` and returns it with its call helpers.
-    pub async fn escrow_with(&self, id: &str, wasm: Vec<u8>) -> TestResult<Escrow<'_>> {
-        let contract = self.deploy_escrow_code(id, wasm).await?;
+    /// Deploys the `fault-injection` build at `id` and returns it with its call helpers.
+    pub async fn faulty_escrow(&self, id: &str) -> TestResult<Escrow<'_>> {
+        let contract = self.deploy_escrow_code(id, true).await?;
         Ok(Escrow {
             chain: self,
             contract,
@@ -272,13 +298,22 @@ pub fn escrow_wasm() -> Vec<u8> {
 }
 
 /// The contract built with the `fault-injection` feature: its settlement callbacks run out of gas
-/// after their transfer. Written to its own folder so it never replaces the normal build.
+/// after their transfer.
+///
+/// It has a cargo target directory and an output folder of its own. With a shared target
+/// directory, `cargo near build` copies `target/wasm32-unknown-unknown/release/ticket_escrow.wasm`
+/// after cargo has released its lock, so a normal build running in another test thread could
+/// replace that file in between and each build would ship the other's wasm.
 pub fn faulty_escrow_wasm() -> Vec<u8> {
     static WASM: OnceLock<Vec<u8>> = OnceLock::new();
     WASM.get_or_init(|| {
         build_wasm(cargo_near_build::BuildOpts {
             features: Some("fault-injection".to_string()),
             out_dir: Some(out_dir("fault-injection")),
+            override_cargo_target_dir: Some(format!(
+                "{}/fault-injection-target",
+                env!("CARGO_TARGET_TMPDIR")
+            )),
             ..Default::default()
         })
     })
@@ -318,6 +353,18 @@ fn out_dir(name: &str) -> cargo_near_build::camino::Utf8PathBuf {
 fn build_wasm(opts: cargo_near_build::BuildOpts) -> Vec<u8> {
     let path = cargo_near_build::build_with_cli(opts).expect("cargo near build failed");
     std::fs::read(path).expect("the built wasm is readable")
+}
+
+/// yoctoNEAR per byte of storage on this protocol version.
+pub const STORAGE_BYTE_COST: u128 = 10_000_000_000_000_000_000;
+/// Gas of each function call inside an [`Escrow::batch`], in Tgas.
+pub const TGAS_PER_CALL: u64 = 25;
+
+/// A 64-character sandbox account id, the longest NEAR allows.
+pub fn long_id(name: &str) -> String {
+    let id = format!("{name:x<56}.sandbox");
+    assert_eq!(id.len(), 64);
+    id
 }
 
 /// The people of the story, each with 20 NEAR.
@@ -386,6 +433,35 @@ impl Escrow<'_> {
             .deposit(deposit)
             .gas(NearGas::from_tgas(tgas))
             .with_signer(signer.0.clone(), self.chain.signer.clone())
+            .send_to(&self.chain.network)
+            .await?;
+        Ok(result
+            .into_full()
+            .ok_or("send_to returned before the transaction ran")?)
+    }
+
+    /// One transaction from `signer` to the escrow, with one function call of
+    /// [`TGAS_PER_CALL`] per `(method, args, deposit in yoctoNEAR)`. If any call fails, none of
+    /// them changes anything.
+    pub async fn batch(
+        &self,
+        signer: &Account,
+        calls: Vec<(&str, Value, u128)>,
+    ) -> TestResult<ExecutionFinalResult> {
+        let actions = calls
+            .into_iter()
+            .map(|(method, args, deposit)| {
+                Action::FunctionCall(Box::new(FunctionCallAction {
+                    method_name: method.to_string(),
+                    args: args.to_string().into_bytes(),
+                    gas: NearGas::from_tgas(TGAS_PER_CALL),
+                    deposit: NearToken::from_yoctonear(deposit),
+                }))
+            })
+            .collect();
+        let result = near_api::Transaction::construct(signer.0.clone(), self.id())
+            .add_actions(actions)
+            .with_signer(self.chain.signer.clone())
             .send_to(&self.chain.network)
             .await?;
         Ok(result

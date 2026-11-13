@@ -4,7 +4,7 @@
 
 mod common;
 
-use common::TestChain;
+use common::{STORAGE_BYTE_COST, TestChain};
 use near_sdk::serde_json::Value;
 
 #[tokio::test]
@@ -38,7 +38,15 @@ async fn deploys_and_reports_config() -> testresult::TestResult<()> {
         .fetch_from(&chain.network)
         .await?
         .data;
-    assert!(per_event > 0 && per_ticket > 0);
+    // The deployed build reports the measured storage constants (Task C4).
+    assert_eq!(
+        per_event,
+        ticket_escrow::STORAGE_BYTES_PER_EVENT * STORAGE_BYTE_COST
+    );
+    assert_eq!(
+        per_ticket,
+        ticket_escrow::STORAGE_BYTES_PER_TICKET * STORAGE_BYTE_COST
+    );
     assert_eq!(quote.parse::<u128>()?, per_event + per_ticket);
 
     Ok(())

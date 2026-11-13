@@ -58,3 +58,5 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | The refund watcher backs off a failing call, gives it up after five, and stops before the next call | `2026-11-13-agent-watcher-backs-off-and-gives-up.md` |
 | 2026-11-13 | The agent's output hides RPC URLs and quotes organizer text on one line | `2026-11-13-agent-output-hides-rpc-urls-and-quotes-organizer-text.md` |
 | 2026-11-13 | At start the agent accepts only .testnet accounts and checks that the key is a full-access key of AGENT_ACCOUNT_ID | `2026-11-13-agent-start-checks-testnet-accounts-and-the-key.md` |
+| 2026-11-13 | Storage and gas constants come from measured worst cases; static gas keeps five times the worst case | `2026-11-13-measured-storage-and-gas-constants.md` |
+| 2026-11-13 | The resolver gets 40 Tgas so it can read the longest answer; `nft_transfer_call` needs 70 Tgas | `2026-11-13-resolver-gas-covers-the-longest-answer.md` |
