@@ -1,5 +1,5 @@
 # CI gates for every push and pull request. Every job must pass before a merge.
-# The contract job (build, clippy, sandbox tests) is added in the commit that adds the contract crate.
+# Each job runs the same script a person runs locally: scripts/gate.sh.
 name: CI
 
 on:
@@ -17,6 +17,39 @@ permissions:
   contents: read
 
 jobs:
+  contract:
+    name: contract (fmt, clippy, wasm build, sandbox tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # rust-toolchain.toml pins the version, the components and the wasm target.
+      - name: Install the pinned Rust toolchain
+        run: |
+          rustup toolchain install || rustup show
+          rustc --version
+
+      - uses: Swatinem/rust-cache@v2
+
+      # The prebuilt cargo-near binary, pinned by version and verified against its published checksum.
+      - name: Install cargo-near
+        env:
+          CARGO_NEAR_VERSION: 0.23.0
+          CARGO_NEAR_SHA256: 94008b827a457750257eced4b571c33736062cc3bd1ffda3e7af70e2bc9a4073
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/cargo-near"
+          cd "$RUNNER_TEMP/cargo-near"
+          gh release download "cargo-near-v$CARGO_NEAR_VERSION" --repo near/cargo-near \
+            --pattern "cargo-near-x86_64-unknown-linux-gnu.tar.gz"
+          echo "$CARGO_NEAR_SHA256  cargo-near-x86_64-unknown-linux-gnu.tar.gz" | sha256sum --check --strict
+          tar -xzf cargo-near-x86_64-unknown-linux-gnu.tar.gz -C "$HOME/.cargo/bin" --strip-components=1 \
+            cargo-near-x86_64-unknown-linux-gnu/cargo-near
+          cargo near --version
+
+      - run: bash scripts/gate.sh contract
+
   web:
     name: web (lint, typecheck, test, build)
     runs-on: ubuntu-latest

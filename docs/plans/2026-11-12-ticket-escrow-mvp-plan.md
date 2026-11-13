@@ -113,6 +113,8 @@ Verified on 2026-11-12 against tagged sources or official docs unless marked UNT
 - Wallets that work on testnet through NEAR Connect: Meteor and Intear. MyNearWallet is being shut down and HOT is not listed on testnet. Function-call access keys cannot attach a deposit, so every payable call needs the wallet.
 - Local Windows Node is 22.18.0 and `near-api-js` asks for 22.22.2 or later; npm only warns. CI and WSL use current Node 22.
 - Long shell heredocs break on Windows shells; write files with the editor tool. A stray `.playwright-mcp/` folder breaks lint if it is not ignored.
+- Sandbox accounts created by patching state are not visible in final blocks at once, and `near-api` reads the signer's nonce from a final block: a transaction signed right after `sandbox.create_account` fails about one time in ten. Create test accounts only through `TestChain::accounts` (`contract/tests/common/mod.rs`), which waits. `near-sandbox` and `near-api` also use different versions of the account id type: parse the text once for each.
+- Commands reach WSL through `scripts/wsl.sh` as plain words. A `$`, a quote or a pipe is lost on the way, and an absolute Linux path is rewritten by Git Bash unless the command starts with `MSYS_NO_PATHCONV=1` (`docs/toolchain.md`).
 
 ### Quality bar (checkable)
 
@@ -265,6 +267,9 @@ Behaviour the signatures do not show:
 - `expire_event`: before the deadline it fails with `ERR_TOO_EARLY`; on an already resolved event it changes nothing and returns the outcome.
 - `claim_refund`: if the event is still `Unresolved` and the deadline has passed, it expires the event first, then proceeds. It requires `prepaid_gas >= GAS_CLAIM_MIN` and the liquidity check below.
 - `claim_payout`: sends the whole `organizer_available` to `organizer_id` in one transfer.
+- `EventView.evidence_ref` is the reference given by whoever resolved the event: the `evidence_ref` of `attest_completed`, the `reason_ref` of `cancel_event`, `null` on expiry or when none was given (`docs/decisions/2026-11-12-cancel-reason-shares-evidence-ref.md`). Both are limited to `max_ref_bytes` (`ERR_LIMIT`).
+- Paginated views (`list_events`, `list_tickets_for_owner`): `from_index` is a 0-based position, `list_events` is ordered by ascending `event_id`, `list_tickets_for_owner` follows the standard enumeration order (`nft_tokens_for_owner`), and each returns at most `min(limit, max_page)` items; they never panic on a large `limit` or an index past the end (empty list).
+- `OperationView.token_id` is `null` for a `Payout`; `recipient_id` is then the organizer.
 - Liquidity check before scheduling a transfer of `X`: `account_balance - X >= storage_usage * storage_byte_cost + total_held`, where `total_held` is the sum over all events of `principal_reserved + organizer_available` after this operation is reserved. Failing it rejects the call with `ERR_INSUFFICIENT_LIQUIDITY` and changes nothing.
 - A callback never panics on an expected path. On `Ok` it settles; on `Err` it restores the right; in both cases it removes the pending operation and returns whether money moved.
 
@@ -378,29 +383,29 @@ Needs Walter's go for three things: installing the Rust toolchain in his WSL, cr
 
 ### Task P0.1: toolchain and spike S1
 
-- [ ] In WSL Ubuntu 24.04: rustup with Rust 1.95.0 and `wasm32-unknown-unknown`, `cargo-near` 0.23.0, `near-cli-rs` 0.31.1 (installers from the official release pages). Expected: `cargo near --version` and `near --version` print those versions.
-- [ ] Run spike S1 in a scratch folder. Record in `docs/toolchain.md`: the exact wrapper to run a command in WSL from the Windows shell, the `CARGO_TARGET_DIR` on the Linux filesystem per track, cold and warm build and test times, the harness chosen, whether worktrees or full clones are used for Rust, and the verified forms of `cargo near build`, `cargo near deploy`, account creation with the faucet (`save-to-legacy-keychain`) and key deletion.
-- [ ] `npx skills add near/agent-skills` in the repository; record where the skills landed.
+- [x] In WSL Ubuntu 24.04: rustup with Rust 1.95.0 and `wasm32-unknown-unknown`, `cargo-near` 0.23.0, `near-cli-rs` 0.31.1 (installers from the official release pages). Expected: `cargo near --version` and `near --version` print those versions. Done from verified archives instead of the installer scripts: `docs/decisions/2026-11-12-rust-toolchain-installed-from-verified-archives.md`.
+- [x] Run spike S1 in a scratch folder. Record in `docs/toolchain.md`: the exact wrapper to run a command in WSL from the Windows shell, the `CARGO_TARGET_DIR` on the Linux filesystem per track, cold and warm build and test times, the harness chosen, whether worktrees or full clones are used for Rust, and the verified forms of `cargo near build`, `cargo near deploy`, account creation with the faucet (`save-to-legacy-keychain`) and key deletion. Deploy and faucet forms are read from the help text and first run in Task I1; key deletion is written down in Task I3 with Walter.
+- [x] `npx skills add near/agent-skills` in the repository; record where the skills landed.
 
 ### Task P0.2: repository, hygiene, CI
 
-- [ ] `git init`, `.gitignore` as in Global Constraints, `LICENSE` (MIT), `.editorconfig`, `.gitattributes` (`* text=auto eol=lf`), `.nvmrc` (`22`), `biome.json`, `tsconfig.base.json` copied from `C:\dev\dealingwith-si` and trimmed. Verify `git status` shows neither the Spanish spec nor `docs/hackathon/`.
-- [ ] pnpm workspace with `packages/client`, `web`, `mcp` (empty packages with `lint`, `typecheck`, `test`, `build` scripts) and the `contract/` crate created by `cargo near new`, plus `fixtures/` for test-only contracts. `rust-toolchain.toml` pins 1.95.0.
-- [ ] `scripts/gate.sh`: one command that builds the contract, runs the sandbox tests, then `pnpm install --frozen-lockfile`, lint, typecheck, test, build. This is the command the README gives to judges.
-- [ ] `.github/workflows/ci.yml` with three jobs, adapted from `C:\dev\dealingwith-si\.github\workflows\ci.yml`: `contract` (Rust 1.95, cargo-near, build, tests), `web` (frozen install, lint, typecheck, test, build), `hygiene` (no private file tracked, gitleaks over the whole history).
-- [ ] `docs/decisions/README.md` with the record format (Context, Decision, Alternatives considered, Consequences; one file per decision named `YYYY-MM-DD-slug.md`; append-only).
-- [ ] Private GitHub repository created, first commit pushed, CI green. `.claude/settings.local.json` (ignored) with the allow and deny lists used in `C:\dev\dealingwith-si`, extended with the WSL, cargo, near and pnpm commands.
+- [x] `git init`, `.gitignore` as in Global Constraints, `LICENSE` (MIT), `.editorconfig`, `.gitattributes` (`* text=auto eol=lf`), `.nvmrc` (`22`), `biome.json`, `tsconfig.base.json` copied from `C:\dev\dealingwith-si` and trimmed. Verify `git status` shows neither the Spanish spec nor `docs/hackathon/`.
+- [x] pnpm workspace with `packages/client`, `web`, `mcp` (empty packages with `lint`, `typecheck`, `test`, `build` scripts) and the `contract/` crate created by `cargo near new`, plus `fixtures/` for test-only contracts. `rust-toolchain.toml` pins 1.95.0. The crate was written from the template inside one cargo workspace: `docs/decisions/2026-11-12-one-cargo-workspace-and-the-template-harness.md`.
+- [x] `scripts/gate.sh`: one command that builds the contract, runs the sandbox tests, then `pnpm install --frozen-lockfile`, lint, typecheck, test, build. This is the command the README gives to judges.
+- [x] `.github/workflows/ci.yml` with three jobs, adapted from `C:\dev\dealingwith-si\.github\workflows\ci.yml`: `contract` (Rust 1.95, cargo-near, build, tests), `web` (frozen install, lint, typecheck, test, build), `hygiene` (no private file tracked, gitleaks over the whole history).
+- [x] `docs/decisions/README.md` with the record format (Context, Decision, Alternatives considered, Consequences; one file per decision named `YYYY-MM-DD-slug.md`; append-only).
+- [x] Private GitHub repository created, first commit pushed, CI green. `.claude/settings.local.json` (ignored) with the allow and deny lists used in `C:\dev\dealingwith-si`, extended with the WSL, cargo, near and pnpm commands.
 
 ### Task P0.3: threat model and interface, before any contract code
 
-- [ ] `docs/threat-model.md`: every way a previous holder, an organizer, a verifier, a receiver contract or a caller of a callback could keep or take money, each with the rule that stops it and the test that proves it (from spec section 12 and the rules above). The honest limits go in the same file: a lying verifier, a stuck callback, a lost key, an unaudited contract.
-- [ ] Commit this plan with the frozen interface. Fill each track's revision note (commit, test counts, worktree path, check command) and start Tracks C and W.
+- [x] `docs/threat-model.md`: every way a previous holder, an organizer, a verifier, a receiver contract or a caller of a callback could keep or take money, each with the rule that stops it and the test that proves it (from spec section 12 and the rules above). The honest limits go in the same file: a lying verifier, a stuck callback, a lost key, an unaudited contract.
+- [x] Commit this plan with the frozen interface. Fill each track's revision note (commit, test counts, worktree path, check command) and start Tracks C and W.
 
 ---
 
 ## Track C — contract (`contract/`, `fixtures/`)
 
-**Revision note.** Filled by the integrator at the end of Phase 0: `main` commit, harness, check command and its expected output, worktree or clone path, target directory.
+**Revision note (2026-11-12, end of Phase 0).** Worktree `.claude/worktrees/c`, branch `track/c`, created from the `main` commit "chore: add the contract crate, the sandbox harness and the contract gate". Check command, from Git Bash in the worktree: `bash scripts/gate.sh contract` (it hops into WSL by itself). Expected on the scaffold: 1 unit test (`config_reports_the_frozen_limits`) and 2 sandbox tests (`deploys_and_reports_config`, `new_accounts_can_sign_at_once`) pass, then `== gate passed: contract ==`. First run in the worktree compiles for about 2 minutes; afterwards under 30 seconds plus your tests. Read `docs/toolchain.md`, section "Rust and the contract", before anything else: how commands reach WSL and its three traps, the cargo target directory (`~/.cache/ticket-escrow/<checkout>/target`), the sandbox harness and the facts it depends on. Already there to build on: the cargo workspace (`Cargo.toml`, `Cargo.lock`; members `contract` and `fixtures/*`), `contract/src/lib.rs` (constants, `Config`, `new`, `get_config`; split it into the modules below), `contract/tests/common/mod.rs` (`TestChain::start`, `accounts`, `deploy_escrow`, `escrow_wasm`; extend it, keep account creation going through `accounts`), `contract/tests/smoke.rs`, the `fault-injection` feature flag in `contract/Cargo.toml`. A new dependency or fixture crate changes `Cargo.lock`: commit it and say so in your report. You may also edit the root `Cargo.toml` only to add a shared dependency under `[workspace.dependencies]`. The plan's `contract/tests/common.rs` is `contract/tests/common/mod.rs`.
 
 **Read first for this track:** the Frozen interface and Acceptance tests above; `docs/threat-model.md`; the `near-smart-contracts` skill; and, at the tag `near-sdk-v5.30.1`, `near-contract-standards/src/non_fungible_token/core/core_impl.rs` (mint helpers, `nft_transfer_call`, the resolver) and `examples/non-fungible-token`. Read them; never guess a name.
 
@@ -469,7 +474,7 @@ Needs Walter's go for three things: installing the Rust toolchain in his WSL, cr
 
 ## Track W — client package and web (`packages/client/`, `web/`)
 
-**Revision note (2026-11-12, scaffold on `main`).** Worktree `.claude/worktrees/w`, branch `track/w`. Check command: `pnpm install --frozen-lockfile && pnpm lint && pnpm typecheck && pnpm test && pnpm build`; expected on the scaffold: lint checks 23 files, 1 test file with 2 tests, the web build writes `web/dist`. Already pinned by the scaffold: `zod` 4.6.7 and `near-api-js` 7.5.3 in `packages/client`; React 19.3.1, Vite 8.3.8, `@vitejs/plugin-react` 6.3.0, `@hot-labs/near-connect` 0.12.0 and `util` 0.12.5 in `web`. `packages/client/src/{brand,index}.ts` and `web/src/{main,App}.tsx` are placeholders to build on. Testing Library and jsdom are not installed: add them pinned in Task W1. No remote yet: commit locally.
+**Revision note (2026-11-12, scaffold on `main`).** Worktree `.claude/worktrees/w`, branch `track/w`. Check command: `pnpm install --frozen-lockfile && pnpm lint && pnpm typecheck && pnpm test && pnpm build`; expected on the scaffold: lint checks 23 files, 1 test file with 2 tests, the web build writes `web/dist`. Already pinned by the scaffold: `zod` 4.6.7 and `near-api-js` 7.5.3 in `packages/client`; React 19.3.1, Vite 8.3.8, `@vitejs/plugin-react` 6.3.0, `@hot-labs/near-connect` 0.12.0 and `util` 0.12.5 in `web`. `packages/client/src/{brand,index}.ts` and `web/src/{main,App}.tsx` are placeholders to build on. Testing Library and jsdom are not installed: add them pinned in Task W1. Remote: `origin`; push every commit (`docs/toolchain.md`).
 
 **Read first for this track:** the Frozen interface; the `near-api-js` and `near-dapp` skills; the Vite React template of `create-near-app` (`templates/frontend/vite-react`, file `src/providers/near-provider.tsx`) for the wallet wiring; Walter's `landing-estilo-hosli` skill for the default look of the landing page, and `frontend-design`.
 
@@ -512,7 +517,7 @@ Needs Walter's go for three things: installing the Rust toolchain in his WSL, cr
 
 **Files:** `web/src/{main,App}.tsx`, `web/src/lib/near/{connector,useWallet,useTx}.ts`, `web/src/features/events/*`, `web/src/styles/*`, tests beside the code.
 
-- [ ] Failing tests (Testing Library, fixture mode): `/` lists the fixture events with price, verifier and phase; `/events/1` shows price, the reserved amount, "Confirmed by" account or "Awaiting verifier", start, end, deadline in the event's time zone and the promise text; the buy button reads "Buy for 1.5 NEAR" and is disabled with the reason outside `OnSale`; a rejected wallet popup leaves the page unchanged with a dismissible notice.
+- [ ] Failing tests (Testing Library, fixture mode): `/` lists the fixture events with price, verifier and phase; `/events/1` shows price, the reserved amount, "Confirmed by" account or "Awaiting verifier", start, end, deadline in the viewer's time zone with the UTC offset written out (`docs/decisions/2026-11-12-times-shown-in-the-viewers-zone.md`) and the promise text; the buy button reads "Buy for 1.5 NEAR" and is disabled with the reason outside `OnSale`; a rejected wallet popup leaves the page unchanged with a dismissible notice.
 - [ ] Implement the shell (header with account, network badge "testnet"), the wallet hook, the transaction hook built on `trackTransaction`, the two routes.
 - [ ] Run lint, typecheck, test, build. Expected: green. Commit `feat(web): event pages and ticket purchase`, tick, push.
 
@@ -520,7 +525,7 @@ Needs Walter's go for three things: installing the Rust toolchain in his WSL, cr
 
 **Files:** `web/src/features/tickets/*`.
 
-- [ ] Failing tests: `/tickets` shows each ticket with holder, principal and claim word; `/tickets/1-3` shows the history list and the reserved amount; transfer form shows the full destination account and the sentence "You will lose the right to the refund", and is disabled after the start; the claim button reads "Claim 1.5 NEAR to <account>" only when `claim` is `Refundable`; Review Focus 1: with a recorded outcome whose callback receipt failed, the page shows "The payment did not complete" with the failed step and never "Refunded"; with `RefundPending` it shows "Sending" and no second button.
+- [ ] Failing tests: `/tickets` shows each ticket with holder, principal and claim word; `/tickets/1-3` shows the history list and the reserved amount; transfer form shows the full destination account and the sentence "You will lose the right to the refund", and is disabled after the start; the claim button reads "Claim 1.5 NEAR to <account>" only when `claim` is `Refundable`, or when `claim` is `Reserved` and the event's `phase` is `Expirable` (then the page also says "The deadline passed without confirmation"; `docs/decisions/2026-11-12-claim-shown-when-event-is-expirable.md`); Review Focus 1: with a recorded outcome whose callback receipt failed, the page shows "The payment did not complete" with the failed step and never "Refunded"; with `RefundPending` it shows "Sending" and no second button.
 - [ ] Implement. Run. Expected: green. Commit `feat(web): tickets, transfers and refund claims with honest pending states`, tick, push.
 
 ### Task W3: organizer and verifier

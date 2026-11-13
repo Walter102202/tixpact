@@ -1,5 +1,7 @@
 * text=auto eol=lf
 *.sh text eol=lf
+# Every track appends lines to this index; a union merge keeps both sides instead of conflicting.
+docs/decisions/README.md merge=union
 *.wasm binary
 *.png binary
 *.jpg binary
