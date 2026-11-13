@@ -1082,45 +1082,66 @@ fn enumeration_views_carry_the_same_metadata() {
 }
 
 /// The drawn ticket stays under 2 KB for the largest facts the contract accepts, and markup in the
-/// title or the symbol is escaped, never drawn.
+/// title or the symbol is escaped, never drawn. The worst amount is the largest principal with the
+/// most decimals and the longest symbol made of the character with the longest escape (`"` or `'`,
+/// 6 bytes each).
 #[test]
 fn the_drawn_ticket_is_small_and_escaped_in_the_worst_case() {
-    use crate::currency::Unit;
+    use crate::currency::{MAX_DECIMALS, MAX_SYMBOL_BYTES, Unit};
     let contract = contract_with_a_sold_ticket();
     let mut event = contract.load_event(1);
     event.capacity = MAX_CAPACITY;
     let mut ticket = contract.load_ticket(&"1-1".to_string());
     ticket.serial = MAX_CAPACITY;
     ticket.principal = u128::MAX;
-    // The longest symbol, every byte escaped.
-    let unit = Unit {
-        symbol: "<<<<<<<<<<<<",
-        decimals: 0,
-    };
     // The longest title of the character with the longest escape, then one of every kind.
     let titles = [
         "\"".repeat(MAX_TITLE_BYTES as usize),
         "\"<&>'\u{1}".repeat(20),
     ];
-    for title in titles {
-        event.title = title;
-        for outcome in [Outcome::Unresolved, Outcome::Completed, Outcome::Refundable] {
-            event.outcome = outcome;
-            let metadata = display::token_metadata(&event, &ticket, unit);
-            let svg = decode_svg(metadata.media.as_deref().expect("a drawn ticket"));
-            assert!(svg.len() <= display::MAX_SVG_BYTES, "{} bytes", svg.len());
-            assert!(!svg.contains("<<") && !svg.contains("<&") && !svg.contains('\u{1}'));
-            assert!(svg.contains("&quot;"), "{svg}");
-            assert!(svg.contains('…'), "a long title is cut: {svg}");
+    let mut largest = 0;
+    for (quote, escape) in [("\"", "&quot;"), ("'", "&apos;")] {
+        let symbol = quote.repeat(MAX_SYMBOL_BYTES);
+        let unit = Unit {
+            symbol: &symbol,
+            decimals: MAX_DECIMALS,
+        };
+        let amount = format!(
+            ">340282366920938.463463374607431768211455 {}<",
+            escape.repeat(MAX_SYMBOL_BYTES)
+        );
+        for title in &titles {
+            event.title = title.clone();
+            for outcome in [Outcome::Unresolved, Outcome::Completed, Outcome::Refundable] {
+                event.outcome = outcome;
+                let metadata = display::token_metadata(&event, &ticket, unit);
+                let svg = decode_svg(metadata.media.as_deref().expect("a drawn ticket"));
+                assert!(svg.len() <= display::MAX_SVG_BYTES, "{} bytes", svg.len());
+                largest = largest.max(svg.len());
+                assert!(
+                    svg.contains(&amount),
+                    "the amount is not drawn escaped: {svg}"
+                );
+                assert!(!svg.contains("\"\"") && !svg.contains("''"), "{svg}");
+                assert!(!svg.contains("<<") && !svg.contains("<&") && !svg.contains('\u{1}'));
+                assert!(svg.contains('…'), "a long title is cut: {svg}");
+            }
         }
+        assert!(svg_of(&event, &ticket, unit).contains("&quot;&lt;&amp;&gt;&apos; "));
     }
-    let svg = decode_svg(
-        display::token_metadata(&event, &ticket, unit)
+    // The bound is not close: the worst ticket is under half of it.
+    eprintln!("largest drawn ticket: {largest} bytes");
+    assert!(largest * 2 <= display::MAX_SVG_BYTES, "{largest} bytes");
+}
+
+/// The drawn ticket of `ticket` in `event`, decoded.
+fn svg_of(event: &EventRecord, ticket: &Ticket, unit: crate::currency::Unit<'_>) -> String {
+    decode_svg(
+        display::token_metadata(event, ticket, unit)
             .media
             .as_deref()
             .expect("a drawn ticket"),
-    );
-    assert!(svg.contains("&quot;&lt;&amp;&gt;&apos; "), "{svg}");
+    )
 }
 
 #[test]
@@ -1466,7 +1487,12 @@ fn a_token_refund_is_an_ft_transfer_of_the_principal_with_one_yocto() {
     assert_eq!(payment.args, expected);
     assert_eq!(payment.deposit, 1);
     assert_eq!(payment.gas, GAS_FT_TRANSFER);
-    assert_eq!(payment.weight, 0, "the token gets exactly its static gas");
+    assert_eq!(
+        payment.weight,
+        near_sdk::GasWeight::default().0,
+        "the token gets the default share of unused gas on top of GAS_FT_TRANSFER"
+    );
+    assert!(payment.weight > 0);
     assert_eq!(payment.callback, "on_refund_result");
 
     let ticket = contract
@@ -1538,7 +1564,7 @@ fn a_token_payout_goes_to_the_organizer_and_its_failure_restores_it() {
     assert_eq!(payment.args["receiver_id"], ORGANIZER);
     assert_eq!(payment.args["amount"], TOKEN_PRICE.to_string());
     assert_eq!((payment.deposit, payment.gas), (1, GAS_FT_TRANSFER));
-    assert_eq!(payment.weight, 0);
+    assert_eq!(payment.weight, near_sdk::GasWeight::default().0);
     assert_eq!(payment.callback, "on_payout_result");
     assert_eq!(contract.total_held, 0);
 
