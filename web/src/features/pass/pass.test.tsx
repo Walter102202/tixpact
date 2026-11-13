@@ -64,9 +64,18 @@ async function openTicket(id: string, services: ReturnType<typeof testServices>)
 }
 
 const verdict = () =>
-  screen.findByText(/^(Admit|Do not admit|Already admitted)$/, {
-    selector: '.verdict-word',
-  });
+  screen.findByText(
+    /^(Demo: would |Demo: )?(admit|not admit|already admitted|Admit|Do not admit|Already admitted)$/,
+    {
+      selector: '.verdict-word',
+    },
+  );
+
+/** Live mode (not demo data), signed out: how an attendant's phone opens the door page. */
+const live = (overrides: Parameters<typeof testServices>[0] = {}) =>
+  servicesAs(null, { fixtureMode: false, ...overrides });
+
+const CHECKING_SITE = `Checking site: ${window.location.origin}. Open this page yourself, from your own bookmark: a link or code the holder shows you can lead to a copy of this site that admits anyone.`;
 
 describe('the ticket page offers the entry pass', () => {
   it('to the signed-in holder of an active ticket', async () => {
@@ -235,7 +244,7 @@ describe('the pass page', () => {
 describe('the door', () => {
   it('admits a valid pass, and a second scan on this device reads "Already admitted"', async () => {
     const pass = demoPass();
-    renderAt(`/door#p=${encodePass(pass)}`, servicesAs(null));
+    renderAt(`/door#p=${encodePass(pass)}`, live());
     expect((await verdict()).textContent).toBe('Admit');
     expect(screen.getByText('Ticket 1-3 · luis.testnet')).toBeTruthy();
     const checks = within(screen.getByRole('list', { name: 'The five checks' }));
@@ -252,7 +261,7 @@ describe('the door', () => {
 
     cleanup();
     act(() => vi.advanceTimersByTime(30_000));
-    renderAt(`/door#p=${encodePass(pass)}`, servicesAs(null));
+    renderAt(`/door#p=${encodePass(pass)}`, live());
     expect((await verdict()).textContent).toBe('Already admitted');
     expect(screen.getByText('Already admitted on this device at 21:03.')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Mark as admitted' })).toBeNull();
@@ -261,7 +270,7 @@ describe('the door', () => {
   it('does not admit a pass once the ticket was transferred after signing', async () => {
     const pass = demoPass();
     const reader = createFixtureReader(transferredToAna());
-    renderAt(`/door#p=${encodePass(pass)}`, servicesAs(null, { reader }));
+    renderAt(`/door#p=${encodePass(pass)}`, live({ reader }));
     expect((await verdict()).textContent).toBe('Do not admit');
     const sentence =
       'luis.testnet signed this pass but no longer holds ticket 1-3. The holder is ana.testnet.';
@@ -269,7 +278,7 @@ describe('the door', () => {
   });
 
   it('does not admit an expired pass, and says why', async () => {
-    renderAt(`/door#p=${encodePass(demoPass(LUIS, '1-3', NOW - 6 * 60_000))}`, servicesAs(null));
+    renderAt(`/door#p=${encodePass(demoPass(LUIS, '1-3', NOW - 6 * 60_000))}`, live());
     expect((await verdict()).textContent).toBe('Do not admit');
     expect(
       screen.getAllByText(
@@ -284,12 +293,12 @@ describe('the door', () => {
       accessKey: async () => 'function-call',
       ticket: (id) => reader.getTicket(id),
     };
-    renderAt(`/door#p=${encodePass(demoPass())}`, servicesAs(null, { passChain }));
+    renderAt(`/door#p=${encodePass(demoPass())}`, live({ passChain }));
     expect((await verdict()).textContent).toBe('Do not admit');
   });
 
   it('without a pass, explains itself and checks a pasted link', async () => {
-    renderAt('/door', servicesAs(null));
+    renderAt('/door', live());
     expect(screen.getByRole('heading', { level: 1, name: 'Door check' })).toBeTruthy();
     const input = screen.getByLabelText('Pass or door link');
     fireEvent.change(input, { target: { value: 'not a pass' } });
@@ -306,7 +315,7 @@ describe('the door', () => {
   });
 
   it('says so when the link carries no readable pass', () => {
-    renderAt('/door#p=garbage', servicesAs(null));
+    renderAt('/door#p=garbage', live());
     expect(screen.getByRole('alert').textContent).toBe(
       'This link does not carry a readable entry pass. Ask the holder to show it again.',
     );
@@ -315,6 +324,29 @@ describe('the door', () => {
   it('is marked as demo data in demo mode, like every page', () => {
     renderAt('/door', servicesAs(null));
     expect(screen.getByText('Demo data: nothing on this page is on chain.')).toBeTruthy();
+    expect(screen.getByText(/It is checked against demo data, not the chain/)).toBeTruthy();
+  });
+
+  it('names the checking site and tells the attendant to open it from their own bookmark', async () => {
+    renderAt('/door', live());
+    expect(document.querySelector('.door-site')?.textContent).toBe(CHECKING_SITE);
+    expect(document.body.textContent).not.toMatch(/camera/i);
+    cleanup();
+    renderAt(`/door#p=${encodePass(demoPass(LUIS, '1-3', NOW - 6 * 60_000))}`, live());
+    await verdict();
+    expect(screen.getByRole('status').querySelector('.door-site')?.textContent).toBe(CHECKING_SITE);
+  });
+
+  it('in demo mode never says a bare "Admit": the verdict reads as a demo result', async () => {
+    renderAt(`/door#p=${encodePass(demoPass())}`, servicesAs(null));
+    expect((await verdict()).textContent).toBe('Demo: would admit');
+    const status = within(screen.getByRole('status'));
+    expect(status.getByText('Demo data, not the chain: this result admits no one.')).toBeTruthy();
+    expect(screen.getByRole('status').querySelector('.door-site')?.textContent).toBe(CHECKING_SITE);
+    expect(screen.queryByText('Admit', { selector: '.verdict-word' })).toBeNull();
+    cleanup();
+    renderAt(`/door#p=${encodePass(demoPass(LUIS, '1-3', NOW - 6 * 60_000))}`, servicesAs(null));
+    expect((await verdict()).textContent).toBe('Demo: would not admit');
   });
 
   it('still works when the browser refuses to store anything', async () => {
@@ -324,7 +356,7 @@ describe('the door', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('storage is disabled');
     });
-    renderAt(`/door#p=${encodePass(demoPass())}`, servicesAs(null));
+    renderAt(`/door#p=${encodePass(demoPass())}`, live());
     expect((await verdict()).textContent).toBe('Admit');
     fireEvent.click(screen.getByRole('button', { name: 'Mark as admitted' }));
     expect(

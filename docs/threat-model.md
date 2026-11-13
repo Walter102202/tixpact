@@ -110,7 +110,7 @@ What a pass does not stop:
 4. **A pass the agent shows.** `show_entry_pass` returns a bearer pass: the model, and anyone who reads the conversation, can show it at the door for five minutes.
 5. **The attendant's clock.** Freshness is judged by the checking device's clock. A clock far ahead turns valid passes into "expired"; a clock far behind accepts passes older than five minutes. The sentence a failed `fresh` check shows tells the attendant to check the clock.
 6. **A key deleted after the scan.** The checks hold at the moment of the scan, not after it.
-7. **A hostile copy of the door page, or a lying RPC endpoint.** Either can say "Admit" for anything. The attendant must use the real site; `scripts/pass.mjs verify` with an RPC of one's choice is an independent check (Limit 7 below).
+7. **A checker the holder chooses.** A QR code or a link names a site, and the holder makes it. They can serve this public code in demo mode from their own domain, point the code at its `/door`, and an attendant who opens it reads a verdict in the real site's words. What stops it is the attendant, not the page: they open the door page from their own bookmark and paste the pass there, as the page tells them, and the page shows the address it checks from. A copy can show any address and any words, so the bookmark and the browser's address bar are the defense; the site's own demo mode never shows a bare "Admit". A lying RPC endpoint can also say "Admit" for anything; `scripts/pass.mjs verify` with an RPC of one's choice is an independent check (Limit 7 below).
 
 ## Limits
 

@@ -77,3 +77,4 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | The web's entry pass: one click to sign, the pass in the URL fragment, the door's verdict ("Admit", "Do not admit", "Already admitted") per device; QR by `uqr` 0.1.3 | `2026-11-13-web-entry-pass-pages.md` |
 | 2026-11-13 | A verifier is shown as a group when its Sputnik DAO policy says one group decides function calls; `needed` counts the quorum as the contract does | `2026-11-13-group-verifier-reads-the-dao-policy.md` |
 | 2026-11-13 | Entry pass signatures are verified under RFC 8032's strict rules (`@noble/curves` 2.4.0, `zip215: false`): ZIP-215 accepts a forgery for small-order keys | `2026-11-13-entry-pass-strict-ed25519.md` |
+| 2026-11-13 | The door page is one the attendant opens from their own bookmark; it names its site, and demo verdicts read "Demo: would admit" | `2026-11-13-door-opened-by-the-attendant.md` |

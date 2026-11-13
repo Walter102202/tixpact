@@ -20,6 +20,31 @@ const CHECK_NAMES: Record<PassCheck['id'], string> = {
   fresh: 'Fresh',
 };
 
+/** In demo mode no verdict reads like a real one: the data is not the chain. */
+const WORDS = {
+  live: { admit: 'Admit', refuse: 'Do not admit', again: 'Already admitted' },
+  demo: {
+    admit: 'Demo: would admit',
+    refuse: 'Demo: would not admit',
+    again: 'Demo: already admitted',
+  },
+};
+const DEMO_RESULT = 'Demo data, not the chain: this result admits no one.';
+
+/**
+ * Where this check runs. The holder's QR or link can name any site, including a copy of this one
+ * in demo mode that admits anyone, so the attendant opens the door page from their own bookmark.
+ */
+function CheckingSite() {
+  return (
+    <p className="door-site">
+      Checking site: <strong>{window.location.origin}</strong>. Open this page yourself, from your
+      own bookmark: a link or code the holder shows you can lead to a copy of this site that admits
+      anyone.
+    </p>
+  );
+}
+
 /** `/door`: checks the entry pass in the URL fragment against the chain, or takes a pasted one. */
 export function DoorPage() {
   const hash = useHash();
@@ -30,6 +55,7 @@ export function DoorPage() {
 }
 
 function DoorIntro({ unreadable }: { unreadable: boolean }) {
+  const { fixtureMode } = useServices();
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const inputId = useId();
@@ -50,9 +76,10 @@ function DoorIntro({ unreadable }: { unreadable: boolean }) {
     <section className="page door-page">
       <h1>Door check</h1>
       <p className="lead">
-        Scan the holder's entry pass with this phone's camera, or paste the pass or its link below.
-        It is checked against the chain; it is sent nowhere else.
+        Paste the holder's entry pass or its link below. It is checked against{' '}
+        {fixtureMode ? 'demo data, not the chain' : 'the chain'}; it is sent nowhere else.
       </p>
+      <CheckingSite />
       {unreadable && (
         <p className="tx tx-notice" role="alert">
           This link does not carry a readable entry pass. Ask the holder to show it again.
@@ -83,7 +110,7 @@ function DoorIntro({ unreadable }: { unreadable: boolean }) {
 }
 
 function DoorCheck({ pass }: { pass: EntryPass }) {
-  const { contractId, passChain } = useServices();
+  const { contractId, passChain, fixtureMode } = useServices();
   const [attempt, setAttempt] = useState(0);
   const checksId = useId();
   const load = useLoad(`door:${attempt}`, async () => {
@@ -95,7 +122,10 @@ function DoorCheck({ pass }: { pass: EntryPass }) {
   return (
     <section className="page door-page">
       <h1>Door check</h1>
-      <LoadState load={load} loadingText="Checking the pass against the chain…">
+      <LoadState
+        load={load}
+        loadingText={`Checking the pass against ${fixtureMode ? 'demo data' : 'the chain'}…`}
+      >
         {(result) => (
           <>
             <Verdict
@@ -147,15 +177,22 @@ function Verdict({
   checks: PassCheck[];
   before: number | null;
 }) {
-  const { contractId, timeZone } = useServices();
+  const { contractId, timeZone, fixtureMode } = useServices();
   const [marked, setMarked] = useState<number | null>(null);
   const [unsaved, setUnsaved] = useState(false);
   const who = `Ticket ${pass.ticket} · ${pass.account}`;
+  const words = fixtureMode ? WORDS.demo : WORDS.live;
+  const site = (
+    <>
+      {fixtureMode && <p className="verdict-demo">{DEMO_RESULT}</p>}
+      <CheckingSite />
+    </>
+  );
 
   if (!admitted) {
     return (
       <div className="verdict verdict-no" role="status">
-        <p className="verdict-word">Do not admit</p>
+        <p className="verdict-word">{words.refuse}</p>
         <p>{who}</p>
         <ul>
           {checks
@@ -164,22 +201,25 @@ function Verdict({
               <li key={check.id}>{check.detail}</li>
             ))}
         </ul>
+        {site}
       </div>
     );
   }
   if (before !== null) {
     return (
       <div className="verdict verdict-again" role="status">
-        <p className="verdict-word">Already admitted</p>
+        <p className="verdict-word">{words.again}</p>
         <p>{who}</p>
         <p>Already admitted on this device at {clockTime(before, timeZone)}.</p>
+        {site}
       </div>
     );
   }
   return (
     <div className="verdict verdict-ok" role="status">
-      <p className="verdict-word">Admit</p>
+      <p className="verdict-word">{words.admit}</p>
       <p>{who}</p>
+      {site}
       {marked === null ? (
         <button
           type="button"
