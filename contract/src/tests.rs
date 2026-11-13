@@ -734,10 +734,10 @@ fn with_margin(bytes: i64) -> u128 {
     u128::try_from(bytes * 6).expect("positive").div_ceil(5)
 }
 
-/// Measures the most storage one event and one ticket can use (plan, Tasks C4 and C7): 64-character
-/// accounts everywhere (the currency too), the longest texts, a full ticket history, a pending
-/// operation, and every holder with an owner index of its own. `storage_per_event` and `storage_per_ticket` must be
-/// exactly these numbers plus 20%.
+/// Measures the most storage one event and one ticket can use (plan, Tasks C4 and C7):
+/// 64-character accounts everywhere (the currency too), the longest texts, a full ticket history,
+/// a pending operation, and every holder with an owner index of its own. `storage_per_event` and
+/// `storage_per_ticket` must be exactly these numbers plus 20%.
 #[test]
 fn storage_constants_are_the_measured_worst_case_plus_twenty_percent() {
     let organizer = long("organizer");
@@ -1616,4 +1616,38 @@ fn near_and_token_events_do_not_share_the_near_total() {
     assert_eq!(contract.total_held, 0);
     assert_identity_of(&contract, 1);
     assert_identity_of(&contract, near_event);
+}
+
+/// A payment that succeeded but answered a value (a token whose `ft_transfer` returns something)
+/// still moved the money: the callback settles it and never gives the right back, which would
+/// let the holder claim and be paid a second time.
+#[test]
+fn a_payment_that_answered_a_value_still_settles() {
+    let mut contract = contract_with_a_pending_token_refund();
+    as_callback();
+    assert!(contract.on_refund_result(1, Err(near_sdk::PromiseError::TooLong(5))));
+    let ticket = contract
+        .get_ticket("1-1".to_string())
+        .expect("ticket exists");
+    assert_eq!(ticket.status, TicketStatus::Refunded);
+    let accounting = contract.get_accounting(1).expect("event exists");
+    assert_eq!(accounting.refunds_settled.0, TOKEN_PRICE);
+    assert_eq!(accounting.principal_reserved.0, 0);
+    assert_identity_of(&contract, 1);
+}
+
+/// The same rule for a payout (one contract per test: the mocked storage is per test thread).
+#[test]
+fn a_payout_that_answered_a_value_still_settles() {
+    let mut contract = contract_with_a_token_ticket();
+    call_as(VERIFIER, 1, ENDS);
+    contract.attest_completed(1, None);
+    call_with_gas(ORGANIZER, 1, ENDS + 1, 100);
+    let _ = contract.claim_payout(1);
+    as_callback();
+    assert!(contract.on_payout_result(1, Err(near_sdk::PromiseError::TooLong(4_194_304))));
+    let accounting = contract.get_accounting(1).expect("event exists");
+    assert_eq!(accounting.organizer_settled.0, TOKEN_PRICE);
+    assert_eq!(accounting.organizer_available.0, 0);
+    assert_identity_of(&contract, 1);
 }

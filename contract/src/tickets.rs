@@ -319,9 +319,9 @@ impl Contract {
 
 #[near]
 impl Contract {
-    /// Buys the next ticket of an event priced in NEAR for exactly its price. The buyer is its first
-    /// holder; the whole deposit is the ticket's principal and nothing is refunded by the mint
-    /// (`t17`). An event priced in a token is bought through `ft_transfer_call` on that token.
+    /// Buys the next ticket of an event priced in NEAR for exactly its price. The buyer is its
+    /// first holder; the whole deposit is the ticket's principal and nothing is refunded by the
+    /// mint (`t17`). An event priced in a token is bought through `ft_transfer_call` on that token.
     #[payable]
     pub fn buy_ticket(&mut self, event_id: u32) -> TokenId {
         let event = self.load_event(event_id);
