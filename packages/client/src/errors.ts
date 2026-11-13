@@ -56,8 +56,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   ERR_APPROVALS_DISABLED: 'Ticket approvals are not supported.',
   ERR_WRONG_CURRENCY:
     'This event is priced in another currency. Pay in the currency the event names; any amount sent was returned.',
-  ERR_BAD_MESSAGE:
-    'The payment did not say which event it was for, so the token returned it.',
+  ERR_BAD_MESSAGE: 'The payment did not say which event it was for, so the token returned it.',
 };
 
 export interface ContractError {
