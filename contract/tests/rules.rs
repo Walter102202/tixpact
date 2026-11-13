@@ -216,6 +216,14 @@ async fn t04_attestation_completes_event() -> TestResult {
         .call(&cast.organizer, "cancel_event", cancel, ONE_YOCTO, TGAS)
         .await?;
     assert_fails_with(&result, "ERR_ALREADY_RESOLVED");
+
+    // Added in C2: a completed event refunds nobody.
+    let result = escrow.claim_refund(&cast.ana, "1-1", TGAS).await?;
+    assert_fails_with(&result, "ERR_NOT_REFUNDABLE");
+    assert_eq!(
+        amount(&escrow.accounting(event_id).await?, "organizer_available"),
+        2 * PRICE
+    );
     Ok(())
 }
 
@@ -273,6 +281,13 @@ async fn t05_anyone_expires_after_deadline() -> TestResult {
         escrow.event(event_id).await?["resolved_by"],
         cast.mallory.0.as_str()
     );
+
+    // Added in C2: an expired event pays the organizer nothing.
+    let result = escrow.claim_payout(&cast.organizer, event_id).await?;
+    assert_fails_with(&result, "ERR_NOT_COMPLETED");
+    let accounting = escrow.accounting(event_id).await?;
+    assert_eq!(amount(&accounting, "organizer_available"), 0);
+    assert_eq!(amount(&accounting, "principal_reserved"), PRICE);
     Ok(())
 }
 
