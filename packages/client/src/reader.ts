@@ -21,8 +21,15 @@ import {
 
 const FINAL = { finality: 'final' } as const;
 
-/** Per endpoint: 3 attempts, 250 ms then 500 ms apart, before the next endpoint is tried. */
+/**
+ * Per endpoint, for the failures near-api-js retries (HTTP 500/503/408, "Failed to fetch"): 3
+ * attempts, 250 ms then 500 ms apart. Anything else goes to the next endpoint at once.
+ */
 const RPC_RETRY = { retries: 3, wait: 250, backoff: 2 };
+/** near-api-js gives `fetch` no timeout; without one a hung endpoint never fails over. */
+const READ_TIMEOUT_MS = 8_000;
+/** Transaction status requests wait on the node by design (`waitUntil`), so they get longer. */
+const TX_TIMEOUT_MS = 30_000;
 const MAX_KEY_PAGES = 100;
 
 type FinalQuery = typeof FINAL;
@@ -80,9 +87,52 @@ export type ReaderOptions =
  * One provider over every endpoint, tried in order. Pass the same instance to `createReader` and
  * `trackTransaction`; the agent's signer can use it as its `Provider`.
  */
-export function createRpc(rpcUrls: readonly string[]): FailoverRpcProvider {
+export interface RpcOptions {
+  /** Time limit per endpoint for a read. Default 8000 ms. */
+  timeoutMs?: number;
+  /** Time limit per endpoint for a transaction send or status request. Default 30000 ms. */
+  txTimeoutMs?: number;
+}
+
+export function createRpc(
+  rpcUrls: readonly string[],
+  options: RpcOptions = {},
+): FailoverRpcProvider {
   if (rpcUrls.length === 0) throw new Error('createRpc needs at least one RPC URL');
-  return new FailoverRpcProvider(rpcUrls.map((url) => new JsonRpcProvider({ url }, RPC_RETRY)));
+  const readMs = options.timeoutMs ?? READ_TIMEOUT_MS;
+  const txMs = options.txTimeoutMs ?? TX_TIMEOUT_MS;
+  return new FailoverRpcProvider(
+    rpcUrls.map((url) => withTimeouts(new JsonRpcProvider({ url }, RPC_RETRY), url, readMs, txMs)),
+  );
+}
+
+/**
+ * Wraps every method of a provider so its promise rejects after a time limit, which makes the
+ * failover move on. The abandoned request is ignored; a resent signed transaction cannot run twice.
+ */
+function withTimeouts(
+  provider: JsonRpcProvider,
+  url: string,
+  readMs: number,
+  txMs: number,
+): JsonRpcProvider {
+  return new Proxy(provider, {
+    get(target, property) {
+      const value: unknown = Reflect.get(target, property);
+      if (typeof value !== 'function' || typeof property !== 'string') return value;
+      const ms = /^(send|viewTransaction)/.test(property) ? txMs : readMs;
+      return (...args: unknown[]) =>
+        timeLimit(Promise.resolve(value.apply(target, args)), ms, `${property} on ${url}`);
+    },
+  });
+}
+
+function timeLimit<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms} ms`)), ms);
+  });
+  return Promise.race([promise, expired]).finally(() => clearTimeout(timer));
 }
 
 const AccountStateSchema = z.object({

@@ -122,6 +122,8 @@ function collect(
     collect(value.cause, depth + 1, seen, texts, missingAccounts);
   }
   const record = value as Record<string, unknown>;
+  // Chain error kinds arrive as keys (`{ InvalidTxError: { NotEnoughBalance: {...} } }`).
+  if (!Array.isArray(value)) texts.push(...Object.keys(record));
   const missing = record.AccountDoesNotExist;
   if (typeof missing === 'object' && missing !== null) {
     const accountId = (missing as Record<string, unknown>).account_id;

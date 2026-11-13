@@ -8,6 +8,7 @@ import {
   OperationViewSchema,
   PhaseSchema,
   TicketHistorySchema,
+  TicketStatusSchema,
   TicketViewSchema,
 } from './schemas.js';
 import { TxStatusSchema } from './tx.js';
@@ -31,6 +32,9 @@ describe('fixtures', () => {
   it('cover every phase and every claim state', () => {
     expect(new Set(FIXTURES.events.map((e) => e.phase))).toEqual(new Set(PhaseSchema.options));
     expect(new Set(FIXTURES.tickets.map((t) => t.claim))).toEqual(new Set(ClaimSchema.options));
+    expect(new Set(FIXTURES.tickets.map((t) => t.status))).toEqual(
+      new Set(TicketStatusSchema.options),
+    );
   });
 
   it('keep the accounting identity and match the tickets sold', () => {

@@ -1,5 +1,5 @@
 import { FailoverRpcProvider } from 'near-api-js';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FIXTURES } from './fixtures.js';
 import { createReader, createRpc, type ReaderRpc } from './reader.js';
 import type { TxStatusRpc } from './tx.js';
@@ -155,5 +155,92 @@ describe('createRpc', () => {
     expect(() => createReader({ contractId: CONTRACT, rpcUrls: [] })).toThrow(
       /at least one RPC URL/,
     );
+  });
+});
+
+describe('createRpc against endpoints that hang or fail', () => {
+  const SLOW = 'https://slow.example';
+  const DEAD = 'https://dead.example';
+  const GOOD = 'https://good.example';
+  const VIEW = {
+    contractId: CONTRACT,
+    method: 'get_config',
+    args: {},
+    blockQuery: { finality: 'final' },
+  } as const;
+
+  /** A JSON-RPC answer to a `call_function` query whose result is `value`. */
+  function viewAnswer(value: unknown): Response {
+    const bytes = [...new TextEncoder().encode(JSON.stringify(value))];
+    const body = {
+      jsonrpc: '2.0',
+      id: '1',
+      result: { result: bytes, logs: [], block_height: 1, block_hash: 'h' },
+    };
+    return new Response(JSON.stringify(body), { status: 200 });
+  }
+
+  function stubFetch(byUrl: Record<string, () => Promise<Response>>) {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', (url: string) => {
+      calls.push(url);
+      const answer = byUrl[url];
+      return answer ? answer() : Promise.reject(new Error(`unexpected ${url}`));
+    });
+    // FailoverRpcProvider logs every failed attempt; keep the test output clean.
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    return calls;
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('fails over from an endpoint that never answers, within the timeout', async () => {
+    const calls = stubFetch({
+      [SLOW]: () => new Promise<Response>(() => {}),
+      [GOOD]: async () => viewAnswer({ version: '1.0.0' }),
+    });
+    const rpc = createRpc([SLOW, GOOD], { timeoutMs: 50 });
+    const started = Date.now();
+    expect(await rpc.callFunction(VIEW)).toEqual({ version: '1.0.0' });
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(calls).toEqual([SLOW, GOOD]);
+  });
+
+  it('rejects in bounded time when every endpoint hangs', async () => {
+    stubFetch({
+      [SLOW]: () => new Promise<Response>(() => {}),
+      [GOOD]: () => new Promise<Response>(() => {}),
+    });
+    const rpc = createRpc([SLOW, GOOD], { timeoutMs: 30 });
+    await expect(rpc.callFunction(VIEW)).rejects.toThrow();
+  });
+
+  it("does not retry Node's 'fetch failed': near-api-js moves to the next endpoint at once", async () => {
+    const calls = stubFetch({
+      [DEAD]: () => Promise.reject(new TypeError('fetch failed')),
+      [GOOD]: async () => viewAnswer(7),
+    });
+    const rpc = createRpc([DEAD, GOOD]);
+    expect(await rpc.callFunction(VIEW)).toBe(7);
+    expect(calls).toEqual([DEAD, GOOD]);
+  });
+
+  it('retries an HTTP 503 on the same endpoint before moving on', async () => {
+    let first = true;
+    const calls = stubFetch({
+      [DEAD]: async () => {
+        if (first) {
+          first = false;
+          return new Response('unavailable', { status: 503 });
+        }
+        return viewAnswer(8);
+      },
+    });
+    const rpc = createRpc([DEAD]);
+    expect(await rpc.callFunction(VIEW)).toBe(8);
+    expect(calls).toEqual([DEAD, DEAD]);
   });
 });

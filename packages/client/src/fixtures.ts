@@ -30,6 +30,8 @@ const ORGANIZER = 'org.testnet';
 const VERIFIER = 'teatro.testnet';
 const ANA = 'ana.testnet';
 const LUIS = 'luis.testnet';
+/** A contract Ana sends ticket 1-4 to with `nft_transfer_call`; its answer is still pending. */
+const RECEIVER = 'resale-desk.testnet';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -102,7 +104,7 @@ const events: EventView[] = [
     resolution_deadline_ms: 1_794_883_600_000,
     price: parseNear('1.5'),
     capacity: 50,
-    sold: 3,
+    sold: 4,
     created_at_ms: 1_794_600_000_000,
     phase: 'OnSale',
   }),
@@ -232,8 +234,8 @@ function accountingRow(
 
 const accounting: AccountingView[] = [
   accountingRow(1, 50, {
-    principal_received: parseNear('4.5'),
-    principal_reserved: parseNear('4.5'),
+    principal_received: parseNear('6'),
+    principal_reserved: parseNear('6'),
   }),
   accountingRow(2, 20, {}),
   accountingRow(3, 2, { principal_received: parseNear('4'), principal_reserved: parseNear('4') }),
@@ -286,6 +288,7 @@ const tickets: TicketView[] = [
   ticket(1, 1, ANA, 'Reserved'),
   ticket(1, 2, ANA, 'Reserved'),
   ticket(1, 3, LUIS, 'Reserved'),
+  ticket(1, 4, RECEIVER, 'Reserved', 'TransferPending'),
   ticket(3, 1, ANA, 'Reserved'),
   ticket(3, 2, LUIS, 'Reserved'),
   ticket(4, 1, ANA, 'Reserved'),
@@ -326,6 +329,13 @@ const histories: Record<string, TicketHistory> = Object.fromEntries(
 histories['1-3'] = {
   dropped: 0,
   entries: [entry('Purchased', ANA, NOW - 8 * HOUR), entry('Transferred', LUIS, NOW - 7 * HOUR)],
+};
+histories['1-4'] = {
+  dropped: 0,
+  entries: [
+    entry('Purchased', ANA, NOW - 3 * HOUR),
+    entry('Transferred', RECEIVER, NOW - 2 * MINUTE),
+  ],
 };
 histories['3-2'] = longHistory();
 histories['8-2'] = {

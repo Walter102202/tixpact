@@ -93,8 +93,10 @@ const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(r
 
 /**
  * Follows a submitted transaction until its receipts are final and reports how it really ended.
- * Calls `onStage` once per stage, in order. Resolves only at `final`, so a read made afterwards at
- * `final` finality sees the transaction's effects. Rejects if a stage is not reached in time.
+ * Calls `onStage` once per stage, in order, and resolves only at `final`. A view read afterwards
+ * may still come from a node that is behind (the RPC is load-balanced and the failover can switch
+ * endpoints): re-read with `readUntilChanged` before showing the new state. Rejects if a stage is
+ * not reached in time, including when the node keeps reporting an outcome that has not run.
  */
 export async function trackTransaction(
   rpc: TxStatusRpc,
@@ -111,11 +113,11 @@ export async function trackTransaction(
   onStage('sending');
   const executed = await waitFor(rpc, txHash, signerId, 'EXECUTED_OPTIMISTIC', settings);
   onStage('executed');
-  const final = REACHED.FINAL.has(executed.final_execution_status)
+  const final = isComplete(executed, 'FINAL')
     ? executed
     : await waitFor(rpc, txHash, signerId, 'FINAL', settings);
   onStage('final');
-  return summarize(final);
+  return summarizeTransaction(final);
 }
 
 async function waitFor(
@@ -136,8 +138,8 @@ async function waitFor(
       const reached = LevelOnlySchema.safeParse(raw);
       if (reached.success && REACHED[level].has(reached.data.final_execution_status)) {
         const parsed = TxStatusSchema.safeParse(raw);
-        if (parsed.success) return parsed.data;
-        lastProblem = parsed.error;
+        if (parsed.success && isComplete(parsed.data, level)) return parsed.data;
+        lastProblem = parsed.success ? new Error('some outcomes have not run yet') : parsed.error;
       } else {
         lastProblem = reached.success
           ? new Error(`status is ${reached.data.final_execution_status}`)
@@ -160,7 +162,30 @@ function failureOf(status: ExecutionStatus): Record<string, unknown> | undefined
   return typeof status === 'object' && 'Failure' in status ? status.Failure : undefined;
 }
 
-function summarize(status: TxStatus): TxResult {
+/** A plain-string status (`Unknown`, `Pending`, `NotStarted`, `Started`) means "has not run yet". */
+const hasRun = (status: ExecutionStatus) => typeof status === 'object';
+
+/**
+ * Whether a response is complete enough for its stage. `executed`: the transaction has a result.
+ * `final`: also every outcome the node lists has run.
+ */
+function isComplete(status: TxStatus, level: TxWaitLevel): boolean {
+  if (!REACHED[level].has(status.final_execution_status) || !hasRun(status.status)) return false;
+  if (level === 'EXECUTED_OPTIMISTIC') return true;
+  return [status.transaction_outcome, ...status.receipts_outcome].every((o) =>
+    hasRun(o.outcome.status),
+  );
+}
+
+const succeeded = (status: ExecutionStatus) =>
+  typeof status === 'object' && ('SuccessValue' in status || 'SuccessReceiptId' in status);
+
+/**
+ * How a transaction ended, from one status response. `ok` is true only when the transaction and
+ * every receipt outcome succeeded and the transaction has a return value; an outcome that has not
+ * run makes it false. `failedReceipt` is the first failed outcome, in the node's order.
+ */
+export function summarizeTransaction(status: TxStatus): TxResult {
   const outcomes = [status.transaction_outcome, ...status.receipts_outcome];
   let failedReceipt: FailedReceipt | undefined;
   for (const { id, outcome } of outcomes) {
@@ -177,12 +202,53 @@ function summarize(status: TxStatus): TxResult {
   const final = status.status;
   const hasValue = typeof final === 'object' && 'SuccessValue' in final;
   const value = hasValue ? decodeValue(final.SuccessValue) : undefined;
-  const ok = failedReceipt === undefined && hasValue;
+  const ok = hasValue && outcomes.every((o) => succeeded(o.outcome.status));
   return {
     ok,
     ...(failedReceipt === undefined ? {} : { failedReceipt }),
     ...(value === undefined ? {} : { value }),
   };
+}
+
+/**
+ * Whether a `claim_refund` or `claim_payout` moved money: the transaction succeeded and the
+ * contract's callback returned `true`. Show "Refunded" or "Collected" only when this is true.
+ */
+export function moneyMoved(result: TxResult): boolean {
+  return result.ok && result.value === true;
+}
+
+export interface ReadUntilChangedOptions {
+  /** Reads in total, the first one included. Default 5. */
+  attempts?: number;
+  /** Pause between reads. Default 1000 ms. */
+  intervalMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+  /** Default: equal JSON. */
+  isEqual?: (a: unknown, b: unknown) => boolean;
+}
+
+const sameJson = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * Re-reads a view after a transaction until it differs from the snapshot taken before sending.
+ * `changed: false` means every read still matched the snapshot: keep showing "Sending".
+ */
+export async function readUntilChanged<T>(
+  read: () => Promise<T>,
+  before: T,
+  options: ReadUntilChangedOptions = {},
+): Promise<{ changed: boolean; value: T }> {
+  const attempts = options.attempts ?? 5;
+  const intervalMs = options.intervalMs ?? 1000;
+  const sleep = options.sleep ?? defaultSleep;
+  const isEqual = options.isEqual ?? sameJson;
+  let value = await read();
+  for (let attempt = 1; attempt < attempts && isEqual(value, before); attempt += 1) {
+    await sleep(intervalMs);
+    value = await read();
+  }
+  return { changed: !isEqual(value, before), value };
 }
 
 function decodeValue(base64: string): unknown {

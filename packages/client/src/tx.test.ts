@@ -4,12 +4,43 @@ import { createFixtureRpc, FIXTURE_CONTRACT_ID, TX_FIXTURES } from './fixtures.j
 import {
   explorerAccountUrl,
   explorerTxUrl,
+  moneyMoved,
+  readUntilChanged,
+  summarizeTransaction,
   type TxStage,
   type TxStatusRpc,
+  TxStatusSchema,
   trackTransaction,
 } from './tx.js';
 
 const noSleep = async () => {};
+
+type Outcome = { id: string; outcome: Record<string, unknown> };
+
+/** A recorded status, parsed, with its receipt outcomes rewritten by `edit`. */
+function edited(
+  status: Record<string, unknown>,
+  edit: (receipts: Outcome[]) => Outcome[],
+  finalStatus?: unknown,
+) {
+  const copy = structuredClone(status) as { receipts_outcome: Outcome[]; status: unknown };
+  copy.receipts_outcome = edit(copy.receipts_outcome);
+  if (finalStatus !== undefined) copy.status = finalStatus;
+  return copy;
+}
+
+/** An RPC that answers every request with the next status in the list, then repeats the last. */
+function answering(...statuses: unknown[]): TxStatusRpc & { requests: number } {
+  const rpc = {
+    requests: 0,
+    async viewTransactionStatusWithReceipts() {
+      const answer = statuses[Math.min(rpc.requests, statuses.length - 1)];
+      rpc.requests += 1;
+      return structuredClone(answer);
+    },
+  };
+  return rpc;
+}
 
 async function track(rpc: TxStatusRpc, hash: string, signerId: string) {
   const stages: TxStage[] = [];
@@ -150,6 +181,121 @@ describe('trackTransaction polling', () => {
     ).rejects.toThrow(recorded.hash);
     expect(attempts).toBe(3);
     expect(stages).toEqual(['sending']);
+  });
+});
+
+describe('a transaction is ok only when every outcome succeeded', () => {
+  const settled = TX_FIXTURES.refundSettled;
+
+  it('never reports ok while an outcome is still Unknown at FINAL, and gives up', async () => {
+    const unknown = edited(settled.status, (receipts) =>
+      receipts.map((r, i) =>
+        i === 2 ? { ...r, outcome: { ...r.outcome, status: 'Unknown' } } : r,
+      ),
+    );
+    const rpc = answering(unknown);
+    await expect(
+      trackTransaction(rpc, settled.hash, settled.signerId, () => {}, {
+        sleep: noSleep,
+        attempts: 3,
+      }),
+    ).rejects.toThrow(settled.hash);
+    expect(summarizeTransaction(TxStatusSchema.parse(unknown))).toEqual({
+      ok: false,
+      value: true,
+    });
+  });
+
+  it('keeps polling while the final status is Started, then judges the settled answer', async () => {
+    const started = edited(settled.status, (receipts) => receipts.slice(0, 2), 'Started');
+    const rpc = answering(started, settled.status);
+    const result = await trackTransaction(rpc, settled.hash, settled.signerId, () => {}, {
+      sleep: noSleep,
+    });
+    expect(result).toEqual({ ok: true, value: true });
+    expect(rpc.requests).toBe(2);
+    const stuck = answering(started);
+    await expect(
+      trackTransaction(stuck, settled.hash, settled.signerId, () => {}, {
+        sleep: noSleep,
+        attempts: 2,
+      }),
+    ).rejects.toThrow(/Could not confirm transaction/);
+  });
+
+  it('reports a failure that happened in the transaction outcome alone', async () => {
+    const rejected = {
+      ...structuredClone(settled.status),
+      status: { Failure: { InvalidTxError: { NotEnoughBalance: { signer_id: 'luis.testnet' } } } },
+      receipts_outcome: [],
+    };
+    const tx = rejected as unknown as { transaction_outcome: Outcome };
+    tx.transaction_outcome.outcome = {
+      ...tx.transaction_outcome.outcome,
+      receipt_ids: [],
+      status: { Failure: { InvalidTxError: { NotEnoughBalance: { signer_id: 'luis.testnet' } } } },
+    };
+    const { result } = await track(answering(rejected), settled.hash, settled.signerId);
+    expect(result).toEqual({
+      ok: false,
+      failedReceipt: {
+        receiptId: settled.hash,
+        executorId: 'luis.testnet',
+        error: { code: 'UNKNOWN', message: 'The account does not have enough NEAR for this.' },
+      },
+    });
+  });
+});
+
+describe('moneyMoved', () => {
+  it('is true only when the claim settled and the contract says money moved', async () => {
+    const rpc = createFixtureRpc();
+    const settled = await track(rpc, TX_FIXTURES.refundSettled.hash, 'luis.testnet');
+    expect(moneyMoved(settled.result)).toBe(true);
+    const callbackFailed = await track(rpc, TX_FIXTURES.refundCallbackFailed.hash, 'luis.testnet');
+    expect(moneyMoved(callbackFailed.result)).toBe(false);
+  });
+
+  it('is false when every receipt succeeded but the contract returned false', () => {
+    // The reviewer's reproduction: the transfer-failed recording without its failed receipt.
+    const tx = TX_FIXTURES.refundTransferFailed;
+    const withoutFailure = edited(tx.status, (receipts) =>
+      receipts.filter((r) => r.id !== tx.failedReceiptId),
+    );
+    const result = summarizeTransaction(TxStatusSchema.parse(withoutFailure));
+    expect(result).toEqual({ ok: true, value: false });
+    expect(moneyMoved(result)).toBe(false);
+  });
+});
+
+describe('readUntilChanged', () => {
+  it('returns the first read that differs from the snapshot', async () => {
+    const reads = [{ status: 'Active' }, { status: 'Active' }, { status: 'RefundPending' }];
+    let i = 0;
+    const sleeps: number[] = [];
+    const result = await readUntilChanged(
+      async () => reads[Math.min(i++, reads.length - 1)],
+      { status: 'Active' },
+      { sleep: async (ms) => void sleeps.push(ms) },
+    );
+    expect(result).toEqual({ changed: true, value: { status: 'RefundPending' } });
+    expect(sleeps).toEqual([1000, 1000]);
+  });
+
+  it('gives up after five reads, one second apart, and says nothing changed', async () => {
+    let reads = 0;
+    const sleeps: number[] = [];
+    const result = await readUntilChanged(
+      async () => {
+        reads += 1;
+        return { sold: 3 };
+      },
+      { sold: 3 },
+      { sleep: async (ms) => void sleeps.push(ms) },
+    );
+    expect(result).toEqual({ changed: false, value: { sold: 3 } });
+    expect(reads).toBe(5);
+    expect(sleeps).toEqual([1000, 1000, 1000, 1000]);
   });
 });
 

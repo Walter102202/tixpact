@@ -22,6 +22,7 @@ export type {
   Reader,
   ReaderOptions,
   ReaderRpc,
+  RpcOptions,
   ViewAccessKeyListParams,
   ViewAccountParams,
 } from './reader.js';
@@ -29,6 +30,7 @@ export { createReader, createRpc } from './reader.js';
 export * from './schemas.js';
 export type {
   FailedReceipt,
+  ReadUntilChangedOptions,
   TrackOptions,
   TxResult,
   TxStage,
@@ -36,4 +38,12 @@ export type {
   TxStatusRpc,
   TxWaitLevel,
 } from './tx.js';
-export { explorerAccountUrl, explorerTxUrl, TxStatusSchema, trackTransaction } from './tx.js';
+export {
+  explorerAccountUrl,
+  explorerTxUrl,
+  moneyMoved,
+  readUntilChanged,
+  summarizeTransaction,
+  TxStatusSchema,
+  trackTransaction,
+} from './tx.js';
