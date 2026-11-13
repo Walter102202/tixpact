@@ -1,6 +1,6 @@
 # The entry pass hash uses `@noble/hashes` 2.4.0, declared by the client package
 
-Date: 2026-11-13. Author: lane P. Status: accepted.
+Date: 2026-11-13. Author: lane P. Status: accepted; its sentence on Ed25519 verification is replaced by `2026-11-13-entry-pass-strict-ed25519.md`.
 
 ## Context
 

@@ -97,16 +97,20 @@ A pass moves no money, so it is outside the rules above; this section says what 
 | E7 | Sign with a function-call key, which apps the holder signed into may hold | Only a full-access key speaks for the account (as NEP-413 says) | `key` | "key: a function-call key signed it" |
 | E8 | Replay an old pass | A pass admits for five minutes after signing, and one dated more than a minute ahead of the checking device is refused | `fresh` | "fresh: a pass six minutes old", "fresh: a pass dated two minutes ahead of this device", "fresh: the edges are inclusive" |
 | E9 | Scan while the RPC is down or answers garbage | A read that fails fails the checks that need it; the verdict is "Do not admit" | all | "a chain that cannot be read fails the checks it answers, and still returns all five" |
+| E10 | Forge a signature for an account whose key has small order, such as the implicit account `000…0` (its full-access key is the all-zero key) | Signatures are verified under RFC 8032's strict rules (`@noble/curves`, `zip215: false`), which refuse small-order keys; near-api-js's own `verify` (ZIP-215) would accept this forgery | `signature` | "refuses a signature forged for a small-order key, which near-api-js would accept" |
+| E11 | Hand the checker something that is not a pass, or check with a clock that reads as no time | Anything that does not match the pass's shape fails all five checks without reading the chain; a time now that is not a finite number fails `fresh` | all, `fresh` | "fails all five, without reading the chain or throwing, for a pass that is not a pass", "fails fresh when the time now is not a finite number" |
 
 The signature step accepts the known-answer vector signed by near-cli-rs 0.31.1, not by this code ("admits the pass when the chain agrees"), and the hash matches what near-api-js signs ("is the hash near-api-js signs for a NEP-413 message").
 
 What a pass does not stop:
 
-1. **A screenshot or link shared within five minutes.** Whoever shows it is admitted, on any device that has not seen it. On the device that admitted it first, the second scan reads "Already admitted on this device at …". Five minutes is the window.
-2. **No record of admissions shared between devices.** "Already admitted" lives in that browser's storage only. Two entrances with two devices could each admit the same ticket within the window, and clearing the browser's data forgets it. A shared record needs a server or a transaction at the door, which this design does not have.
-3. **The attendant's clock.** Freshness is judged by the checking device's clock. A clock far ahead turns valid passes into "expired"; a clock far behind accepts passes older than five minutes. The sentence a failed `fresh` check shows tells the attendant to check the clock.
-4. **A key deleted after the scan.** The checks hold at the moment of the scan, not after it.
-5. **A hostile copy of the door page, or a lying RPC endpoint.** Either can say "Admit" for anything. The attendant must use the real site; `scripts/pass.mjs verify` with an RPC of one's choice is an independent check (Limit 7 below).
+1. **A screenshot or link shared within five minutes.** Whoever shows it is admitted on any device that has no record of this ticket. A device where the attendant marked the ticket as admitted reads "Already admitted on this device at …" for any later pass of that ticket.
+2. **Duplicate entry is caught only per device, and not only within five minutes.** The holder can sign a new pass at any time, and can enter, then transfer the ticket so that the next holder signs a valid pass of their own. The record of admissions is per ticket but lives in one browser's storage: another device, or the same browser after its data is cleared, admits again. A shared record needs a server or a transaction at the door, which this design does not have.
+3. **Lending the unlocked phone or the wallet.** Whoever holds them can sign a pass and is admitted: a pass proves control of a key, not who is standing at the door.
+4. **A pass the agent shows.** `show_entry_pass` returns a bearer pass: the model, and anyone who reads the conversation, can show it at the door for five minutes.
+5. **The attendant's clock.** Freshness is judged by the checking device's clock. A clock far ahead turns valid passes into "expired"; a clock far behind accepts passes older than five minutes. The sentence a failed `fresh` check shows tells the attendant to check the clock.
+6. **A key deleted after the scan.** The checks hold at the moment of the scan, not after it.
+7. **A hostile copy of the door page, or a lying RPC endpoint.** Either can say "Admit" for anything. The attendant must use the real site; `scripts/pass.mjs verify` with an RPC of one's choice is an independent check (Limit 7 below).
 
 ## Limits
 

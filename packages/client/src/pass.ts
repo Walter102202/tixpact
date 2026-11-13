@@ -1,3 +1,4 @@
+import { ed25519 } from '@noble/curves/ed25519.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import {
   base64Decode,
@@ -206,6 +207,7 @@ export function encodePass(pass: EntryPass): string {
 
 /** A bare pass, or any URL carrying `#p=<pass>`; null for anything else. */
 export function decodePass(text: string): EntryPass | null {
+  if (typeof text !== 'string') return null;
   const trimmed = text.trim();
   const hash = trimmed.indexOf('#');
   const encoded =
@@ -250,6 +252,7 @@ function publicKeyOf(text: string): PublicKey | null {
 }
 
 const ASK_AGAIN = 'Ask the holder to sign a new pass.';
+const DAMAGED = `This pass is damaged: part of it cannot be read. ${ASK_AGAIN}`;
 
 function checkSignature(pass: EntryPass, contractId: string): PassCheck {
   const no = (detail: string): PassCheck => ({ id: 'signature', ok: false, detail });
@@ -260,7 +263,7 @@ function checkSignature(pass: EntryPass, contractId: string): PassCheck {
   const signature = signatureBytes(pass.signature);
   const key = publicKeyOf(pass.publicKey);
   if (nonce?.length !== NONCE_BYTES || signature?.length !== SIGNATURE_BYTES || key === null) {
-    return no(`This pass is damaged: part of it cannot be read. ${ASK_AGAIN}`);
+    return no(DAMAGED);
   }
   const issued = new DataView(nonce.buffer, nonce.byteOffset).getBigUint64(0);
   if (issued !== BigInt(pass.issuedAtMs)) {
@@ -271,7 +274,9 @@ function checkSignature(pass: EntryPass, contractId: string): PassCheck {
   const hash = nep413Hash({ message: passMessage(pass), nonce, recipient: pass.contract });
   let verified = false;
   try {
-    verified = key.verify(hash, signature);
+    // RFC 8032 strict, not near-api-js's default (ZIP-215): ZIP-215 accepts small-order keys such
+    // as the all-zero key of the implicit account 000…0, whose "signatures" need no private key.
+    verified = ed25519.verify(signature, hash, key.data, { zip215: false });
   } catch {
     verified = false;
   }
@@ -360,6 +365,13 @@ function span(ms: number): string {
 }
 
 function checkFresh(pass: EntryPass, nowMs: number): PassCheck {
+  if (!Number.isFinite(nowMs)) {
+    return {
+      id: 'fresh',
+      ok: false,
+      detail: "This device's clock could not be read, so the time was not checked. Try again.",
+    };
+  }
   const age = nowMs - pass.issuedAtMs;
   if (age > PASS_TTL_MS) {
     return {
@@ -383,16 +395,24 @@ function checkFresh(pass: EntryPass, nowMs: number): PassCheck {
   };
 }
 
+const CHECK_IDS = ['signature', 'key', 'holder', 'ticket', 'fresh'] as const;
+
 /**
  * The door's verdict: always the five checks, in this order. `admitted` is all five. A chain that
- * cannot be read fails the checks that need it, never admits.
+ * cannot be read fails the checks that need it, never admits. A pass that is not a pass (it did
+ * not come through `decodePass`) fails all five without reading the chain.
  */
 export async function checkPass(
-  pass: EntryPass,
+  given: EntryPass,
   contractId: string,
   chain: PassChain,
   nowMs: number,
 ): Promise<{ admitted: boolean; checks: PassCheck[] }> {
+  const valid = PassSchema.safeParse(given);
+  if (!valid.success) {
+    return { admitted: false, checks: CHECK_IDS.map((id) => ({ id, ok: false, detail: DAMAGED })) };
+  }
+  const pass = valid.data;
   const [key, ticket] = await Promise.allSettled([
     chain.accessKey(pass.account, pass.publicKey),
     chain.ticket(pass.ticket),

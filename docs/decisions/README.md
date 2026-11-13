@@ -76,3 +76,4 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | The agent's `show_entry_pass` refuses tickets the door would refuse, and is read-only; `scripts/pass.mjs request` builds the CLI command | `2026-11-13-agent-entry-pass-tool.md` |
 | 2026-11-13 | The web's entry pass: one click to sign, the pass in the URL fragment, the door's verdict ("Admit", "Do not admit", "Already admitted") per device; QR by `uqr` 0.1.3 | `2026-11-13-web-entry-pass-pages.md` |
 | 2026-11-13 | A verifier is shown as a group when its Sputnik DAO policy says one group decides function calls; `needed` counts the quorum as the contract does | `2026-11-13-group-verifier-reads-the-dao-policy.md` |
+| 2026-11-13 | Entry pass signatures are verified under RFC 8032's strict rules (`@noble/curves` 2.4.0, `zip215: false`): ZIP-215 accepts a forgery for small-order keys | `2026-11-13-entry-pass-strict-ed25519.md` |

@@ -432,6 +432,99 @@ describe('checkPass, one check failing at a time', () => {
   });
 });
 
+describe('checkPass against forged and malformed input', () => {
+  // The implicit account 000…0 exists for anyone to create; its key is the all-zero key, a point
+  // of small order. Under ZIP-215 (near-api-js's default) this "signature" verifies with no key.
+  const ZERO_ACCOUNT = '0'.repeat(64);
+  const ZERO_KEY = `ed25519:${'1'.repeat(32)}`;
+  const forged = (): EntryPass => {
+    const nonce = passNonce(ISSUED, new Uint8Array(24));
+    return {
+      v: 1,
+      contract: CONTRACT,
+      ticket: '5-1',
+      account: ZERO_ACCOUNT,
+      publicKey: ZERO_KEY,
+      signature: Buffer.from([1, ...new Uint8Array(63)]).toString('base64'),
+      nonce: Buffer.from(nonce).toString('base64'),
+      issuedAtMs: ISSUED,
+    };
+  };
+
+  it('refuses a signature forged for a small-order key, which near-api-js would accept', async () => {
+    const pass = forged();
+    const hash = nep413Hash({
+      message: passMessage(pass),
+      nonce: Buffer.from(pass.nonce, 'base64'),
+      recipient: CONTRACT,
+    });
+    // The attack is real: the library's own verify says yes.
+    expect(PublicKey.fromString(ZERO_KEY).verify(hash, Buffer.from(pass.signature, 'base64'))).toBe(
+      true,
+    );
+    const chain = fakeChain('full', anaTicket({ owner_id: ZERO_ACCOUNT }));
+    const result = await checkPass(pass, CONTRACT, chain, ISSUED + 1_000);
+    expect(ids(result.checks)).toEqual([
+      'signature:NO',
+      'key:ok',
+      'holder:ok',
+      'ticket:ok',
+      'fresh:ok',
+    ]);
+    expect(result.admitted).toBe(false);
+  });
+
+  it('still admits the near-cli-rs vector and a pass signed in the test', async () => {
+    const kat = await checkPass(
+      KAT_PASS,
+      KAT.contract,
+      fakeChain('full', ticketView()),
+      KAT.issuedAtMs,
+    );
+    expect(kat.admitted).toBe(true);
+    const ana = await checkPass(anaPass(), CONTRACT, fakeChain('full', anaTicket()), ISSUED);
+    expect(ana.admitted).toBe(true);
+  });
+
+  it('fails fresh when the time now is not a finite number', async () => {
+    for (const now of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      const result = await checkPass(anaPass(), CONTRACT, fakeChain('full', anaTicket()), now);
+      expect(failed(result.checks), String(now)).toEqual(['fresh']);
+      expect(result.admitted).toBe(false);
+    }
+  });
+
+  it('fails all five, without reading the chain or throwing, for a pass that is not a pass', async () => {
+    const { nonce: _nonce, ...noNonce } = anaPass();
+    const { signature: _signature, ...noSignature } = anaPass();
+    for (const given of [
+      { ...anaPass(), issuedAtMs: 1.5 },
+      noNonce,
+      noSignature,
+      { ...anaPass(), ticket: 5 },
+      { ...anaPass(), v: '1' },
+      null,
+      'a pass',
+    ]) {
+      const chain = fakeChain('full', anaTicket());
+      const result = await checkPass(given as never, CONTRACT, chain, ISSUED);
+      expect(ids(result.checks), JSON.stringify(given)).toEqual([
+        'signature:NO',
+        'key:NO',
+        'holder:NO',
+        'ticket:NO',
+        'fresh:NO',
+      ]);
+      expect(new Set(result.checks.map((c) => c.detail))).toEqual(
+        new Set([
+          'This pass is damaged: part of it cannot be read. Ask the holder to sign a new pass.',
+        ]),
+      );
+      expect(chain.asked).toEqual([]);
+    }
+  });
+});
+
 describe('encodePass and decodePass', () => {
   const pass = anaPass();
 
@@ -467,6 +560,12 @@ describe('encodePass and decodePass', () => {
       '%%%',
     ]) {
       expect(decodePass(text), text).toBeNull();
+    }
+  });
+
+  it('returns null for anything that is not a string', () => {
+    for (const value of [undefined, null, 42, {}, [encodePass(pass)]]) {
+      expect(decodePass(value as never), String(value)).toBeNull();
     }
   });
 });
