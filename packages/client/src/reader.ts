@@ -352,6 +352,8 @@ const RULE_LABELS = [
   'remove_member_from_role',
   'upgrade_self',
   'upgrade_remote',
+  // Sputnik v3: replaces the factory and auto_update; the factory may then replace the DAO's code.
+  'factory_info_update',
   'policy',
   'policy_add_or_update_role',
   'policy_remove_role',
