@@ -18,6 +18,23 @@
   max-width: 34rem;
 }
 
+/* The drawn tickets (hero and replay) say they are examples, in both modes. */
+figure.stub {
+  margin: 0;
+}
+.stub-label {
+  position: absolute;
+  top: -12px;
+  left: 20px;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--foreground);
+  color: var(--background);
+  font: 500 11px / 1.4 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 /* 01 · The problem */
 .fact-list {
   list-style: none;

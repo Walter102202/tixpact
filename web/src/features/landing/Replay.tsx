@@ -96,7 +96,10 @@ export function Replay() {
           )}
         </div>
         <div className="window-body">
-          <div className="stub card replay-stub">
+          <figure className="stub card replay-stub" aria-labelledby={`${titleId}-label`}>
+            <figcaption id={`${titleId}-label`} className="stub-label">
+              Example ticket
+            </figcaption>
             <p className="stub-eyebrow">Ticket 1-4 · Jazz night</p>
             <p className="stub-amount">1.5 NEAR</p>
             <p className="replay-state">
@@ -110,7 +113,7 @@ export function Replay() {
             <p key={state.holder} className="stub-note replay-holder">
               Held by {state.holder}
             </p>
-          </div>
+          </figure>
 
           {reduced ? (
             <ol className="replay-steps">

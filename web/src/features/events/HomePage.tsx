@@ -1,4 +1,5 @@
 import { type EventView, formatDateTime, PHASE_LABELS, PROMISE_TEXT } from '@ticket-escrow/client';
+import { useId } from 'react';
 import { readAllPages } from '../../lib/pages';
 import { Link } from '../../lib/router';
 import { useLoad } from '../../lib/useLoad';
@@ -135,17 +136,24 @@ function EventRow({ event, timeZone }: { event: EventView; timeZone: string }) {
   );
 }
 
-/** The hero image: a drawn ticket, not a screenshot (landing style). */
+/**
+ * The hero image: a drawn ticket, not a screenshot (landing style). It is labelled as an example in
+ * both modes, so it never reads as chain data next to the live events list.
+ */
 function TicketStub() {
+  const labelId = useId();
   return (
-    <div className="hero-art rise" data-delay="2" aria-hidden="true">
-      <div className="hero-diamond" />
-      <div className="stub card">
+    <div className="hero-art rise" data-delay="2">
+      <div className="hero-diamond" aria-hidden="true" />
+      <figure className="stub card" aria-labelledby={labelId}>
+        <figcaption id={labelId} className="stub-label">
+          Example ticket
+        </figcaption>
         <p className="stub-eyebrow">Ticket 1-3 · Jazz night</p>
         <p className="stub-amount">1.5 NEAR</p>
         <p className="stub-state">Reserved</p>
         <p className="stub-note">Held by luis.testnet. Refund right goes with the ticket.</p>
-      </div>
+      </figure>
     </div>
   );
 }

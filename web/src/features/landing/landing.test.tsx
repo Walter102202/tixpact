@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { CLAIM_LABELS, PHASE_LABELS } from '@ticket-escrow/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { renderAt } from '../../test/render';
+import { renderAt, testServices } from '../../test/render';
 import { AgentTerminal } from './AgentTerminal';
 import { Replay } from './Replay';
 
@@ -158,6 +158,21 @@ describe('the landing', () => {
     expect(jazz?.textContent).toContain('teatro.testnet');
     expect(jazz?.textContent).toContain(PHASE_LABELS.OnSale);
   });
+
+  it('labels the hero ticket as an example when a contract is configured', () => {
+    renderAt('/', testServices({ fixtureMode: false, contractId: 'te-d3-escrow.testnet' }));
+    expect(screen.queryByText('Demo data: nothing on this page is on chain.')).toBeNull();
+    const hero = document.querySelector('.hero') as HTMLElement;
+    const ticket = within(hero).getByRole('figure', { name: 'Example ticket' });
+    expect(within(ticket).getByText('Example ticket')).toBeTruthy();
+    expect(ticket.textContent).toContain('Ticket 1-3 · Jazz night');
+  });
+
+  it('labels the hero ticket as an example with demo data too', () => {
+    renderAt('/');
+    const hero = document.querySelector('.hero') as HTMLElement;
+    expect(within(hero).getByRole('figure', { name: 'Example ticket' })).toBeTruthy();
+  });
 });
 
 describe('the replay', () => {
@@ -169,6 +184,12 @@ describe('the replay', () => {
     const chrome = stub().querySelector('.window-chrome') as HTMLElement;
     expect(chrome.textContent).toContain('/tickets/1-4');
     expect(within(chrome).getByRole('button', { name: 'Replay' })).toBeTruthy();
+  });
+
+  it('labels its ticket as an example', () => {
+    render(<Replay />);
+    const ticket = within(stub()).getByRole('figure', { name: 'Example ticket' });
+    expect(ticket.textContent).toContain('Ticket 1-4 · Jazz night');
   });
 
   it('says it is a replay with demo data and links to the proof', () => {
