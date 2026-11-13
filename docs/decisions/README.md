@@ -84,3 +84,4 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | The group verifier counts every label that can change who decides calls (`policy…`, members, upgrades, config); `needed` is the minimum; the line says "its rules now" | `2026-11-13-group-verifier-counts-every-rule-changing-label.md` |
 | 2026-11-13 | The door checks every new fragment and dates every verdict; Undo works after "Check again" and says whether it removed the admission | `2026-11-13-door-checks-every-arrival-and-undo-says-so.md` |
 | 2026-11-13 | The group verifier also counts `factory_info_update` (Sputnik v3: replaces the factory, which can then replace the DAO's code) | `2026-11-13-group-verifier-counts-factory-info-update.md` |
+| 2026-11-13 | The door looks the signing key up in the account's key list (`view_access_key_list`), so a missing key is an answer, not a failover error | `2026-11-13-pass-key-read-from-the-key-list.md` |
