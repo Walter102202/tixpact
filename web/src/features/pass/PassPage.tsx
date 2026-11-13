@@ -15,7 +15,7 @@ import { useServices } from '../../services';
 import { AccountLink } from '../../ui/AccountLink';
 import { LoadState } from '../../ui/LoadState';
 import { EntryPassOffer } from './EntryPassOffer';
-import { clockTime, countdown } from './passFlow';
+import { clockTime, countdown, passBlockedReason } from './passFlow';
 import { QrCode } from './QrCode';
 
 interface PassTicket {
@@ -94,17 +94,22 @@ function PassView({ pass, ticket }: { pass: EntryPass; ticket: TicketView }) {
   const expiresAt = pass.issuedAtMs + PASS_TTL_MS;
   const left = expiresAt - now;
   const door = doorUrl(window.location.origin, pass);
+  // The door's rules, read when the page loaded: a pass that cannot admit shows no QR.
+  const blocked = passBlockedReason(ticket);
+  const holderGone = ticket.owner_id !== pass.account;
+  const showable = left > 0 && blocked === null && !holderGone;
 
   return (
     <section className="card pass-card" aria-label="Entry pass">
-      {left > 0 ? (
+      {showable && (
         <>
           <QrCode text={door} label={`QR code of the entry pass for ticket ${pass.ticket}`} />
           <p className="pass-countdown" role="timer">
             Admits for <strong>{countdown(left)}</strong>
           </p>
         </>
-      ) : (
+      )}
+      {left <= 0 && (
         <p className="pass-expired">
           This pass expired at {clockTime(expiresAt, timeZone)}. Sign a new one to show at the door.
         </p>
@@ -119,19 +124,21 @@ function PassView({ pass, ticket }: { pass: EntryPass; ticket: TicketView }) {
         <dt>Signed</dt>
         <dd>{clockTime(pass.issuedAtMs, timeZone)}</dd>
       </dl>
-      {ticket.owner_id !== pass.account && (
+      {blocked !== null && <p className="tx tx-notice">{blocked} This pass will not admit.</p>}
+      {holderGone && (
         <p className="tx tx-notice">
           {pass.account} signed this pass but no longer holds the ticket, so it will not admit. The
           holder is {ticket.owner_id}.
         </p>
       )}
-      {left > 0 ? (
+      {showable && (
         <p>
           <a href={door} target="_blank" rel="noreferrer">
             Open the door check in a new tab
           </a>
         </p>
-      ) : (
+      )}
+      {left <= 0 && blocked === null && (
         <EntryPassOffer
           ticket={ticket}
           label="Sign a new pass"

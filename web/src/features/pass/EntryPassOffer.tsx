@@ -32,7 +32,8 @@ export function EntryPassOffer({
   async function sign() {
     setProblem(null);
     setBusy(true);
-    // The wallet opens inside this click, before the first await (popup blockers).
+    // The request is built without waiting and the wallet is asked at once; the live wallet first
+    // awaits near-connect's `connector.wallet()`, then calls its `signMessage`, which opens it.
     const outcome = await signEntryPass(wallet, contractId, ticket.token_id, Date.now());
     setBusy(false);
     if (outcome.ok) onSigned(outcome.pass);

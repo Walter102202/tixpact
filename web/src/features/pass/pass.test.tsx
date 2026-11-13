@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import {
   createFixtureReader,
   decodePass,
@@ -15,7 +15,9 @@ import {
   signPassWithKey,
 } from '@ticket-escrow/client';
 import { base64Encode } from 'near-api-js';
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { App } from '../../App';
 import {
   createFixtureWallet,
   type FixtureWallet,
@@ -233,6 +235,36 @@ describe('the pass page', () => {
     ).toBeTruthy();
   });
 
+  it('shows no QR and says why once the ticket was refunded or a refund is in flight', async () => {
+    for (const change of [{ status: 'Refunded' }, { status: 'RefundPending' }] as const) {
+      const data = structuredClone(FIXTURES);
+      data.tickets = data.tickets.map((t) => (t.token_id === '1-3' ? { ...t, ...change } : t));
+      const reader = createFixtureReader(data);
+      renderAt(`/tickets/1-3/pass#p=${encodePass(demoPass())}`, servicesAs(LUIS, { reader }));
+      expect(
+        await screen.findByText(/so it has no entry pass\. This pass will not admit\./),
+      ).toBeTruthy();
+      expect(screen.queryByRole('timer')).toBeNull();
+      expect(screen.queryByRole('img', { name: /QR code/ })).toBeNull();
+      cleanup();
+    }
+  });
+
+  it('ignores a pass for another ticket or another contract', async () => {
+    const otherTicket = demoPass(LUIS, '1-4');
+    const otherContract = signPassWithKey(
+      passRequest({ contract: 'other.testnet', ticket: '1-3', issuedAtMs: NOW }),
+      LUIS,
+      demoPassKey(LUIS),
+    );
+    for (const pass of [otherTicket, otherContract]) {
+      renderAt(`/tickets/1-3/pass#p=${encodePass(pass)}`, servicesAs(LUIS));
+      expect(await screen.findByRole('button', { name: 'Show entry pass' })).toBeTruthy();
+      expect(screen.queryByRole('timer')).toBeNull();
+      cleanup();
+    }
+  });
+
   it('without a pass, offers the holder to sign one', async () => {
     renderAt('/tickets/1-3/pass', servicesAs(LUIS));
     fireEvent.click(await screen.findByRole('button', { name: 'Show entry pass' }));
@@ -256,15 +288,82 @@ describe('the door', () => {
       'ok',
     ]);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Mark as admitted' }));
-    expect(screen.getByText('Marked as admitted at 21:03.')).toBeTruthy();
+    // Recorded with the verdict, not on a button.
+    expect(
+      screen.getByText(/This device now remembers ticket 1-3 as admitted at 21:03:00/),
+    ).toBeTruthy();
 
     cleanup();
     act(() => vi.advanceTimersByTime(30_000));
     renderAt(`/door#p=${encodePass(pass)}`, live());
-    expect((await verdict()).textContent).toBe('Already admitted');
-    expect(screen.getByText('Already admitted on this device at 21:03.')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Mark as admitted' })).toBeNull();
+    expect((await verdict()).textContent).toBe('Do not admit');
+    expect(screen.getByText('Already admitted on this device at 21:03:00.')).toBeTruthy();
+  });
+
+  it('a NEW pass for a ticket already admitted here reads "Do not admit"', async () => {
+    renderAt(`/door#p=${encodePass(demoPass())}`, live());
+    expect((await verdict()).textContent).toBe('Admit');
+    cleanup();
+    act(() => vi.advanceTimersByTime(70_000));
+    const fresh = demoPass(LUIS, '1-3', Date.now());
+    renderAt(`/door#p=${encodePass(fresh)}`, live());
+    expect((await verdict()).textContent).toBe('Do not admit');
+    expect(screen.getByText('Already admitted on this device at 21:03:00.')).toBeTruthy();
+  });
+
+  it('a chain that cannot be read reads "Do not admit"', async () => {
+    const passChain: PassChain = {
+      accessKey: async () => {
+        throw new Error('rpc down');
+      },
+      ticket: async () => {
+        throw new Error('rpc down');
+      },
+    };
+    renderAt(`/door#p=${encodePass(demoPass())}`, live({ passChain }));
+    expect((await verdict()).textContent).toBe('Do not admit');
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it('starts a new check when the pass in an open door tab changes', async () => {
+    renderAt(`/door#p=${encodePass(demoPass(LUIS, '1-3', NOW - 6 * 60_000))}`, live());
+    expect((await verdict()).textContent).toBe('Do not admit');
+    act(() => {
+      window.location.hash = `p=${encodePass(demoPass())}`;
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+    expect(await screen.findByText('Admit', { selector: '.verdict-word' })).toBeTruthy();
+  });
+
+  it('admits once under React StrictMode, which runs the check twice', async () => {
+    window.history.pushState(null, '', `/door#p=${encodePass(demoPass())}`);
+    render(
+      <StrictMode>
+        <App services={live()} />
+      </StrictMode>,
+    );
+    expect((await verdict()).textContent).toBe('Admit');
+  });
+
+  it('keeps demo admissions apart from live ones', async () => {
+    renderAt(`/door#p=${encodePass(demoPass())}`, servicesAs(null));
+    expect((await verdict()).textContent).toBe('Demo: would admit');
+    cleanup();
+    renderAt(`/door#p=${encodePass(demoPass())}`, live());
+    expect((await verdict()).textContent).toBe('Admit');
+  });
+
+  it('undoes a scan made by mistake', async () => {
+    const pass = demoPass();
+    renderAt(`/door#p=${encodePass(pass)}`, live());
+    await verdict();
+    fireEvent.click(screen.getByRole('button', { name: 'Undo: scanned by mistake' }));
+    expect(
+      screen.getByText('Undone: this device no longer remembers ticket 1-3 as admitted.'),
+    ).toBeTruthy();
+    cleanup();
+    renderAt(`/door#p=${encodePass(pass)}`, live());
+    expect((await verdict()).textContent).toBe('Admit');
   });
 
   it('does not admit a pass once the ticket was transferred after signing', async () => {
@@ -358,11 +457,11 @@ describe('the door', () => {
     });
     renderAt(`/door#p=${encodePass(demoPass())}`, live());
     expect((await verdict()).textContent).toBe('Admit');
-    fireEvent.click(screen.getByRole('button', { name: 'Mark as admitted' }));
     expect(
       screen.getByText(
-        'Marked as admitted at 21:03. This browser would not store it, so a second scan here will not be flagged.',
+        'This browser would not store the admission, so a second scan here will not be flagged.',
       ),
     ).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Undo: scanned by mistake' })).toBeNull();
   });
 });

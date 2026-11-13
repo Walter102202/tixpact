@@ -10,7 +10,14 @@ import { replaceHash, useHash } from '../../lib/router';
 import { useLoad } from '../../lib/useLoad';
 import { useServices } from '../../services';
 import { LoadState } from '../../ui/LoadState';
-import { admittedAt, clockTime, markAdmitted } from './passFlow';
+import {
+  type Admission,
+  admissionOf,
+  admissionScope,
+  clockTime,
+  forgetAdmission,
+  recordAdmission,
+} from './passFlow';
 
 const CHECK_NAMES: Record<PassCheck['id'], string> = {
   signature: 'Signature',
@@ -22,12 +29,8 @@ const CHECK_NAMES: Record<PassCheck['id'], string> = {
 
 /** In demo mode no verdict reads like a real one: the data is not the chain. */
 const WORDS = {
-  live: { admit: 'Admit', refuse: 'Do not admit', again: 'Already admitted' },
-  demo: {
-    admit: 'Demo: would admit',
-    refuse: 'Demo: would not admit',
-    again: 'Demo: already admitted',
-  },
+  live: { admit: 'Admit', refuse: 'Do not admit' },
+  demo: { admit: 'Demo: would admit', refuse: 'Demo: would not admit' },
 };
 const DEMO_RESULT = 'Demo data, not the chain: this result admits no one.';
 
@@ -111,12 +114,23 @@ function DoorIntro({ unreadable }: { unreadable: boolean }) {
 
 function DoorCheck({ pass }: { pass: EntryPass }) {
   const { contractId, passChain, fixtureMode } = useServices();
+  const scope = admissionScope(fixtureMode, contractId);
   const [attempt, setAttempt] = useState(0);
+  // Random, so a record left by an earlier visit is never taken for this one.
+  const [instance] = useState(() => `${Date.now()}-${Math.random().toString(36).slice(2)}`);
   const checksId = useId();
-  const load = useLoad(`door:${attempt}`, async () => {
-    const result = await checkPass(pass, contractId, passChain, Date.now());
-    // Read once per check: a mark made during this check shows as "Marked", not "Already".
-    return { ...result, before: admittedAt(contractId, pass.ticket) };
+  const load = useLoad(`door:${attempt}`, async (): Promise<DoorResult> => {
+    const now = Date.now();
+    const result = await checkPass(pass, contractId, passChain, now);
+    const check = `${instance}:${attempt}`;
+    const earlier = admissionOf(scope, pass.ticket);
+    if (earlier !== null && earlier.check !== check) return { ...result, earlier };
+    if (!result.admitted) return { ...result, earlier: null };
+    // Recorded when the verdict is Admit, not on a button the attendant may forget. In development
+    // React runs this twice; the second run finds the record of its own check and keeps it.
+    const recorded = earlier ?? { at: now, check };
+    const saved = earlier !== null || recordAdmission(scope, pass.ticket, recorded);
+    return { ...result, earlier: null, recorded, saved };
   });
 
   return (
@@ -128,12 +142,7 @@ function DoorCheck({ pass }: { pass: EntryPass }) {
       >
         {(result) => (
           <>
-            <Verdict
-              pass={pass}
-              admitted={result.admitted}
-              checks={result.checks}
-              before={result.before}
-            />
+            <Verdict pass={pass} result={result} scope={scope} />
             <h2 id={checksId} className="door-checks-heading">
               The five checks
             </h2>
@@ -166,22 +175,22 @@ function DoorCheck({ pass }: { pass: EntryPass }) {
   );
 }
 
-function Verdict({
-  pass,
-  admitted,
-  checks,
-  before,
-}: {
-  pass: EntryPass;
+interface DoorResult {
   admitted: boolean;
   checks: PassCheck[];
-  before: number | null;
-}) {
-  const { contractId, timeZone, fixtureMode } = useServices();
-  const [marked, setMarked] = useState<number | null>(null);
-  const [unsaved, setUnsaved] = useState(false);
+  /** An admission of this ticket recorded on this device by an earlier check. */
+  earlier: Admission | null;
+  /** The admission this check recorded, and whether the browser stored it. */
+  recorded?: Admission;
+  saved?: boolean;
+}
+
+function Verdict({ pass, result, scope }: { pass: EntryPass; result: DoorResult; scope: string }) {
+  const { timeZone, fixtureMode } = useServices();
+  const [undone, setUndone] = useState(false);
   const who = `Ticket ${pass.ticket} · ${pass.account}`;
   const words = fixtureMode ? WORDS.demo : WORDS.live;
+  const time = (ms: number) => clockTime(ms, timeZone, true);
   const site = (
     <>
       {fixtureMode && <p className="verdict-demo">{DEMO_RESULT}</p>}
@@ -189,13 +198,21 @@ function Verdict({
     </>
   );
 
-  if (!admitted) {
+  if (!result.admitted || result.earlier !== null) {
     return (
-      <div className="verdict verdict-no" role="status">
+      <div
+        className={`verdict verdict-no${result.earlier !== null ? ' verdict-again' : ''}`}
+        role="status"
+      >
         <p className="verdict-word">{words.refuse}</p>
         <p>{who}</p>
+        {result.earlier !== null && (
+          <p className="verdict-again-line">
+            Already admitted on this device at {time(result.earlier.at)}.
+          </p>
+        )}
         <ul>
-          {checks
+          {result.checks
             .filter((check) => !check.ok)
             .map((check) => (
               <li key={check.id}>{check.detail}</li>
@@ -205,40 +222,31 @@ function Verdict({
       </div>
     );
   }
-  if (before !== null) {
-    return (
-      <div className="verdict verdict-again" role="status">
-        <p className="verdict-word">{words.again}</p>
-        <p>{who}</p>
-        <p>Already admitted on this device at {clockTime(before, timeZone)}.</p>
-        {site}
-      </div>
-    );
-  }
+  const recorded = result.recorded;
   return (
     <div className="verdict verdict-ok" role="status">
       <p className="verdict-word">{words.admit}</p>
       <p>{who}</p>
-      {site}
-      {marked === null ? (
-        <button
-          type="button"
-          className="btn"
-          onClick={() => {
-            const at = Date.now();
-            setUnsaved(!markAdmitted(contractId, pass.ticket, at));
-            setMarked(at);
-          }}
-        >
-          Mark as admitted
-        </button>
-      ) : (
+      {recorded !== undefined && !result.saved && (
         <p>
-          Marked as admitted at {clockTime(marked, timeZone)}.
-          {unsaved &&
-            ' This browser would not store it, so a second scan here will not be flagged.'}
+          This browser would not store the admission, so a second scan here will not be flagged.
         </p>
       )}
+      {recorded !== undefined && result.saved && !undone && (
+        <p>
+          This device now remembers ticket {pass.ticket} as admitted at {time(recorded.at)}: any
+          other pass for it reads "{words.refuse}" here.{' '}
+          <button
+            type="button"
+            className="btn btn-sm btn-secondary"
+            onClick={() => setUndone(forgetAdmission(scope, pass.ticket, recorded.check))}
+          >
+            Undo: scanned by mistake
+          </button>
+        </p>
+      )}
+      {undone && <p>Undone: this device no longer remembers ticket {pass.ticket} as admitted.</p>}
+      {site}
     </div>
   );
 }

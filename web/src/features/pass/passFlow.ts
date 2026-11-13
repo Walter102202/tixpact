@@ -41,8 +41,8 @@ const SIGNATURE_ONLY: PassChain = { accessKey: async () => 'full', ticket: async
 export type SignOutcome = { ok: true; pass: EntryPass } | { ok: false; message: string };
 
 /**
- * Asks the wallet to sign a pass for `tokenId`. Call it straight from a click handler: the wallet
- * opens before the first `await`. The answer must come from the signed-in account, and its
+ * Asks the wallet to sign a pass for `tokenId`. Call it straight from a click handler: it asks the
+ * wallet before awaiting anything of its own. The answer must come from the signed-in account, and its
  * signature must verify here, so a wallet that signs another form is caught before the door.
  */
 export async function signEntryPass(
@@ -86,46 +86,71 @@ export async function signEntryPass(
   return { ok: true, pass };
 }
 
-// Admissions are remembered on this device only (threat model, "Entry pass", limit 2).
+// Admissions are remembered per ticket on this device only (threat model, "Entry pass", item 2).
 
-const storageKey = (contractId: string) => `ticket-escrow:admitted:${contractId}`;
+/** One admission: when, and which check recorded it (React runs a check twice in development). */
+export interface Admission {
+  at: number;
+  check: string;
+}
 
-function readAdmissions(contractId: string): Record<string, number> {
+/** Demo and live runs keep separate records: a demo on this device must not mark a live ticket. */
+export const admissionScope = (fixtureMode: boolean, contractId: string) =>
+  `${fixtureMode ? 'demo' : 'live'}:${contractId}`;
+
+const storageKey = (scope: string) => `ticket-escrow:admitted:${scope}`;
+
+function isAdmission(value: unknown): value is Admission {
+  if (value === null || typeof value !== 'object') return false;
+  const { at, check } = value as Record<string, unknown>;
+  return typeof at === 'number' && Number.isFinite(at) && typeof check === 'string';
+}
+
+function readAdmissions(scope: string): Record<string, Admission> {
   try {
-    const raw = window.localStorage.getItem(storageKey(contractId));
+    const raw = window.localStorage.getItem(storageKey(scope));
     const parsed: unknown = raw === null ? {} : JSON.parse(raw);
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
     return Object.fromEntries(
-      Object.entries(parsed).filter((entry): entry is [string, number] =>
-        Number.isFinite(entry[1]),
-      ),
+      Object.entries(parsed).filter((entry): entry is [string, Admission] => isAdmission(entry[1])),
     );
   } catch {
     return {};
   }
 }
 
-/** When this device marked the ticket as admitted, or null. */
-export function admittedAt(contractId: string, tokenId: string): number | null {
-  return readAdmissions(contractId)[tokenId] ?? null;
-}
-
-/** Records the admission on this device. Returns false when the browser would not store it. */
-export function markAdmitted(contractId: string, tokenId: string, atMs: number): boolean {
+function writeAdmissions(scope: string, admissions: Record<string, Admission>): boolean {
   try {
-    const next = { ...readAdmissions(contractId), [tokenId]: atMs };
-    window.localStorage.setItem(storageKey(contractId), JSON.stringify(next));
+    window.localStorage.setItem(storageKey(scope), JSON.stringify(admissions));
     return true;
   } catch {
     return false;
   }
 }
 
-/** "21:03" in the viewer's zone. */
-export function clockTime(ms: number, timeZone: string): string {
+/** The admission this device recorded for the ticket, or null. */
+export function admissionOf(scope: string, tokenId: string): Admission | null {
+  return readAdmissions(scope)[tokenId] ?? null;
+}
+
+/** Records the admission. Returns false when the browser would not store it. */
+export function recordAdmission(scope: string, tokenId: string, admission: Admission): boolean {
+  return writeAdmissions(scope, { ...readAdmissions(scope), [tokenId]: admission });
+}
+
+/** Forgets the ticket's admission if `check` recorded it (an "Undo" right after a mistaken scan). */
+export function forgetAdmission(scope: string, tokenId: string, check: string): boolean {
+  const { [tokenId]: current, ...rest } = readAdmissions(scope);
+  if (current?.check !== check) return false;
+  return writeAdmissions(scope, rest);
+}
+
+/** "21:03" in the viewer's zone, or "21:03:10" with seconds. */
+export function clockTime(ms: number, timeZone: string, withSeconds = false): string {
   return new Intl.DateTimeFormat('en-GB', {
     hour: '2-digit',
     minute: '2-digit',
+    ...(withSeconds && { second: '2-digit' }),
     hourCycle: 'h23',
     timeZone,
   }).format(ms);
