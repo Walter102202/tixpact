@@ -76,3 +76,4 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | `FIXTURES` stays the NEAR chain; `FIXTURES_WITH_TOKENS` adds three tUSD events, one per outcome | `2026-11-13-client-v2-fixtures-keep-near-set-and-add-a-token-set.md` |
 | 2026-11-13 | The agent buys only in NEAR (its caps are in NEAR) and reads, claims and checks every currency | `2026-11-13-agent-buys-in-near-and-reads-every-currency.md` |
 | 2026-11-13 | The web writes every amount in its event's currency, judges a token purchase from its receipts and checks token registration before money moves | `2026-11-13-web-prices-in-a-token.md` |
+| 2026-11-13 | The organizer picks a currency, a payout in a token checks registration, and the proof compares each currency on its own | `2026-11-13-web-organizer-and-proof-per-currency.md` |

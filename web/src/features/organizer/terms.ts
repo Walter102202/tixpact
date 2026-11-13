@@ -1,4 +1,4 @@
-import { type Config, type EventTerms, parseNear } from '@ticket-escrow/client';
+import { type Config, type EventTerms, parseAmount, type Unit } from '@ticket-escrow/client';
 import { testnetAccountError } from '../../lib/accounts';
 import { tooLong } from '../../lib/text';
 
@@ -8,7 +8,7 @@ export const FIELDS = [
   'Starts',
   'Ends',
   'Confirmation deadline',
-  'Price in NEAR',
+  'Price',
   'Capacity',
   'Verifier account',
 ] as const;
@@ -17,8 +17,8 @@ export type Field = (typeof FIELDS)[number];
 export type FormValues = Record<Field, string>;
 export type FieldErrors = Partial<Record<Field, string>>;
 
-/** 0.0001 NEAR in yoctoNEAR: the smallest step a price may have. */
-const FOUR_DECIMALS = 10n ** 20n;
+/** Decimals a price may have: what the facts show (`money`), so no price is paid unseen. */
+const PRICE_DECIMALS = 4;
 
 export const EMPTY_FORM: FormValues = Object.fromEntries(FIELDS.map((f) => [f, ''])) as FormValues;
 
@@ -97,6 +97,10 @@ export interface TermsContext {
   nowMs: number;
   /** The zone the form's times are read in. */
   timeZone: string;
+  /** The event's currency: null for NEAR, else a token the contract accepts. */
+  currency: string | null;
+  /** The unit of that currency, which the price is typed in. */
+  unit: Unit;
 }
 
 /**
@@ -105,7 +109,7 @@ export interface TermsContext {
  */
 export function checkTerms(
   values: FormValues,
-  { config, organizer, contractId, nowMs, timeZone }: TermsContext,
+  { config, organizer, contractId, nowMs, timeZone, currency, unit }: TermsContext,
 ): { errors: FieldErrors; terms: EventTerms | null } {
   const errors: FieldErrors = {};
   const title = values.Title.trim();
@@ -133,17 +137,21 @@ export function checkTerms(
     errors['Confirmation deadline'] = 'The deadline must be after the end.';
   }
 
-  let price: string | null = null;
-  try {
-    price = parseNear(values['Price in NEAR'].trim());
-  } catch {
-    errors['Price in NEAR'] = 'Enter a price in NEAR, like 1.5.';
-  }
-  if (price !== null && BigInt(price) === 0n) {
-    errors['Price in NEAR'] = 'The price must be above 0 NEAR.';
-  } else if (price !== null && BigInt(price) % FOUR_DECIMALS !== 0n) {
+  const typed = values.Price.trim();
+  const price = parseAmount(typed, unit);
+  const decimals = Math.min(PRICE_DECIMALS, unit.decimals);
+  const step = 10n ** BigInt(unit.decimals - decimals);
+  const fraction = /^[0-9]+\.([0-9]+)$/.exec(typed)?.[1] ?? '';
+  if (price === null && fraction.length > unit.decimals) {
+    // A number with more decimals than the currency has: say so, not that it is not a number.
+    errors.Price = decimals === 0 ? 'Use a whole number.' : `Use at most ${decimals} decimals.`;
+  } else if (price === null) {
+    errors.Price = `Enter a price in ${unit.symbol}, like 1.5.`;
+  } else if (BigInt(price) === 0n) {
+    errors.Price = `The price must be above 0 ${unit.symbol}.`;
+  } else if (BigInt(price) % step !== 0n) {
     // Amounts are shown to 4 decimals; a finer price would be accepted and paid unseen.
-    errors['Price in NEAR'] = 'Use at most 4 decimals.';
+    errors.Price = decimals === 0 ? 'Use a whole number.' : `Use at most ${decimals} decimals.`;
   }
 
   const capacity = parseCapacity(values.Capacity, config);
@@ -182,6 +190,7 @@ export function checkTerms(
       price,
       capacity,
       verifier_id: verifier,
+      currency,
     },
   };
 }

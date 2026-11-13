@@ -678,6 +678,11 @@ section,
 .faucet {
   margin-top: 16px;
 }
+.proof-token {
+  margin-top: 24px;
+  padding: 24px 0 0;
+  border-top: 1px solid var(--border-soft);
+}
 
 @media (max-width: 760px) {
   .terms-form {
