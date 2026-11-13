@@ -108,10 +108,16 @@ function CreateEventForm({
   const [sent, setSent] = useState<EventTerms | null>(null);
 
   const capacity = parseCapacity(values.Capacity, config);
-  const quote = useLoad(`quote:${capacity ?? 'none'}`, () =>
-    capacity === null ? Promise.resolve(null) : reader.quoteEventBudget(capacity),
-  );
-  const budget = quote.state.status === 'ready' ? quote.state.data : null;
+  const quote = useLoad(`quote:${capacity ?? 'none'}`, async () => ({
+    capacity,
+    budget: capacity === null ? null : await reader.quoteEventBudget(capacity),
+  }));
+  // Only the quote for the capacity now in the field counts: the budget sent must cover it.
+  const budget =
+    quote.state.status === 'ready' && quote.state.data.capacity === capacity
+      ? quote.state.data.budget
+      : null;
+  const quoteFailed = capacity !== null && quote.state.status === 'error';
   const check = checkTerms(values, { config, organizer, contractId, nowMs: now?.() ?? Date.now() });
   const verifier = check.errors['Verifier account'] ? null : values['Verifier account'].trim();
 
@@ -155,7 +161,13 @@ function CreateEventForm({
   }
 
   const waitingForQuote = capacity !== null && budget === null;
-  const waiting = checking ? `Checking that ${toCheck} exists on testnet…` : null;
+  // Every disabled button says why.
+  let waiting: string | null = null;
+  if (waitingForQuote && !quoteFailed) waiting = 'Reading the storage budget…';
+  else if (checking) waiting = `Checking that ${toCheck} exists on testnet…`;
+  let disabledBecause: string | undefined;
+  if (quoteFailed) disabledBecause = `${formId}-quote-error`;
+  else if (waiting !== null) disabledBecause = `${formId}-waiting`;
   return (
     <section className="create-event" aria-labelledby={`${formId}-heading`}>
       <h2 id={`${formId}-heading`}>Create an event</h2>
@@ -207,6 +219,16 @@ function CreateEventForm({
 
         <div className="organizer-promise">
           {budget !== null && <p className="budget">Storage budget: {nearExact(budget)}</p>}
+          {quoteFailed && (
+            <div className="quote-error">
+              <p id={`${formId}-quote-error`} className="field-error" role="alert">
+                Could not read the storage budget.
+              </p>
+              <button type="button" className="btn btn-sm btn-secondary" onClick={quote.reload}>
+                Try again
+              </button>
+            </div>
+          )}
           <ul>
             <li>
               You receive nothing before {verifier ?? 'the verifier'} confirms the event took place.
@@ -232,7 +254,7 @@ function CreateEventForm({
               type="submit"
               className="btn"
               disabled={waitingForQuote || waiting !== null}
-              aria-describedby={waiting === null ? undefined : `${formId}-waiting`}
+              aria-describedby={disabledBecause}
             >
               {budget === null
                 ? 'Create the event'

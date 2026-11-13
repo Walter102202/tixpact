@@ -225,6 +225,72 @@ describe('/organizer: create an event', () => {
     await waitFor(() => expect((createButton() as HTMLButtonElement).disabled).toBe(false));
   });
 
+  it('says when the storage budget cannot be read, and reads it again on request', async () => {
+    let fails = true;
+    const fixtures = createFixtureReader();
+    const reader: Reader = {
+      ...fixtures,
+      quoteEventBudget: (capacity) =>
+        fails ? Promise.reject(new Error('the RPC is down')) : fixtures.quoteEventBudget(capacity),
+    };
+    const services = await openOrganizer(
+      testServices({ reader, wallet: createFixtureWallet(ORGANIZER) }),
+    );
+    fill(VALID);
+    expect(await screen.findByText('Could not read the storage budget.')).toBeTruthy();
+    const button = createButton() as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    const reasonId = button.getAttribute('aria-describedby');
+    expect(reasonId && document.getElementById(reasonId)?.textContent).toContain(
+      'Could not read the storage budget.',
+    );
+    fails = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByText('Storage budget: 0.7 NEAR')).toBeTruthy();
+    expect((createButton() as HTMLButtonElement).disabled).toBe(false);
+    expect(services.wallet.sent).toEqual([]);
+  });
+
+  it('waits for the budget before the button works, and says why', async () => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fixtures = createFixtureReader();
+    const reader: Reader = {
+      ...fixtures,
+      quoteEventBudget: async (capacity) => {
+        await gate;
+        return fixtures.quoteEventBudget(capacity);
+      },
+    };
+    await openOrganizer(testServices({ reader, wallet: createFixtureWallet(ORGANIZER) }));
+    fill(VALID);
+    const button = createButton() as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    const reasonId = button.getAttribute('aria-describedby');
+    expect(reasonId && document.getElementById(reasonId)?.textContent).toBe(
+      'Reading the storage budget…',
+    );
+    release();
+    expect(await screen.findByText('Storage budget: 0.7 NEAR')).toBeTruthy();
+    expect((createButton() as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('sends the budget quoted for the capacity now in the field', async () => {
+    const services = await openOrganizer();
+    fill(VALID);
+    await screen.findByText('Storage budget: 0.7 NEAR');
+    fill({ Capacity: '10' });
+    expect(await screen.findByText('Storage budget: 0.18 NEAR')).toBeTruthy();
+    expect(createButton().textContent).toBe('Create the event and pay 0.18 NEAR to the contract');
+    fireEvent.click(createButton());
+    await screen.findByText(/Event 9 created\./);
+    expect(services.wallet.sent).toEqual([
+      actions.createEvent({ ...VALID_TERMS, capacity: 10 }, parseNear('0.18')),
+    ]);
+  });
+
   it('sends the terms with exactly the quoted budget and links the new event', async () => {
     const services = await openOrganizer();
     fill(VALID);

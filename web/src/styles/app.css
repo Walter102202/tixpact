@@ -600,6 +600,13 @@ section,
   font-size: 24px;
   margin-bottom: 8px;
 }
+.quote-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+}
 .payout {
   max-width: 24rem;
   display: grid;
