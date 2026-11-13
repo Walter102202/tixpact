@@ -68,3 +68,5 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | Storage and gas constants come from measured worst cases; static gas keeps five times the worst case | `2026-11-13-measured-storage-and-gas-constants.md` |
 | 2026-11-13 | The resolver gets 40 Tgas so it can read the longest answer; `nft_transfer_call` needs 70 Tgas | `2026-11-13-resolver-gas-covers-the-longest-answer.md` |
 | 2026-11-13 | An unknown result asks the chain again, and an irreversible step sends exactly what was checked | `2026-11-13-web-review-fixes-for-w3-and-w4.md` |
+| 2026-11-13 | The wallet selector offers only Meteor and Intear, through an allow list on `availableWallets` | `2026-11-13-web-wallet-selector-meteor-and-intear.md` |
+| 2026-11-13 | The landing states the problem and plays the refund: motion decided at mount, sticky floating header, fixed event columns | `2026-11-13-web-landing-problem-and-motion.md` |

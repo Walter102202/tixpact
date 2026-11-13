@@ -10,12 +10,38 @@ export interface ConnectorOptions {
   rpcUrls: string[];
 }
 
+/**
+ * The wallets the plan verified on testnet. The manifest also offers Ledger, Nightly, Ethereum
+ * wallets and NEAR CLI there; a judge who picks one of those may reach a dead end.
+ */
+export const TESTNET_WALLETS = ['meteor-wallet', 'intear-wallet'] as const;
+
+/**
+ * Narrows the wallet selector to `ids`. near-connect 0.12.0 has only a deny list
+ * (`excludedWallets`), which never removes hot-wallet and does not cover wallets a browser
+ * extension injects later. Its selector lists the public `availableWallets` getter when it opens,
+ * so the allow list is applied there, on top of near-connect's own network and feature filters.
+ */
+export function limitWallets(connector: NearConnector, ids: readonly string[]): void {
+  const allowed = new Set(ids);
+  const base = Object.getOwnPropertyDescriptor(NearConnector.prototype, 'availableWallets')?.get;
+  if (!base) throw new Error('near-connect has no availableWallets getter; check its version.');
+  Object.defineProperty(connector, 'availableWallets', {
+    configurable: true,
+    get: (): NearConnector['availableWallets'] =>
+      (base.call(connector) as NearConnector['availableWallets']).filter((wallet) =>
+        allowed.has(wallet.manifest.id),
+      ),
+  });
+}
+
 export function createNearConnectWallet({ contractId, rpcUrls }: ConnectorOptions): WalletPort {
   const connector = new NearConnector({
     network: 'testnet',
     providers: { testnet: rpcUrls },
     features: { testnet: true, signAndSendTransaction: true },
   });
+  limitWallets(connector, TESTNET_WALLETS);
   let accountId: string | null = null;
   const listeners = new Set<() => void>();
   const setAccount = (next: string | null) => {

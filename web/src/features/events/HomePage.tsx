@@ -1,9 +1,14 @@
 import { type EventView, formatDateTime, PHASE_LABELS, PROMISE_TEXT } from '@ticket-escrow/client';
+import { useId } from 'react';
 import { readAllPages } from '../../lib/pages';
 import { Link } from '../../lib/router';
 import { useLoad } from '../../lib/useLoad';
 import { useServices } from '../../services';
 import { LoadState } from '../../ui/LoadState';
+import { AgentTerminal } from '../landing/AgentTerminal';
+import { Problem } from '../landing/Problem';
+import { Replay } from '../landing/Replay';
+import { Reveal, type RevealDelay } from '../landing/Reveal';
 import { near } from './eventCopy';
 
 const STEPS = [
@@ -29,7 +34,10 @@ export function HomePage() {
   return (
     <>
       <section className="hero">
-        <div className="hero-text">
+        <div className="hero-text rise">
+          <p className="eyebrow hero-eyebrow">
+            When an event is cancelled, your refund depends on the seller still having your money.
+          </p>
           <h1>Event tickets whose price stays reserved until the event happens.</h1>
           <p className="lead">{PROMISE_TEXT}</p>
           <a className="btn" href="#events">
@@ -39,24 +47,45 @@ export function HomePage() {
         <TicketStub />
       </section>
 
-      <section className="steps" aria-labelledby="how-heading">
-        <h2 id="how-heading">How it works</h2>
-        <ol className="step-list">
-          {STEPS.map((step, i) => (
-            <li key={step.title} className="step">
-              <span className="numeral" aria-hidden="true">
-                {String(i + 1).padStart(2, '0')}
-              </span>
-              <div>
-                <h3>{step.title}</h3>
-                <p>{step.body}</p>
-              </div>
-            </li>
-          ))}
-        </ol>
-      </section>
+      <Problem />
 
-      <section id="events" className="events" aria-labelledby="events-heading">
+      <Reveal as="section" className="landing-section steps" aria-labelledby="how-heading">
+        <p className="eyebrow section-eyebrow">02</p>
+        <h2 id="how-heading">How it works</h2>
+        <div className="how-grid">
+          <ol className="step-list">
+            {STEPS.map((step, i) => (
+              <Reveal as="li" key={step.title} delay={(i + 1) as RevealDelay} className="step">
+                <span className="numeral" aria-hidden="true">
+                  {String(i + 1).padStart(2, '0')}
+                </span>
+                <div>
+                  <h3>{step.title}</h3>
+                  <p>{step.body}</p>
+                </div>
+              </Reveal>
+            ))}
+          </ol>
+          <Replay />
+        </div>
+      </Reveal>
+
+      <Reveal as="section" className="landing-section agents" aria-labelledby="agents-heading">
+        <p className="eyebrow section-eyebrow">03</p>
+        <h2 id="agents-heading">An agent can hold tickets too.</h2>
+        <p className="lead">
+          The ticket agent buys only within the caps its owner sets, and its watcher claims the
+          refund when an event is never confirmed.
+        </p>
+        <AgentTerminal />
+      </Reveal>
+
+      <Reveal
+        as="section"
+        id="events"
+        className="landing-section events"
+        aria-labelledby="events-heading"
+      >
         <h2 id="events-heading">Events</h2>
         <LoadState load={events} loadingText="Reading events from the contract…">
           {(list) =>
@@ -71,7 +100,7 @@ export function HomePage() {
             )
           }
         </LoadState>
-      </section>
+      </Reveal>
     </>
   );
 }
@@ -107,17 +136,24 @@ function EventRow({ event, timeZone }: { event: EventView; timeZone: string }) {
   );
 }
 
-/** The hero image: a drawn ticket, not a screenshot (landing style). */
+/**
+ * The hero image: a drawn ticket, not a screenshot (landing style). It is labelled as an example in
+ * both modes, so it never reads as chain data next to the live events list.
+ */
 function TicketStub() {
+  const labelId = useId();
   return (
-    <div className="hero-art" aria-hidden="true">
-      <div className="hero-diamond" />
-      <div className="stub card">
+    <div className="hero-art rise" data-delay="2">
+      <div className="hero-diamond" aria-hidden="true" />
+      <figure className="stub card" aria-labelledby={labelId}>
+        <figcaption id={labelId} className="stub-label">
+          Example ticket
+        </figcaption>
         <p className="stub-eyebrow">Ticket 1-3 · Jazz night</p>
         <p className="stub-amount">1.5 NEAR</p>
         <p className="stub-state">Reserved</p>
         <p className="stub-note">Held by luis.testnet. Refund right goes with the ticket.</p>
-      </div>
+      </figure>
     </div>
   );
 }
