@@ -103,10 +103,13 @@ export function Replay() {
             <p className="stub-eyebrow">Ticket 1-4 · Jazz night</p>
             <p className="stub-amount">1.5 NEAR</p>
             <p className="replay-state">
-              <span key={state.phase} className={`phase phase-${state.phase} replay-pill`}>
+              <span
+                key={`phase-${state.phase}`}
+                className={`phase phase-${state.phase} replay-pill`}
+              >
                 {PHASE_LABELS[state.phase]}
               </span>
-              <span key={state.claim} className="replay-claim">
+              <span key={`claim-${state.claim}`} className="replay-claim">
                 {CLAIM_LABELS[state.claim]}
               </span>
             </p>
