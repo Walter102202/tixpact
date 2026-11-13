@@ -6,11 +6,11 @@ Why NEAR: the verifier is an account name a buyer can read before paying, the co
 
 Built at NEAR HACKATHON 2026. It runs on **testnet**, it is **not audited**, and it must not hold real money. The web app carries a working name, TixPact.
 
-**Status on 2026-11-13.** The contract named below is the development deployment. It still has one access key, and the proof page and `scripts/verify-deployment.mjs` say so. The final deployment, with zero keys, replaces it before the submission. Every contract call here was signed from scripts and the command line; the web app reads this contract, and signing from a browser wallet has not been walked through yet.
+**Status on 2026-11-13.** The contract named below holds the released build. It still has one access key, and the proof page and `scripts/verify-deployment.mjs` say so; deleting that key is the last step before the submission. Every contract call here was signed from scripts, the command line and the agent; the web app reads this contract, and signing from a browser wallet has not been walked through yet.
 
 | | |
 |---|---|
-| Contract (testnet) | [`te-d4-escrow.testnet`](https://testnet.nearblocks.io/address/te-d4-escrow.testnet) |
+| Contract (testnet) | [`ticket-escrow.testnet`](https://testnet.nearblocks.io/address/ticket-escrow.testnet) |
 | Hosted demo | Not published yet. Run it locally: [Try it](#try-it), step 1. |
 | Every claim below, with its transaction | [`docs/proof.md`](docs/proof.md) |
 | How it works and why | [`docs/design.md`](docs/design.md) |
@@ -36,7 +36,7 @@ The law does not fill the gap by itself. When a UK ticketing company went under,
 | The organizer is insolvent, silent or gone, so nobody approves refunds. | A deadline is part of the terms. Once it passes without a confirmation, any account can switch the event to refunds, and each holder claims their own. | `t05_anyone_expires_after_deadline`, `t09_refund_pays_exact_principal` |
 | The refund goes to whoever bought first, not to whoever holds the ticket now. | The ticket is an NFT (NEP-171) and the refund belongs to its current holder. Give the ticket away and the right goes with it. | `t07_refund_follows_the_holder` |
 | "Trust us" hides who decides. | The verifier is a named account, shown before you pay, that accepted the exact terms. It can confirm only between the end of the event and the deadline. | `t02_purchase_needs_acceptance_and_capacity`, `t04_attestation_completes_event`, `t15_deadline_boundaries` |
-| Someone with admin rights can change the rules later. | There is no owner, no admin method and no upgrade method. The final deployment has zero access keys. | `scripts/verify-deployment.mjs` |
+| Someone with admin rights can change the rules later. | There is no owner, no admin method and no upgrade method. Once the account's last key is deleted, nobody can replace the code. | `scripts/verify-deployment.mjs` |
 
 ## Try it
 
@@ -46,16 +46,16 @@ Each step says what to do and what you should see.
 
    ```bash
    pnpm install --frozen-lockfile
-   VITE_CONTRACT_ID=te-d4-escrow.testnet pnpm --filter @ticket-escrow/web dev
+   VITE_CONTRACT_ID=ticket-escrow.testnet pnpm --filter @ticket-escrow/web dev
    ```
 
-   Open `http://localhost:5173`. You should see the events read from the contract above: at least "Jazz night", "Opening night" and "Direct calls" (every run of step 5 adds one). Open one: the page shows the verifier's account, the deadline and how much is reserved in the contract. Open `/tickets/1-1`: where the money went, and the history with the purchase by Ana, the transfer to Luis and the refund to Luis. Open `/proof`: the code hash, the access keys and the balance, read from the chain.
+   Open `http://localhost:5173`. You should see the events read from the contract above: at least "Jazz night", "Opening night", "Direct calls" and "Agent night" (every run of step 5 adds one). Open one: the page shows the verifier's account, the deadline and how much is reserved in the contract. Open `/tickets/1-1`: where the money went, and the history with the purchase by Ana, the transfer to Luis and the refund to Luis. Open `/proof`: the code hash, the access keys and the balance, read from the chain.
 2. **Read the proof.** Open [`docs/proof.md`](docs/proof.md). Each row is one step of two stories played on testnet (an organizer who disappears; an event that is confirmed), with the transaction link and the observed result. Open any link in the explorer and compare.
 3. **Check the deployment yourself.** With Node 22 and pnpm:
 
    ```bash
    pnpm install --frozen-lockfile && pnpm --filter @ticket-escrow/client build
-   node scripts/verify-deployment.mjs te-d4-escrow.testnet --allow-keys
+   node scripts/verify-deployment.mjs ticket-escrow.testnet --allow-keys
    ```
 
    You should see the code hash, `Access keys     1`, the balance next to the principal held, and a final line starting with `OK with --allow-keys`. The script signs nothing. Without `--allow-keys` it ends with `NOT VERIFIED` and exits non-zero while the account has any key; it also fails if the contract is a test build or holds less than it owes.
@@ -66,19 +66,10 @@ Each step says what to do and what you should see.
    ```
 
    You should see the web checks, then the contract tests listed by name (`t01_purchase_reserves_exact_price ... ok`, and so on), then `== gate passed: all ==`. The contract tests start a local NEAR node, deploy the contract and move the clock past deadlines. The first run compiles everything and downloads the node: about ten minutes.
-
-   The gate leaves the contract it built in `target/near/`. Compare it with the deployed one:
-
-   ```bash
-   node scripts/verify-deployment.mjs te-d4-escrow.testnet --allow-keys \
-     --wasm target/near/ticket_escrow/ticket_escrow.wasm
-   ```
-
-   You should see a `Local wasm` line with the hash of your build next to the `Code hash` read from the chain. If they differ, the script ends with `NOT VERIFIED`; see limit 7 for why another machine can differ.
 5. **Use the contract without our website.** With the NEAR CLI and four testnet accounts ([details](#if-the-website-is-down)):
 
    ```bash
-   CONTRACT_ID=te-d4-escrow.testnet ORGANIZER_ID=... VERIFIER_ID=... BUYER_ID=... ANYONE_ID=... \
+   CONTRACT_ID=ticket-escrow.testnet ORGANIZER_ID=... VERIFIER_ID=... BUYER_ID=... ANYONE_ID=... \
      bash scripts/direct-calls.sh
    ```
 
@@ -87,7 +78,7 @@ Each step says what to do and what you should see.
 
    ```bash
    pnpm install --frozen-lockfile && pnpm build
-   CONTRACT_ID=te-d4-escrow.testnet pnpm --filter @ticket-escrow/mcp smoke
+   CONTRACT_ID=ticket-escrow.testnet pnpm --filter @ticket-escrow/mcp smoke
    ```
 
    You should see `Tools (10): list_events, get_event, ...`, the events, the contract's code hash and balance next to what it owes, and `Smoke passed.` It runs without a key, so nothing is signed. To connect Claude Code, or to let the agent buy within a cap, see [`docs/mcp.md`](docs/mcp.md).
@@ -117,7 +108,7 @@ Tests are sandbox tests in [`contract/tests/`](contract/tests/), one function pe
 | A verifier who lies is believed. This is a limit, stated and tested. | `t21_false_attestation_is_a_trust_limit` | |
 | The ticket is a standard NFT that wallets and explorers understand. | `t22_standard_token_surface` | |
 | The whole flow works from the command line alone. | `scripts/direct-calls.sh` | |
-| The deployed contract is not a test build, holds at least what it owes, and its access keys are counted from the chain (zero in the final deployment). | `scripts/verify-deployment.mjs` | |
+| The deployed contract is not a test build, holds at least what it owes, and its access keys are counted from the chain (zero once the last key is deleted). | `scripts/verify-deployment.mjs` | |
 | An agent cannot spend above its caps or call anything else. | `mcp/src/policy.test.ts`, `mcp/src/tools.test.ts` | [`docs/mcp.md`](docs/mcp.md#verification) |
 
 ## What NEAR does here
@@ -136,7 +127,7 @@ Tests are sandbox tests in [`contract/tests/`](contract/tests/), one function pe
 
 - **Caps checked before anything is signed.** A price cap per ticket and a cap on the money it has in tickets at one time. It can call one contract and four methods, and nothing else. `mcp/src/policy.test.ts`
 - **It cannot do what the contract forbids.** It cannot confirm an event or claim a ticket it does not hold; the contract's rules apply to it as to anyone.
-- **A watcher that never forgets a refund.** A loop that, after a deadline nobody met, switches the event to refunds and claims the agent's tickets. On testnet it did both in its first round after the deadline (transactions in [`docs/mcp.md`](docs/mcp.md#verification)).
+- **A watcher that never forgets a refund.** A loop that, after a deadline nobody met, switches the event to refunds and claims the agent's tickets. On testnet, on the contract above, it did both within a minute of the deadline (transactions in [`docs/mcp.md`](docs/mcp.md#verification)).
 - **The key stays on your machine.** The server runs locally over stdio; nothing is hosted.
 
 The caps do not bound what the agent spends over time: fund its account only with what it may spend.
@@ -148,7 +139,7 @@ The caps do not bound what the agent spends over time: fund its account only wit
 | The contract, deployed on NEAR testnet, with the rules above enforced on chain. | The money: testnet NEAR from the faucet, worth nothing. |
 | Every transaction in `docs/proof.md`; each can be opened in the explorer. | The people: organizer, verifier, Ana and Luis are accounts we created and played ourselves. |
 | The tests: a real local node, real deployments, real failed transfers. | The verifier: a single account. A real one would be a venue, an auditor or a group with its own voting rules. |
-| The web app and the agent, reading and writing that contract. | The time scale: demo events last minutes so a deadline can be watched. |
+| The agent, reading and writing that contract, and the web app, reading it (signing from a browser wallet: see the status above). | The time scale: demo events last minutes so a deadline can be watched. |
 
 Nothing in the product is decided by an AI or by a server of ours. There is no backend: the web reads the chain through public RPC endpoints.
 
@@ -160,7 +151,7 @@ Nothing in the product is decided by an AI or by a server of ours. There is no b
 4. **A lost key is a lost ticket.**
 5. **The refund is the same amount of NEAR, not the same value** in any currency.
 6. **The whole price is locked**, so an organizer cannot fund the event with ticket sales.
-7. **Not audited, testnet only.** A bug cannot be patched: a new version is a new deployment. The build is not reproducible-verified: the deployed code hash is public, but another machine may not produce the same bytes from this source.
+7. **Not audited, testnet only.** A bug cannot be patched: a new version is a new deployment. The build is not reproducible: the deployed code hash is public and equals what our machine builds from this source (`scripts/verify-deployment.mjs --wasm <file>` compares them), but another machine produces different bytes. Our CI runner prints the hash of its own build, and it is a different one.
 8. **Out of scope:** entry at the door, proof of attendance, paid resale, identity.
 
 The full list is in the [threat model](docs/threat-model.md#limits).
@@ -174,7 +165,8 @@ fixtures/          Hostile test contracts: a holder that deletes itself, a ticke
 packages/client/   TypeScript: typed views and calls, transaction tracking, the words shown to people
 web/               React app (Vite): events, tickets, transfers, claims, an organizer and verifier desk, the proof page
 mcp/               MCP server: an agent with its own account and a spending cap
-scripts/           gate.sh (all checks), demo-scenario.mjs (writes docs/proof.md), direct-calls.sh, verify-deployment.mjs
+scripts/           gate.sh (all checks), demo-scenario.mjs (writes docs/proof.md), direct-calls.sh, verify-deployment.mjs,
+                   demo-event.sh (one event with a deadline minutes away, to play the refund from the web app)
 docs/              design, threat model, proof, gas, the agent guide, toolchain, one file per decision
 ```
 
@@ -211,7 +203,7 @@ The same script runs in CI ([`.github/workflows/ci.yml`](.github/workflows/ci.ym
 To run the web app against the deployed contract:
 
 ```bash
-VITE_CONTRACT_ID=te-d4-escrow.testnet pnpm --filter @ticket-escrow/web dev
+VITE_CONTRACT_ID=ticket-escrow.testnet pnpm --filter @ticket-escrow/web dev
 ```
 
 Without `VITE_CONTRACT_ID` it shows built-in demo data and says so in a banner.
@@ -227,14 +219,14 @@ for name in organizer verifier buyer anyone; do
     autogenerate-new-keypair save-to-legacy-keychain network-config testnet create
 done
 
-CONTRACT_ID=te-d4-escrow.testnet ORGANIZER_ID=<your-prefix>-organizer.testnet VERIFIER_ID=<your-prefix>-verifier.testnet \
+CONTRACT_ID=ticket-escrow.testnet ORGANIZER_ID=<your-prefix>-organizer.testnet VERIFIER_ID=<your-prefix>-verifier.testnet \
   BUYER_ID=<your-prefix>-buyer.testnet ANYONE_ID=<your-prefix>-anyone.testnet bash scripts/direct-calls.sh
 ```
 
 Reading needs no account at all:
 
 ```bash
-near contract call-function as-read-only te-d4-escrow.testnet list_events json-args '{"from_index":0,"limit":10}' \
+near contract call-function as-read-only ticket-escrow.testnet list_events json-args '{"from_index":0,"limit":10}' \
   network-config testnet now
 ```
 

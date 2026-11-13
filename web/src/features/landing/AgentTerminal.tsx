@@ -3,7 +3,7 @@ import { Link } from '../../lib/router';
 import { prefersReducedMotion, useInView } from './Reveal';
 
 // The agent's real output on NEAR testnet, from docs/mcp.md, section "Verification" (2026-11-13):
-// contract te-d3-escrow.testnet, agent te-d1-agent.testnet, caps 2 NEAR per ticket and 5 NEAR of
+// contract ticket-escrow.testnet, agent te-d1-agent.testnet, caps 2 NEAR per ticket and 5 NEAR of
 // exposure. Lines starting with "#" say which run follows; every other line is as printed.
 
 type Line =
@@ -28,11 +28,11 @@ const RUNS: Run[] = [
       { kind: 'out', text: 'Per-ticket cap: 2 NEAR' },
       { kind: 'out', text: 'Exposure cap: 5 NEAR' },
       { kind: 'out', text: 'Exposure now: 0 NEAR, leaving 5 NEAR under the cap.' },
-      { kind: 'call', text: 'buy_ticket {"event_id":2}' },
+      { kind: 'call', text: 'buy_ticket {"event_id":4}' },
       {
         kind: 'out',
-        text: 'Bought ticket 2-1 for 0.5 NEAR. Its price stays reserved in the contract until the event is confirmed or switched to refunds. Transaction:',
-        href: tx('Dj5bhTYztQbZgUt7wCpeuDXPyTBQk1fxTb2jf5J64J3j'),
+        text: 'Bought ticket 4-1 for 0.5 NEAR. Its price stays reserved in the contract until the event is confirmed or switched to refunds. Transaction:',
+        href: tx('xipcWZ6r5E6rYCthHvqbKbEBHs7kYgrjMR7XYWtjdK6'),
       },
     ],
   },
@@ -42,9 +42,9 @@ const RUNS: Run[] = [
     lines: [
       {
         kind: 'note',
-        text: '# The same run with an exposure cap of 0.5 NEAR, holding ticket 2-1.',
+        text: '# The same run with an exposure cap of 0.5 NEAR, holding ticket 4-1.',
       },
-      { kind: 'call', text: 'buy_ticket {"event_id":2}' },
+      { kind: 'call', text: 'buy_ticket {"event_id":4}' },
       {
         kind: 'denied',
         text: 'Denied: Exposure would be 1 NEAR (0.5 NEAR in tickets held plus 0.5 NEAR for this one), above the cap of 0.5 NEAR. Nothing was signed.',
@@ -57,25 +57,25 @@ const RUNS: Run[] = [
     lines: [
       {
         kind: 'note',
-        text: '# The refund watcher. Event 2 had a deadline of 03:51:06 UTC and no confirmation.',
+        text: '# The refund watcher. Event 4 had a deadline of 13:37:59 UTC and no confirmation.',
       },
       {
         kind: 'out',
-        text: '2026-11-13T03:49:35.284Z Watching te-d1-agent.testnet: a plain loop that checks every 30 s. Stop it with Ctrl+C.',
+        text: '2026-11-13T13:33:22.801Z Watching te-d1-agent.testnet: a plain loop that checks every 30 s. Stop it with Ctrl+C.',
       },
       {
         kind: 'out',
-        text: '2026-11-13T03:50:39.905Z Nothing to claim: 1 ticket held, none claimable now.',
+        text: '2026-11-13T13:37:30.157Z Nothing to claim: 1 ticket held, none claimable now.',
       },
       {
         kind: 'out',
-        text: '2026-11-13T03:51:14.755Z expire_event 2: succeeded, tx 3zYb7PV3KjR2ePTSUexqVAyHHFGoA9Siw8887EnS4BGg',
-        href: tx('3zYb7PV3KjR2ePTSUexqVAyHHFGoA9Siw8887EnS4BGg'),
+        text: '2026-11-13T13:38:35.999Z expire_event 4: succeeded, tx 3MgSi5t77JZ7PH2nXPq9z1FPxaPeASAn5Fiv5Hrzpti7',
+        href: tx('3MgSi5t77JZ7PH2nXPq9z1FPxaPeASAn5Fiv5Hrzpti7'),
       },
       {
         kind: 'out',
-        text: '2026-11-13T03:51:21.084Z claim_refund 2-1: succeeded, tx 23DM83YCghZv1Ad3aDhVxhXDjHm9KXjnCtBApDEMmY3e',
-        href: tx('23DM83YCghZv1Ad3aDhVxhXDjHm9KXjnCtBApDEMmY3e'),
+        text: '2026-11-13T13:38:41.946Z claim_refund 4-1: succeeded, tx 5ZQummRVUDyv44cg8zK8nTqvWuGjoU85oZcuJaZaRzUS',
+        href: tx('5ZQummRVUDyv44cg8zK8nTqvWuGjoU85oZcuJaZaRzUS'),
       },
     ],
   },
@@ -212,7 +212,7 @@ function TermLine({ line }: { line: Line }) {
   );
 }
 
-// The agent's exposure as it stood in the run above, after buying ticket 2-1.
+// The agent's exposure as it stood in the run above, after buying ticket 4-1.
 const HELD = 0.5;
 const PER_TICKET = 2;
 const EXPOSURE_CAP = 5;
@@ -243,7 +243,7 @@ function CapMeter() {
         <span>per-ticket cap {PER_TICKET} NEAR</span>
       </p>
       <p className="muted">
-        te-d1-agent.testnet after buying ticket 2-1. A purchase that would pass either cap is denied
+        te-d1-agent.testnet after buying ticket 4-1. A purchase that would pass either cap is denied
         before anything is signed.
       </p>
     </figure>

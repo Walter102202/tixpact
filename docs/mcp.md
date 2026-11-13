@@ -2,7 +2,7 @@
 
 A local MCP server that lets an AI agent read events and tickets, and buy, transfer and claim tickets from its own NEAR testnet account. Every write is checked against fixed caps before anything is signed, and the key never leaves the machine: the server speaks over stdio and nothing is hosted.
 
-Verified on 2026-11-13 against `@modelcontextprotocol/sdk` 1.32.2 and `near-api-js` 7.5.3 (installed type declarations), on the fixture chain of `@ticket-escrow/client` and on testnet against `te-d3-escrow.testnet`; the `claude mcp add` form was read from the help text of Claude Code 2.1.323 on 2026-11-12 and again on 2026-11-13. The testnet runs are recorded in "Verification" at the end.
+Verified on 2026-11-13 against `@modelcontextprotocol/sdk` 1.32.2 and `near-api-js` 7.5.3 (installed type declarations), on the fixture chain of `@ticket-escrow/client` and on testnet against `ticket-escrow.testnet` (the released build) and, earlier, `te-d3-escrow.testnet`; the `claude mcp add` form was read from the help text of Claude Code 2.1.323 on 2026-11-12 and again on 2026-11-13. The testnet runs are recorded in "Verification" at the end.
 
 ## What the agent can and cannot do
 
@@ -320,6 +320,38 @@ It starts the built server as a child process over stdio, exactly as an MCP clie
 ## Verification
 
 - 2026-11-13, offline: `pnpm --filter @ticket-escrow/mcp test` runs the tools through the SDK's in-memory client and server pair on the fixture chain with a recording signer, the policy, the configuration, the signer against a fake provider, the start-up checks of the network and the key, the watcher, and the redaction of RPC URLs and organizer text (131 tests). The built server over stdio, through the smoke script against an RPC that refuses connections, listed the ten tools and reported the failed read as a tool error.
+- 2026-11-13, testnet, contract `ticket-escrow.testnet` (the released build, code hash `HVyFFXATaegV6kptSDZhR9VUuo3itjYvUoR8NsKDitgK`), agent `te-d1-agent.testnet`, default endpoints, run on a26520a. Event 4, "Agent night", was created by `te-d1-venue.testnet` and accepted by `te-d1-auditor.testnet`; nobody confirmed it. Its deadline was 13:37:59 UTC.
+  - Smoke with the key (`SMOKE_EVENT_ID=4`), caps 2 NEAR per ticket and 5 NEAR of exposure, the last two calls as printed:
+
+    ```text
+    ## get_wallet {}
+    # Agent wallet te-d1-agent.testnet (testnet)
+
+    Balance: 9.997563910230307499999998 NEAR. The agent can never spend more than this account holds.
+    Per-ticket cap: 2 NEAR
+    Exposure cap: 5 NEAR
+    Exposure now: 0 NEAR, leaving 5 NEAR under the cap.
+    Contract it may call: ticket-escrow.testnet (buy_ticket, nft_transfer, expire_event, claim_refund only).
+    Signing: on. Every write is checked against the caps before it is signed.
+
+    ## buy_ticket {"event_id":4}
+    Bought ticket 4-1 for 0.5 NEAR. Its price stays reserved in the contract until the event is confirmed or switched to refunds. Transaction: https://testnet.nearblocks.io/txns/xipcWZ6r5E6rYCthHvqbKbEBHs7kYgrjMR7XYWtjdK6
+
+    Smoke passed.
+    ```
+  - The same smoke with an exposure cap of 0.5 NEAR, holding ticket 4-1: `Denied: Exposure would be 1 NEAR (0.5 NEAR in tickets held plus 0.5 NEAR for this one), above the cap of 0.5 NEAR. Nothing was signed.` The smoke then exits 1, as it does whenever the purchase is not made.
+  - The watcher (`node dist/bin/watch.js`, stopped with SIGINT after six minutes), log as printed with the repeated idle lines cut:
+
+    ```text
+    2026-11-13T13:33:22.801Z Watching te-d1-agent.testnet: a plain loop that checks every 30 s. Stop it with Ctrl+C.
+    2026-11-13T13:33:23.553Z Nothing to claim: 1 ticket held, none claimable now.
+    2026-11-13T13:38:01.016Z Nothing to claim: 1 ticket held, none claimable now.
+    2026-11-13T13:38:35.999Z expire_event 4: succeeded, tx 3MgSi5t77JZ7PH2nXPq9z1FPxaPeASAn5Fiv5Hrzpti7 https://testnet.nearblocks.io/txns/3MgSi5t77JZ7PH2nXPq9z1FPxaPeASAn5Fiv5Hrzpti7
+    2026-11-13T13:38:41.946Z claim_refund 4-1: succeeded, tx 5ZQummRVUDyv44cg8zK8nTqvWuGjoU85oZcuJaZaRzUS https://testnet.nearblocks.io/txns/5ZQummRVUDyv44cg8zK8nTqvWuGjoU85oZcuJaZaRzUS
+    ```
+
+    The round that started two seconds after the deadline still read a block from before it; the next round, 37 seconds after the deadline, expired the event and claimed the ticket.
+- Earlier, on the build of Tasks C1 and C2:
 - 2026-11-13, testnet, contract `te-d3-escrow.testnet` (the C1 and C2 build), agent `te-d1-agent.testnet`, default endpoints, caps 2 NEAR per ticket and 5 NEAR of exposure. Event 2, "Agent night", was created by `te-d1-venue.testnet` and accepted by `te-d1-auditor.testnet`; nobody confirmed it.
   - Smoke with the key (`SMOKE_EVENT_ID=2`), run on ca62150, output as printed (`list_events` lines shortened here):
 

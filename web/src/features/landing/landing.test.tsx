@@ -160,7 +160,7 @@ describe('the landing', () => {
   });
 
   it('labels the hero ticket as an example when a contract is configured', () => {
-    renderAt('/', testServices({ fixtureMode: false, contractId: 'te-d3-escrow.testnet' }));
+    renderAt('/', testServices({ fixtureMode: false, contractId: 'ticket-escrow.testnet' }));
     expect(screen.queryByText('Demo data: nothing on this page is on chain.')).toBeNull();
     const hero = document.querySelector('.hero') as HTMLElement;
     const ticket = within(hero).getByRole('figure', { name: 'Example ticket' });
@@ -257,10 +257,9 @@ describe('the replay', () => {
 });
 
 describe('the agent terminal', () => {
-  const PURCHASE =
-    'https://testnet.nearblocks.io/txns/Dj5bhTYztQbZgUt7wCpeuDXPyTBQk1fxTb2jf5J64J3j';
-  const EXPIRE = 'https://testnet.nearblocks.io/txns/3zYb7PV3KjR2ePTSUexqVAyHHFGoA9Siw8887EnS4BGg';
-  const CLAIM = 'https://testnet.nearblocks.io/txns/23DM83YCghZv1Ad3aDhVxhXDjHm9KXjnCtBApDEMmY3e';
+  const PURCHASE = 'https://testnet.nearblocks.io/txns/xipcWZ6r5E6rYCthHvqbKbEBHs7kYgrjMR7XYWtjdK6';
+  const EXPIRE = 'https://testnet.nearblocks.io/txns/3MgSi5t77JZ7PH2nXPq9z1FPxaPeASAn5Fiv5Hrzpti7';
+  const CLAIM = 'https://testnet.nearblocks.io/txns/5ZQummRVUDyv44cg8zK8nTqvWuGjoU85oZcuJaZaRzUS';
   const terminal = () => screen.getByRole('figure', { name: 'The agent on NEAR testnet' });
   const panel = () => within(terminal()).getByRole('tabpanel');
   const links = () =>
@@ -287,7 +286,7 @@ describe('the agent terminal', () => {
       '/refund-watcher',
     ]);
     expect(tabs[0]?.getAttribute('aria-selected')).toBe('true');
-    expect(panel().textContent).toContain('Bought ticket 2-1 for 0.5 NEAR.');
+    expect(panel().textContent).toContain('Bought ticket 4-1 for 0.5 NEAR.');
     expect(links()).toEqual([PURCHASE]);
   });
 
@@ -300,8 +299,8 @@ describe('the agent terminal', () => {
     );
     expect(links()).toEqual([]);
     fireEvent.click(within(terminal()).getByRole('tab', { name: '/refund-watcher' }));
-    expect(panel().textContent).toContain('expire_event 2: succeeded');
-    expect(panel().textContent).toContain('claim_refund 2-1: succeeded');
+    expect(panel().textContent).toContain('expire_event 4: succeeded');
+    expect(panel().textContent).toContain('claim_refund 4-1: succeeded');
     expect(links()).toEqual([EXPIRE, CLAIM]);
   });
 
