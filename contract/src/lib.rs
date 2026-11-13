@@ -5,13 +5,16 @@
 //! once the deadline passes without that confirmation, anyone can switch the event to refunds.
 //!
 //! The rules (R1–R11), methods, JSON shapes and error codes are the plan's "Frozen interface (v1)"
-//! (`docs/plans/2026-11-12-ticket-escrow-mvp-plan.md`). Where each part lives:
+//! (`docs/plans/2026-11-12-ticket-escrow-mvp-plan.md`), extended by "Frozen interface (v2)"
+//! (`docs/plans/2026-11-13-pass-group-verifier-dollars.md`): events priced in a NEP-141 token
+//! fixed at `new`. Where each part lives:
 //!
+//! - `currency.rs`: the token list given to `new`.
 //! - `events.rs`: `create_event`, `accept_verification`, `cancel_event`, `attest_completed`,
 //!   `expire_event`.
-//! - `tickets.rs`: `buy_ticket` and the NEP-171 token surface (`nft_transfer`,
-//!   `nft_transfer_call` with its private `nft_resolve_transfer`, `nft_token`, enumeration,
-//!   metadata).
+//! - `tickets.rs`: `buy_ticket`, `ft_on_transfer` (a purchase paid in a token) and the NEP-171
+//!   token surface (`nft_transfer`, `nft_transfer_call` with its private `nft_resolve_transfer`,
+//!   `nft_token`, enumeration, metadata).
 //! - `views.rs`: `get_config`, `quote_event_budget`, `get_event`, `list_events`,
 //!   `get_accounting`, `get_ticket`, `list_tickets_for_owner`, `get_ticket_history`.
 //! - `settlement.rs`: `claim_refund`, `claim_payout`, their private callbacks, `get_operation` and
@@ -22,6 +25,7 @@
 //! The contract has no owner, no admin method and no upgrade method (R10).
 
 mod accounting;
+mod currency;
 mod errors;
 mod events;
 mod log;
@@ -34,6 +38,7 @@ use near_sdk::store::{LookupMap, Vector};
 use near_sdk::{PanicOnDefault, env, near};
 
 pub use crate::accounting::{Ledger, STORAGE_BYTES_PER_EVENT, STORAGE_BYTES_PER_TICKET};
+pub use crate::currency::{MAX_DECIMALS, MAX_SYMBOL_BYTES, MAX_TOKENS, TokenSpec};
 pub use crate::errors::Code;
 pub use crate::events::{EventTerms, Outcome, OutcomeReason};
 pub use crate::settlement::{GAS_CLAIM_MIN, GAS_FOR_CALLBACK, OperationKind, OperationView};
@@ -90,16 +95,20 @@ pub struct Contract {
     pub(crate) operations: LookupMap<u64, Operation>,
     /// The id of the latest operation; 0 before the first one.
     pub(crate) last_operation_id: u64,
-    /// Sum over all events of `principal_reserved + organizer_available`, in yoctoNEAR.
+    /// Sum over all events priced in NEAR of `principal_reserved + organizer_available`, in
+    /// yoctoNEAR. Token-priced events are not in it: their money is held by their token.
     pub(crate) total_held: u128,
+    /// The NEP-141 tokens events may be priced in, fixed at `new`. Empty: NEAR only.
+    pub(crate) currencies: Vec<TokenSpec>,
 }
 
 #[near]
 impl Contract {
-    /// Initializes the contract. Takes no arguments: there is nothing to configure and nobody to
-    /// put in charge.
+    /// Initializes the contract with the tokens events may be priced in, besides NEAR: at most 4,
+    /// each listed once. The list can never change, and nobody is put in charge.
     #[init]
-    pub fn new() -> Self {
+    pub fn new(tokens: Vec<TokenSpec>) -> Self {
+        currency::validate_tokens(&tokens);
         Self {
             tokens: NonFungibleToken::new(
                 prefix::TOKEN_OWNERS,
@@ -113,6 +122,7 @@ impl Contract {
             operations: LookupMap::new(prefix::OPERATIONS),
             last_operation_id: 0,
             total_held: 0,
+            currencies: tokens,
         }
     }
 }

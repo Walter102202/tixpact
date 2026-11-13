@@ -18,10 +18,12 @@ pub struct EventTerms {
     pub starts_at_ms: u64,
     pub ends_at_ms: u64,
     pub resolution_deadline_ms: u64,
-    /// Price of one ticket in yoctoNEAR.
+    /// Price of one ticket, in the smallest unit of `currency`.
     pub price: U128,
     pub capacity: u32,
     pub verifier_id: AccountId,
+    /// `null` (or left out) for NEAR; otherwise one of the tokens listed at `new`.
+    pub currency: Option<AccountId>,
 }
 
 /// The event outcome. It leaves `Unresolved` once and never changes again (R2).
@@ -55,9 +57,12 @@ pub struct EventRecord {
     pub starts_at_ms: u64,
     pub ends_at_ms: u64,
     pub resolution_deadline_ms: u64,
+    /// In the smallest unit of `currency`.
     pub price: u128,
     pub capacity: u32,
     pub sold: u32,
+    /// `None` for NEAR; otherwise a token listed at `new`. The ledger counts in this currency.
+    pub currency: Option<AccountId>,
     pub outcome: Outcome,
     pub outcome_reason: Option<OutcomeReason>,
     pub resolved_at_ms: Option<u64>,
@@ -91,7 +96,7 @@ impl EventRecord {
 
 /// Lowercase hex SHA-256 of the Borsh encoding of
 /// `(organizer_id, verifier_id, title, venue, starts_at_ms, ends_at_ms, resolution_deadline_ms,
-/// price, capacity)`.
+/// price, capacity, currency)`. The currency is last, an `Option<AccountId>` (v2).
 pub fn terms_hash(organizer_id: &AccountId, terms: &EventTerms) -> [u8; 32] {
     let encoded = near_sdk::borsh::to_vec(&(
         organizer_id,
@@ -103,6 +108,7 @@ pub fn terms_hash(organizer_id: &AccountId, terms: &EventTerms) -> [u8; 32] {
         terms.resolution_deadline_ms,
         terms.price.0,
         terms.capacity,
+        &terms.currency,
     ))
     .unwrap_or_else(|_| env::abort());
     env::sha256_array(&encoded)
@@ -119,8 +125,8 @@ pub fn to_hex(bytes: &[u8; 32]) -> String {
     text
 }
 
-/// Checks the terms against the rules and the limits. Changes nothing.
-fn validate_terms(organizer_id: &AccountId, terms: &EventTerms, now_ms: u64) {
+/// Checks the terms against the rules, the limits and the listed tokens. Changes nothing.
+fn validate_terms(contract: &Contract, organizer_id: &AccountId, terms: &EventTerms, now_ms: u64) {
     ensure_text_fits(Some(&terms.title), MAX_TITLE_BYTES, "the title");
     ensure_text_fits(Some(&terms.venue), MAX_VENUE_BYTES, "the venue");
     ensure(
@@ -158,6 +164,14 @@ fn validate_terms(organizer_id: &AccountId, terms: &EventTerms, now_ms: u64) {
             && terms.ends_at_ms < terms.resolution_deadline_ms,
         Code::InvalidTerms,
         "the times must satisfy now < starts_at_ms < ends_at_ms < resolution_deadline_ms",
+    );
+    ensure(
+        terms
+            .currency
+            .as_ref()
+            .is_none_or(|token| contract.token_spec(token).is_some()),
+        Code::InvalidTerms,
+        "the currency must be null for NEAR or one of the tokens in get_config",
     );
 }
 
@@ -201,7 +215,8 @@ impl Contract {
 
 #[near]
 impl Contract {
-    /// Creates an event with the caller as organizer. The deposit must cover
+    /// Creates an event with the caller as organizer, priced in NEAR or in one listed token
+    /// (`terms.currency`). The deposit, always in NEAR, must cover
     /// `quote_event_budget(capacity)`; all of it becomes the event's operating budget, which pays
     /// for its storage only. Tickets go on sale once the verifier accepts these exact terms.
     /// Returns the new event id (ids start at 1).
@@ -210,7 +225,7 @@ impl Contract {
         let organizer_id = env::predecessor_account_id();
         let now_ms = env::block_timestamp_ms();
         let deposit = env::attached_deposit().as_yoctonear();
-        validate_terms(&organizer_id, &terms, now_ms);
+        validate_terms(self, &organizer_id, &terms, now_ms);
         ensure(
             deposit >= quote_event_budget(terms.capacity),
             Code::WrongDeposit,
@@ -236,6 +251,7 @@ impl Contract {
             price: terms.price.0,
             capacity: terms.capacity,
             sold: 0,
+            currency: terms.currency,
             outcome: Outcome::Unresolved,
             outcome_reason: None,
             resolved_at_ms: None,
@@ -255,6 +271,7 @@ impl Contract {
             &to_hex(&hash),
             event.price,
             event.capacity,
+            event.currency.as_ref(),
         );
         self.events.push(event);
         event_id

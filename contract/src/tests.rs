@@ -64,13 +64,14 @@ fn terms() -> EventTerms {
         price: U128(PRICE),
         capacity: 3,
         verifier_id: id(VERIFIER),
+        currency: None,
     }
 }
 
 /// A contract with one accepted event and a ticket bought by Ana at time 1_500_000.
 fn contract_with_a_sold_ticket() -> Contract {
     call_as(ESCROW, 0, 1_000_000);
-    let mut contract = Contract::new();
+    let mut contract = Contract::new(Vec::new());
     call_as(ORGANIZER, quote_event_budget(3), 1_000_000);
     let event_id = contract.create_event(terms());
     let hash = contract
@@ -87,13 +88,14 @@ fn contract_with_a_sold_ticket() -> Contract {
 #[test]
 fn config_reports_the_frozen_limits() {
     call_as(ESCROW, 0, 1);
-    let config = Contract::new().get_config();
+    let config = Contract::new(Vec::new()).get_config();
 
-    assert_eq!(config.version, "1.0.0");
+    assert_eq!(config.version, "2.0.0");
     assert_eq!(config.max_capacity, 100);
     assert_eq!(config.max_page, 50);
     assert_eq!(config.history_cap, 16);
     assert!(!config.fault_injection);
+    assert!(config.tokens.is_empty());
 }
 
 /// `t15_deadline_boundaries` in the sandbox shows each window from both sides; this pins the
@@ -181,7 +183,7 @@ fn phase_follows_the_time_and_the_outcome() {
 #[test]
 fn an_event_not_yet_accepted_awaits_its_verifier() {
     call_as(ESCROW, 0, 1_000_000);
-    let mut contract = Contract::new();
+    let mut contract = Contract::new(Vec::new());
     call_as(ORGANIZER, quote_event_budget(3), 1_000_000);
     contract.create_event(terms());
     assert_eq!(
@@ -229,9 +231,27 @@ fn terms_hash_is_sha256_of_the_borsh_terms() {
     encoded.extend_from_slice(&DEADLINE.to_le_bytes());
     encoded.extend_from_slice(&PRICE.to_le_bytes());
     encoded.extend_from_slice(&3u32.to_le_bytes());
+    // The currency, last: `None` is one zero byte.
+    let mut near_encoded = encoded.clone();
+    near_encoded.push(0);
 
     let hash = events::terms_hash(&organizer, &terms);
-    assert_eq!(hash, near_sdk::env::sha256_array(&encoded));
+    assert_eq!(hash, near_sdk::env::sha256_array(&near_encoded));
+
+    // `Some(token)` is a one byte, then the account id as a Borsh string.
+    let token = "tusd.near";
+    let mut token_encoded = encoded;
+    token_encoded.push(1);
+    token_encoded.extend_from_slice(&(token.len() as u32).to_le_bytes());
+    token_encoded.extend_from_slice(token.as_bytes());
+    let priced_in_token = EventTerms {
+        currency: Some(id(token)),
+        ..terms.clone()
+    };
+    assert_eq!(
+        events::terms_hash(&organizer, &priced_in_token),
+        near_sdk::env::sha256_array(&token_encoded)
+    );
     let hex = events::to_hex(&hash);
     assert_eq!(hex.len(), 64);
     assert!(
@@ -679,7 +699,17 @@ fn bytes_added(
     i64::try_from(near_sdk::env::storage_usage()).expect("small") - BASE_USAGE as i64
 }
 
-/// The largest event terms: 64-character verifier, longest title and venue, full capacity.
+/// A listed token with a 64-character account id.
+fn longest_token() -> TokenSpec {
+    TokenSpec {
+        account_id: long("token"),
+        symbol: "t".repeat(MAX_SYMBOL_BYTES),
+        decimals: MAX_DECIMALS,
+    }
+}
+
+/// The largest event terms in NEAR: 64-character verifier, longest title and venue, full
+/// capacity.
 fn largest_terms() -> EventTerms {
     EventTerms {
         title: "t".repeat(MAX_TITLE_BYTES as usize),
@@ -690,14 +720,22 @@ fn largest_terms() -> EventTerms {
     }
 }
 
+/// The same terms priced in the token with a 64-character id: the largest event record.
+fn largest_token_terms() -> EventTerms {
+    EventTerms {
+        currency: Some(longest_token().account_id),
+        ..largest_terms()
+    }
+}
+
 /// The measured constants are the worst case plus 20%, rounded up.
 fn with_margin(bytes: i64) -> u128 {
     u128::try_from(bytes * 6).expect("positive").div_ceil(5)
 }
 
-/// Measures the most storage one event and one ticket can use (plan, Task C4): 64-character
-/// accounts everywhere, the longest texts, a full ticket history, a pending operation, and every
-/// holder with an owner index of its own. `storage_per_event` and `storage_per_ticket` must be
+/// Measures the most storage one event and one ticket can use (plan, Tasks C4 and C7): 64-character
+/// accounts everywhere (the currency too), the longest texts, a full ticket history, a pending
+/// operation, and every holder with an owner index of its own. `storage_per_event` and `storage_per_ticket` must be
 /// exactly these numbers plus 20%.
 #[test]
 fn storage_constants_are_the_measured_worst_case_plus_twenty_percent() {
@@ -705,7 +743,7 @@ fn storage_constants_are_the_measured_worst_case_plus_twenty_percent() {
     let verifier = long("verifier");
     let budget = quote_event_budget(MAX_CAPACITY);
     call_as(ESCROW, 0, 1_000_000);
-    let mut contract = Contract::new();
+    let mut contract = Contract::new(vec![longest_token()]);
 
     // Nine events first, so the measured ones have two-digit ids ("10-100").
     for _ in 0..9 {
@@ -768,7 +806,7 @@ fn storage_constants_are_the_measured_worst_case_plus_twenty_percent() {
     let ticket_worst = ticket + TOKEN_ID_COPIES * (longest_id - "10-100".len() as i64);
 
     // Event 11: completed with a payout in flight, the larger of the two outcomes.
-    let mut event = created;
+    let mut event = 0;
     let hash_11 = {
         let _ = bytes_added(&mut contract, &organizer, budget, 1_000_000, |c| {
             assert_eq!(c.create_event(largest_terms()), 11);
@@ -789,6 +827,17 @@ fn storage_constants_are_the_measured_worst_case_plus_twenty_percent() {
     event += bytes_added(&mut contract, &organizer, 1, ENDS + 1, |c| {
         let _ = c.claim_payout(11);
     });
+    // Event 12: the largest terms priced in the token. The outcome and the payout add the same
+    // bytes in every currency (an operation stores no currency), so its record completes the sum.
+    let created_in_token = bytes_added(&mut contract, &organizer, budget, 1_000_000, |c| {
+        assert_eq!(c.create_event(largest_token_terms()), 12);
+    });
+    assert_eq!(
+        created_in_token - created,
+        4 + 64,
+        "the currency adds its account id as a Borsh string"
+    );
+    event += created_in_token;
 
     eprintln!("measured worst case: event {event} bytes, ticket {ticket_worst} bytes");
     assert_eq!(

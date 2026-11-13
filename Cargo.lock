@@ -3672,7 +3672,7 @@ dependencies = [
 
 [[package]]
 name = "ticket-escrow"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "cargo-near-build",
  "near-api",

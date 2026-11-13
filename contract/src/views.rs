@@ -6,6 +6,7 @@ use near_sdk::json_types::U128;
 use near_sdk::{AccountId, env, near};
 
 use crate::accounting::{self, Ledger};
+use crate::currency::TokenSpec;
 use crate::events::{EventRecord, Outcome, OutcomeReason, to_hex};
 use crate::tickets::{HistoryEntry, Ticket, TicketStatus};
 use crate::{
@@ -32,6 +33,8 @@ pub struct Config {
     pub storage_per_ticket: U128,
     /// True only in test builds made with the `fault-injection` feature.
     pub fault_injection: bool,
+    /// The tokens events may be priced in besides NEAR, fixed at `new`.
+    pub tokens: Vec<TokenSpec>,
 }
 
 /// Where an event stands, derived from its outcome and the time, for display.
@@ -72,7 +75,10 @@ pub struct EventView {
     pub starts_at_ms: u64,
     pub ends_at_ms: u64,
     pub resolution_deadline_ms: u64,
+    /// In the smallest unit of `currency`.
     pub price: U128,
+    /// `null` for NEAR, otherwise the token account.
+    pub currency: Option<AccountId>,
     pub capacity: u32,
     pub sold: u32,
     pub outcome: Outcome,
@@ -92,7 +98,10 @@ pub struct TicketView {
     pub event_id: u32,
     pub serial: u32,
     pub owner_id: AccountId,
+    /// In the smallest unit of `currency`.
     pub principal: U128,
+    /// The event's currency: `null` for NEAR, otherwise the token account.
+    pub currency: Option<AccountId>,
     pub status: TicketStatus,
     pub claim: Claim,
     pub pending_operation_id: Option<u64>,
@@ -102,6 +111,9 @@ pub struct TicketView {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccountingView {
     pub event_id: u32,
+    /// The currency of every amount below except `operating_budget`, which is in yoctoNEAR:
+    /// `null` for NEAR, otherwise the token account.
+    pub currency: Option<AccountId>,
     pub principal_received: U128,
     pub principal_reserved: U128,
     pub refund_pending: U128,
@@ -161,6 +173,7 @@ fn event_view(event_id: u32, event: &EventRecord, now_ms: u64) -> EventView {
         ends_at_ms: event.ends_at_ms,
         resolution_deadline_ms: event.resolution_deadline_ms,
         price: U128(event.price),
+        currency: event.currency.clone(),
         capacity: event.capacity,
         sold: event.sold,
         outcome: event.outcome,
@@ -174,9 +187,11 @@ fn event_view(event_id: u32, event: &EventRecord, now_ms: u64) -> EventView {
     }
 }
 
-fn accounting_view(event_id: u32, ledger: &Ledger) -> AccountingView {
+fn accounting_view(event_id: u32, event: &EventRecord) -> AccountingView {
+    let ledger: &Ledger = &event.ledger;
     AccountingView {
         event_id,
+        currency: event.currency.clone(),
         principal_received: U128(ledger.principal_received),
         principal_reserved: U128(ledger.principal_reserved),
         refund_pending: U128(ledger.refund_pending),
@@ -202,6 +217,7 @@ impl Contract {
             serial: ticket.serial,
             owner_id,
             principal: U128(ticket.principal),
+            currency: event.currency.clone(),
             status: ticket.status,
             claim: claim(event.outcome, ticket.status),
             pending_operation_id: ticket.pending_operation_id,
@@ -226,6 +242,7 @@ impl Contract {
             storage_per_event: U128(accounting::storage_per_event()),
             storage_per_ticket: U128(accounting::storage_per_ticket()),
             fault_injection: cfg!(feature = "fault-injection"),
+            tokens: self.currencies.clone(),
         }
     }
 
@@ -258,7 +275,7 @@ impl Contract {
     /// One event's ledger, or `null`.
     pub fn get_accounting(&self, event_id: u32) -> Option<AccountingView> {
         self.stored_event(event_id)
-            .map(|event| accounting_view(event_id, &event.ledger))
+            .map(|event| accounting_view(event_id, event))
     }
 
     /// One ticket, or `null`.
