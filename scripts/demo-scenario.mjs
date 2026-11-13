@@ -661,8 +661,7 @@ ${JSON.stringify(books, null, 2)}
 
 // PROOF_FILE writes the result somewhere else, for a rehearsal that must not replace docs/proof.md.
 const output =
-  process.env.PROOF_FILE ??
-  join(dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'proof.md');
+  process.env.PROOF_FILE ?? join(dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'proof.md');
 await writeFile(output, document);
 console.log(
   `\nWrote ${output}. ${failures === 0 ? 'All steps as expected.' : `${failures} FAILED.`}`,

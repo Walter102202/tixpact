@@ -3,13 +3,15 @@
 // It signs nothing and needs no key.
 //
 //   pnpm install --frozen-lockfile && pnpm --filter @ticket-escrow/client build
-//   node scripts/verify-deployment.mjs <contract-account> [--wasm <file>] [--allow-keys]
+//   node scripts/verify-deployment.mjs <contract-account> [--wasm <file>] [--tokens <a,b>] [--allow-keys]
 //
 // Prints the account's code hash, the number of access keys, its balance and the principal the
 // contract says it holds, in NEAR and in each token it accepts. Exits non-zero when:
 //   - the account has an access key (somebody could still replace the code), unless --allow-keys;
 //   - the deployed code is a test build with fault injection;
 //   - --wasm is given and the deployed code hash is not the SHA-256 of that file;
+//   - --tokens is given and the tokens the contract accepts are not exactly that list (the list is
+//     fixed when the contract is created; `--tokens ""` means it must accept NEAR only);
 //   - a balance does not cover the principal the contract reports as held in that currency;
 //   - the contract is not registered with a token it accepts (the token would reject every
 //     purchase in it).
@@ -33,14 +35,18 @@ const DEFAULT_RPC_URLS = 'https://test.rpc.fastnear.com,https://near-testnet.drp
 const args = process.argv.slice(2);
 const wasmFlag = args.indexOf('--wasm');
 const wasmPath = wasmFlag === -1 ? undefined : args[wasmFlag + 1];
+const tokensFlag = args.indexOf('--tokens');
+const expectedTokens =
+  tokensFlag === -1
+    ? undefined
+    : (args[tokensFlag + 1] ?? '').split(',').filter((token) => token !== '');
 const allowKeys = args.includes('--allow-keys');
-const contractId = args.find(
-  (arg, index) => !arg.startsWith('--') && (wasmFlag === -1 || index !== wasmFlag + 1),
-);
+const flagValues = new Set([wasmFlag, tokensFlag].filter((at) => at !== -1).map((at) => at + 1));
+const contractId = args.find((arg, index) => !arg.startsWith('--') && !flagValues.has(index));
 
 if (!contractId) {
   console.error(
-    'usage: node scripts/verify-deployment.mjs <contract-account> [--wasm <file>] [--allow-keys]',
+    'usage: node scripts/verify-deployment.mjs <contract-account> [--wasm <file>] [--tokens <a,b>] [--allow-keys]',
   );
   process.exit(2);
 }
@@ -134,6 +140,15 @@ if (proof.accessKeys > 0 && !allowKeys) {
 }
 if (config.fault_injection) {
   problems.push('The deployed code is a test build with fault injection.');
+}
+if (expectedTokens !== undefined) {
+  const accepted = config.tokens.map((token) => token.account_id).sort();
+  if (accepted.join(',') !== [...expectedTokens].sort().join(',')) {
+    const list = (tokens) => (tokens.length === 0 ? 'no token' : tokens.join(', '));
+    problems.push(
+      `The contract accepts ${list(accepted)}; the expected list is ${list(expectedTokens)}.`,
+    );
+  }
 }
 if (BigInt(proof.balance) < held) {
   problems.push('The NEAR balance is lower than the principal the contract reports as held.');
