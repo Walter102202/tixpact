@@ -1,4 +1,4 @@
-// Contract error codes (plan, "Error codes") and the one plain-English sentence shown for each.
+// Contract error codes (plan, "Error codes", plus the two of interface v2) and the one plain-English sentence shown for each.
 // Every contract panic message starts with a code, then `: ` and a sentence of its own.
 
 export const ERROR_CODES = [
@@ -23,6 +23,9 @@ export const ERROR_CODES = [
   'ERR_INSUFFICIENT_LIQUIDITY',
   'ERR_INSUFFICIENT_GAS',
   'ERR_APPROVALS_DISABLED',
+  // Interface v2: purchases in a token.
+  'ERR_WRONG_CURRENCY',
+  'ERR_BAD_MESSAGE',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -51,6 +54,10 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     'The contract cannot send this payment yet without using money reserved for others. Try again in a moment.',
   ERR_INSUFFICIENT_GAS: 'The transaction did not attach enough gas to finish safely. Try again.',
   ERR_APPROVALS_DISABLED: 'Ticket approvals are not supported.',
+  ERR_WRONG_CURRENCY:
+    'This event is priced in another currency. Pay in the currency the event names; any amount sent was returned.',
+  ERR_BAD_MESSAGE:
+    'The payment did not say which event it was for, so the token returned it.',
 };
 
 export interface ContractError {

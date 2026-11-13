@@ -365,6 +365,37 @@ describe('purchaseResult', () => {
     });
   });
 
+  it('reports the v2 purchase codes of a rejected ft_on_transfer', () => {
+    for (const code of ['ERR_WRONG_CURRENCY', 'ERR_BAD_MESSAGE', 'ERR_WRONG_DEPOSIT']) {
+      const status = edited(TX_FIXTURES.tokenBuyRejected.status, (receipts) =>
+        receipts.map((r, i) =>
+          i === 1
+            ? {
+                ...r,
+                outcome: {
+                  ...r.outcome,
+                  status: {
+                    Failure: {
+                      ActionError: {
+                        index: 0,
+                        kind: {
+                          FunctionCallError: {
+                            ExecutionError: `Smart contract panicked: ${code}: rejected`,
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              }
+            : r,
+        ),
+      );
+      const result = summarizeTransaction(TxStatusSchema.parse(status));
+      expect(purchaseResult(result, FIXTURE_CONTRACT_ID)).toEqual({ bought: false, code });
+    }
+  });
+
   it('reads a purchase the token refused before the contract ran as not bought, with no code', async () => {
     const result = await judged(TX_FIXTURES.tokenBuyUnfunded);
     expect(result.ok).toBe(false);
