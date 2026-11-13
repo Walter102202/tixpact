@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
   "installCommand": "pnpm install --frozen-lockfile",
-  "buildCommand": "VITE_CONTRACT_ID=ticket-escrow.testnet pnpm --filter @ticket-escrow/web... build",
+  "buildCommand": "VITE_CONTRACT_ID=ticket-escrow-v2.testnet VITE_FAUCET_TOKENS=tusd.ticket-escrow-v2.testnet pnpm --filter @ticket-escrow/web... build",
   "outputDirectory": "web/dist",
   "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
 }

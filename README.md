@@ -10,7 +10,8 @@ Built at NEAR HACKATHON 2026. It runs on **testnet**, it is **not audited**, and
 
 | | |
 |---|---|
-| Contract (testnet) | [`ticket-escrow.testnet`](https://testnet.nearblocks.io/address/ticket-escrow.testnet) |
+| Contract (testnet) | [`ticket-escrow-v2.testnet`](https://testnet.nearblocks.io/address/ticket-escrow-v2.testnet) |
+| Dollar token it accepts (testnet) | [`tusd.ticket-escrow-v2.testnet`](https://testnet.nearblocks.io/address/tusd.ticket-escrow-v2.testnet): `tUSD`, a test dollar anyone can mint, worth nothing |
 | Hosted demo | Not published yet. Run it locally: [Try it](#try-it), step 1. |
 | Every claim below, with its transaction | [`docs/proof.md`](docs/proof.md) |
 | How it works and why | [`docs/design.md`](docs/design.md) |
@@ -47,19 +48,19 @@ Each step says what to do and what you should see.
 
    ```bash
    pnpm install --frozen-lockfile
-   VITE_CONTRACT_ID=ticket-escrow.testnet pnpm --filter @ticket-escrow/web dev
+   VITE_CONTRACT_ID=ticket-escrow-v2.testnet VITE_FAUCET_TOKENS=tusd.ticket-escrow-v2.testnet pnpm --filter @ticket-escrow/web dev
    ```
 
-   Open `http://localhost:5173`. You should see the events read from the contract above: at least "Jazz night", "Opening night", "Direct calls" and "Agent night" (every run of step 5 adds one). Open one: the page shows the verifier's account, the deadline and how much is reserved in the contract. Open `/tickets/1-1`: where the money went, and the history with the purchase by Ana, the transfer to Luis and the refund to Luis. Open `/proof`: the code hash, the access keys and the balance, read from the chain.
-2. **Read the proof.** Open [`docs/proof.md`](docs/proof.md). Each row is one step of two stories played on testnet (an organizer who disappears; an event that is confirmed), with the transaction link and the observed result. Open any link in the explorer and compare.
+   Open `http://localhost:5173`. You should see the events read from the contract above: at least "Jazz night", "Opening night", "Dollar night" (priced at 10 tUSD), "Direct calls", "Agent night" and "Jury night" (every run of step 5 adds one). Open one: the page shows the verifier's account, the deadline and how much is reserved in the contract. Open `/tickets/1-1`: where the money went, the history with the purchase by Ana, the transfer to Luis and the refund to Luis, and under "As wallets show it" the picture the contract draws for that state. Open `/proof`: the code hash, the access keys, and the balance next to what the contract holds, in NEAR and in tUSD, read from the chain.
+2. **Read the proof.** Open [`docs/proof.md`](docs/proof.md). Each row is one step of three stories played on testnet (an organizer who disappears; an event that is confirmed; an event priced in dollars), with the transaction link and the observed result. Open any link in the explorer and compare.
 3. **Check the deployment yourself.** With Node 22 and pnpm:
 
    ```bash
    pnpm install --frozen-lockfile && pnpm --filter @ticket-escrow/client build
-   node scripts/verify-deployment.mjs ticket-escrow.testnet --allow-keys
+   node scripts/verify-deployment.mjs ticket-escrow-v2.testnet --allow-keys --tokens tusd.ticket-escrow-v2.testnet
    ```
 
-   You should see the code hash, `Access keys     1`, the balance next to the principal held, and a final line starting with `OK with --allow-keys`. The script signs nothing. Without `--allow-keys` it ends with `NOT VERIFIED` and exits non-zero while the account has any key; it also fails if the contract is a test build or holds less than it owes.
+   You should see the code hash, `Access keys     1`, the balance next to the principal held, the same for the token (`Registered      yes`, its balance next to the `tUSD` held), and a final line starting with `OK with --allow-keys`. The script signs nothing. Without `--allow-keys` it ends with `NOT VERIFIED` and exits non-zero while the account has any key; it also fails if the contract is a test build or holds less than it owes.
 4. **Run every test.** On Linux, macOS or WSL (see [Setup](#setup)):
 
    ```bash
@@ -70,7 +71,7 @@ Each step says what to do and what you should see.
 5. **Use the contract without our website.** With the NEAR CLI and four testnet accounts ([details](#if-the-website-is-down)):
 
    ```bash
-   CONTRACT_ID=ticket-escrow.testnet ORGANIZER_ID=... VERIFIER_ID=... BUYER_ID=... ANYONE_ID=... \
+   CONTRACT_ID=ticket-escrow-v2.testnet ORGANIZER_ID=... VERIFIER_ID=... BUYER_ID=... ANYONE_ID=... \
      bash scripts/direct-calls.sh
    ```
 
@@ -79,7 +80,7 @@ Each step says what to do and what you should see.
 
    ```bash
    pnpm install --frozen-lockfile && pnpm build
-   CONTRACT_ID=ticket-escrow.testnet pnpm --filter @ticket-escrow/mcp smoke
+   CONTRACT_ID=ticket-escrow-v2.testnet pnpm --filter @ticket-escrow/mcp smoke
    ```
 
    You should see `Tools (11): list_events, get_event, ...`, the events, the contract's code hash and balance next to what it owes, and `Smoke passed.` It runs without a key, so nothing is signed. To connect Claude Code, or to let the agent buy within a cap, see [`docs/mcp.md`](docs/mcp.md).
@@ -192,7 +193,7 @@ The caps do not bound what the agent spends over time: fund its account only wit
 |---|---|
 | The contract, deployed on NEAR testnet, with the rules above enforced on chain. | The money: testnet NEAR from the faucet and `tUSD`, a test token we deployed that anyone can mint. Both are worth nothing. |
 | Every transaction in `docs/proof.md`; each can be opened in the explorer. | The people: organizer, verifier, Ana and Luis are accounts we created and played ourselves. |
-| The tests: a real local node, real deployments, real failed transfers. | The verifiers: accounts we hold. In the two stories the verifier is one account; in the [group proof](docs/proof-group-verifier.md) it is a DAO where two of three must vote, and all three are ours. |
+| The tests: a real local node, real deployments, real failed transfers. | The verifiers: accounts we hold. In the three stories the verifier is one account; in the [group proof](docs/proof-group-verifier.md) it is a DAO where two of three must vote, and all three are ours. |
 | The agent, reading and writing that contract, and the web app, reading it (signing from a browser wallet: see the status above). | The time scale: demo events last minutes so a deadline can be watched. |
 
 Nothing in the product is decided by an AI or by a server of ours. There is no backend: the web reads the chain through public RPC endpoints.
@@ -263,7 +264,7 @@ The same script runs in CI ([`.github/workflows/ci.yml`](.github/workflows/ci.ym
 To run the web app against the deployed contract:
 
 ```bash
-VITE_CONTRACT_ID=ticket-escrow.testnet pnpm --filter @ticket-escrow/web dev
+VITE_CONTRACT_ID=ticket-escrow-v2.testnet VITE_FAUCET_TOKENS=tusd.ticket-escrow-v2.testnet pnpm --filter @ticket-escrow/web dev
 ```
 
 Without `VITE_CONTRACT_ID` it shows built-in demo data and says so in a banner.
@@ -279,14 +280,14 @@ for name in organizer verifier buyer anyone; do
     autogenerate-new-keypair save-to-legacy-keychain network-config testnet create
 done
 
-CONTRACT_ID=ticket-escrow.testnet ORGANIZER_ID=<your-prefix>-organizer.testnet VERIFIER_ID=<your-prefix>-verifier.testnet \
+CONTRACT_ID=ticket-escrow-v2.testnet ORGANIZER_ID=<your-prefix>-organizer.testnet VERIFIER_ID=<your-prefix>-verifier.testnet \
   BUYER_ID=<your-prefix>-buyer.testnet ANYONE_ID=<your-prefix>-anyone.testnet bash scripts/direct-calls.sh
 ```
 
 Reading needs no account at all:
 
 ```bash
-near contract call-function as-read-only ticket-escrow.testnet list_events json-args '{"from_index":0,"limit":10}' \
+near contract call-function as-read-only ticket-escrow-v2.testnet list_events json-args '{"from_index":0,"limit":10}' \
   network-config testnet now
 ```
 

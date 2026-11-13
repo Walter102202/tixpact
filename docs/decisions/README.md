@@ -99,8 +99,8 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | The door looks the signing key up in the account's key list (`view_access_key_list`), so a missing key is an answer, not a failover error | `2026-11-13-pass-key-read-from-the-key-list.md` |
 | 2026-11-13 | The ticket page shows the ticket as wallets show it: the contract's picture in an `<img>`, checked against its hash, and its sentence | `2026-11-13-web-ticket-as-wallets-show-it.md` |
 | 2026-11-13 | A payment whose receipt succeeded settles whatever the token answers: callbacks read the answer bounded at 0 bytes and restore only on a confirmed failure | `2026-11-13-a-payment-that-went-through-settles.md` |
-| 2026-11-13 | A token's `ft_transfer` gets exactly 20 Tgas (no share of unused gas, which bounds its answer); a token claim needs 60 Tgas | `2026-11-13-the-token-gets-exactly-its-static-gas.md` |
 | 2026-11-13 | A token's longest answer must still settle: measured at 300 Tgas, the long-answer tests stay strict | `2026-11-13-long-token-answers-must-settle.md` |
 | 2026-11-13 | Replaced by the next line: a token's `ft_transfer` gets exactly 20 Tgas (no share of unused gas, which bounds its answer) | `2026-11-13-the-token-gets-exactly-its-static-gas.md` |
 | 2026-11-13 | A token's `ft_transfer` (at least 20 Tgas) and the settlement callbacks (at least 15 Tgas) share the claimant's unused gas, so a costly token can still be paid and no answer outruns the callback; a token claim needs 60 Tgas | `2026-11-13-the-token-gets-at-least-its-static-gas.md` |
 | 2026-11-13 | Only the contract account can call `new(tokens)` (`#[private]`); deploy and init go in one transaction | `2026-11-13-only-the-contract-account-calls-new.md` |
+| 2026-11-13 | Version 2 goes to its own account, `ticket-escrow-v2.testnet`, with the test token `tUSD` as its only listed token; every proof is played again there | `2026-11-13-version-2-goes-to-its-own-account.md` |
