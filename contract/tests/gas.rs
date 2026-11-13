@@ -937,8 +937,11 @@ async fn gas_of_token_settlement_in_its_worst_case() -> TestResult {
     record_token(
         &mut rows, &escrow, &tusd.id, case, tgas_used, &result, failed,
     )?;
+    // The most gas a transaction can attach, so that the token's answer is the longest a claim
+    // can bring back to the callback.
     hostile.set_mode(&buyer, "long").await?;
-    let result = escrow.claim_refund(&h4, &t4, tgas_used).await?;
+    let most_tgas = 300;
+    let result = escrow.claim_refund(&h4, &t4, most_tgas).await?;
     let case = "claim_refund + ft_transfer + on_refund_result (the token answers as long as its gas allows)";
     let answer = common::value_returned_by(&result, &hostile.id).map_or(0, |bytes| bytes.len());
     eprintln!("hostile token answer: {answer} bytes");
@@ -955,7 +958,7 @@ async fn gas_of_token_settlement_in_its_worst_case() -> TestResult {
         &escrow,
         &hostile.id,
         case,
-        tgas_used,
+        most_tgas,
         &result,
         settled,
     )?;

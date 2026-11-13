@@ -23,6 +23,8 @@ const TUSD_PRICE: u128 = 10 * USD;
 const FIXTURE_TGAS: u64 = 300;
 /// Gas of a claim, as the client attaches it, in Tgas.
 const CLAIM_TGAS: u64 = 100;
+/// The most gas one transaction can attach, in Tgas.
+const MAX_TGAS: u64 = 300;
 
 #[tokio::test]
 async fn test_token_registers_and_gives_from_its_faucet() -> TestResult {
@@ -1275,6 +1277,53 @@ async fn a_token_answer_does_not_stop_the_confirmation() -> TestResult {
     }
     let accounting = escrow.accounting(event_id).await?;
     assert_eq!(amount(&accounting, "refunds_settled"), 2 * price);
+    assert_eq!(amount(&accounting, "refund_pending"), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_token_answer_settles_at_the_most_gas_a_claim_can_attach() -> TestResult {
+    // The same confirmation when the claimant attaches the most gas a transaction allows. The
+    // token's answer must stay short enough for the callback to read whatever gas the claimant
+    // brought: the claim's own gas is not a reason to leave a payment pending for good (R7).
+    let chain = TestChain::start().await?;
+    let escrow = chain.escrow().await?;
+    let cast = chain.cast().await?;
+    let hostile = token(&chain, HOSTILE_ID, &[&escrow], &cast.mallory).await?;
+    fund(&hostile, &cast.ana).await?;
+    let price = 5 * HOST;
+    let (event_id, _) = on_sale(
+        &escrow,
+        &cast,
+        [600, 1_200, 1_800],
+        2,
+        Some(HOSTILE_ID),
+        price,
+    )
+    .await?;
+    let token_id = buy_with(&hostile, &escrow, &cast.ana, event_id, price).await?;
+    escrow.cancel(&cast.organizer, event_id).await?;
+    hostile.set_mode(&cast.mallory, "long").await?;
+    let result = escrow.claim_refund(&cast.ana, &token_id, MAX_TGAS).await?;
+    let answer = value_returned_by(&result, &hostile.id).map_or(0, |bytes| bytes.len());
+    eprintln!("the token answered {answer} bytes to a claim with {MAX_TGAS} Tgas");
+    assert_eq!(
+        token_moves(&result, &hostile.id),
+        [TokenMove {
+            from: escrow.id().to_string(),
+            to: cast.ana.0.to_string(),
+            amount: price
+        }],
+        "paid once"
+    );
+    assert_eq!(
+        events_named(&result, "refund_settled").len(),
+        1,
+        "confirmed"
+    );
+    assert_eq!(escrow.ticket(&token_id).await?["status"], "Refunded");
+    let accounting = escrow.accounting(event_id).await?;
+    assert_eq!(amount(&accounting, "refunds_settled"), price);
     assert_eq!(amount(&accounting, "refund_pending"), 0);
     Ok(())
 }
