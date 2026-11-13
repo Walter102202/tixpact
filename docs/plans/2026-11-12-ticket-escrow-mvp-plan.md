@@ -67,7 +67,7 @@ When something is unclear, do not stop to ask Walter. Ask yourself what a top 1%
 - One task at a time, in the plan's order inside your track. Each task ends with its tests green, a commit, a push and its checkboxes ticked in this file (same commit).
 - Tests first: write the failing test named in the task, see it fail, implement, see it pass. Keep the test names this plan gives: the README maps claims to them.
 - Each track works in its own worktree on `track/<letter>`, pushed on every commit. Tracks never merge into `main`. The integrator merges with a merge commit after an independent review.
-- Only the integrator edits the frozen interface in this plan, `packages/client` (after Task W0 is merged), root configuration files (`package.json`, `pnpm-workspace.yaml`, `biome.json`, `tsconfig.base.json`, `vitest.config.ts`, `.github/`, `rust-toolchain.toml`) and `README.md`. If you need a change there, write it under "Needs the integrator" in your report, work around it locally when you safely can, and continue.
+- Only the integrator edits the frozen interface in this plan, `packages/client` (after Task W0 is merged; Track W may still add exports, fixtures and tests there, never rename or remove one, and lists each addition in its report), root configuration files (`package.json`, `pnpm-workspace.yaml`, `biome.json`, `tsconfig.base.json`, `vitest.config.ts`, `.github/`, `rust-toolchain.toml`) and `README.md`. If you need a change there, write it under "Needs the integrator" in your report, work around it locally when you safely can, and continue.
 - Library APIs are verified against the installed sources or type declarations, never recalled from memory. When you verify one, write the exact import and signature in your report under "Notes for the next task".
 - Commits: Conventional Commits, present tense, one task per commit, ending with the line `Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>` (or the model that wrote it). Never amend a pushed commit.
 - Lint, typecheck and tests all run before every commit, not tests alone. A commit with green tests and a red typecheck is a broken commit.
@@ -478,7 +478,7 @@ Needs Walter's go for three things: installing the Rust toolchain in his WSL, cr
 
 **Read first for this track:** the Frozen interface; the `near-api-js` and `near-dapp` skills; the Vite React template of `create-near-app` (`templates/frontend/vite-react`, file `src/providers/near-provider.tsx`) for the wallet wiring; Walter's `landing-estilo-hosli` skill for the default look of the landing page, and `frontend-design`.
 
-**Files you may touch, and nothing else:** `packages/client/**` (until Task W0 is merged; after that only the integrator), `web/**`, `docs/decisions/`, the Track W checkboxes. Never: `contract/`, `fixtures/`, `mcp/`, root configuration, `README.md`.
+**Files you may touch, and nothing else:** `packages/client/**` (until Task W0 is merged; after that additions only: new exports, fixtures and tests, never a rename or removal, each listed in your report), `web/**`, `docs/decisions/`, the Track W checkboxes. Never: `contract/`, `fixtures/`, `mcp/`, root configuration, `README.md`.
 
 **Decisions already taken (do not reopen):**
 
