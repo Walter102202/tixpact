@@ -67,3 +67,4 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | At start the agent accepts only .testnet accounts and checks that the key is a full-access key of AGENT_ACCOUNT_ID | `2026-11-13-agent-start-checks-testnet-accounts-and-the-key.md` |
 | 2026-11-13 | Storage and gas constants come from measured worst cases; static gas keeps five times the worst case | `2026-11-13-measured-storage-and-gas-constants.md` |
 | 2026-11-13 | The resolver gets 40 Tgas so it can read the longest answer; `nft_transfer_call` needs 70 Tgas | `2026-11-13-resolver-gas-covers-the-longest-answer.md` |
+| 2026-11-13 | An unknown result asks the chain again, and an irreversible step sends exactly what was checked | `2026-11-13-web-review-fixes-for-w3-and-w4.md` |
