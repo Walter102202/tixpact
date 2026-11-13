@@ -571,18 +571,18 @@ Starts when W0 is on `main`. Enters the `agents` track of the hackathon only if 
 
 **Files:** `mcp/src/{server,tools,policy,format,config}.ts`, tests beside them.
 
-- [ ] Failing tests: `evaluate` allows a purchase within both caps; denies with "Price 2 NEAR is above the per-ticket cap of 1.5 NEAR" (Review Focus 5); denies when exposure plus price exceeds the cap; denies a contract or method outside the allowlist. Through the SDK's in-memory transport pair with a fixture reader and a recording signer: `listTools` returns exactly the ten names; `get_event` text names the verifier and the deadline; `buy_ticket` above the cap returns `denied` and the signer recorded nothing; `buy_ticket` within the caps records one call equal to `actions.buyTicket(...)`; with no key every write tool is denied.
-- [ ] Implement. Run. Expected: green. Commit `feat(mcp): capped agent tools over the ticket contract`, tick, push.
+- [x] Failing tests: `evaluate` allows a purchase within both caps; denies with "Price 2 NEAR is above the per-ticket cap of 1.5 NEAR" (Review Focus 5); denies when exposure plus price exceeds the cap; denies a contract or method outside the allowlist. Through the SDK's in-memory transport pair with a fixture reader and a recording signer: `listTools` returns exactly the ten names; `get_event` text names the verifier and the deadline; `buy_ticket` above the cap returns `denied` and the signer recorded nothing; `buy_ticket` within the caps records one call equal to `actions.buyTicket(...)`; with no key every write tool is denied.
+- [x] Implement. Run. Expected: green. Commit `feat(mcp): capped agent tools over the ticket contract`, tick, push.
 
 ### Task M2: signer, watcher, guide
 
 **Files:** `mcp/src/{signer,watch}.ts`, `mcp/scripts/smoke.mjs`, `docs/mcp.md`.
 
-- [ ] Spike S4: read the installed `near-api-js` declarations for the account and signer classes, send one function call with a deposit on testnet, and record the imports in the report.
-- [ ] Implement the signer behind the interface M1 used; `watch` (`pnpm --filter @ticket-escrow/mcp agent:watch`): every 30 s it reads the agent's tickets and, when one is claimable or its event is past the deadline, calls `expire_event` if needed and `claim_refund`, logging each transaction hash; it is a plain loop, described as such.
-- [ ] `smoke.mjs`: lists the tools and calls `list_events` and `verify_contract` against `CONTRACT_ID`; with a key, buys one ticket within the caps and prints the transaction link.
-- [ ] `docs/mcp.md`: what the server exposes, the caps and what enforces each, the `claude mcp add` command verified on the day, one example call and result per tool, limits.
-- [ ] Run everything. Expected: green; smoke output pasted in the report with no key in it. Commit `feat(mcp): testnet signer, refund watcher and connection guide`, tick, push. End the report with `STATUS: DONE`.
+- [x] Spike S4: read the installed `near-api-js` declarations for the account and signer classes, send one function call with a deposit on testnet, and record the imports in the report.
+- [x] Implement the signer behind the interface M1 used; `watch` (`pnpm --filter @ticket-escrow/mcp agent:watch`): every 30 s it reads the agent's tickets and, when one is claimable or its event is past the deadline, calls `expire_event` if needed and `claim_refund`, logging each transaction hash; it is a plain loop, described as such.
+- [x] `smoke.mjs`: lists the tools and calls `list_events` and `verify_contract` against `CONTRACT_ID`; with a key, buys one ticket within the caps and prints the transaction link.
+- [x] `docs/mcp.md`: what the server exposes, the caps and what enforces each, the `claude mcp add` command verified on the day, one example call and result per tool, limits.
+- [x] Run everything. Expected: green; smoke output pasted in the report with no key in it. Commit `feat(mcp): testnet signer, refund watcher and connection guide`, tick, push. End the report with `STATUS: DONE`.
 
 ---
 
