@@ -242,6 +242,20 @@ describe('/verify/:id actions', () => {
     expect(services.wallet.sent).toEqual([
       actions.acceptVerification(2, eventFixture(2).terms_hash),
     ]);
+    // Accepting gives the event no outcome: it can still be cancelled.
+    expect(enabled()).toEqual(['Declare cancelled']);
+  });
+
+  it('offers no other decision once the event has an outcome from this page', async () => {
+    // Demo data never changes, and a live re-read can lag: neither may offer a second outcome.
+    const { services } = await openVerify(5);
+    fireEvent.click(button('Confirm the event took place'));
+    const confirm = screen.getByRole('region', { name: 'Confirm the attestation' });
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Yes, it took place' }));
+    await screen.findByText('Confirmed. The organizer can now collect the ticket money.');
+    expect(enabled()).toEqual([]);
+    expect(reason('Declare cancelled')).toBe('Done: this event now has an outcome.');
+    expect(services.wallet.sent).toHaveLength(1);
   });
 
   it('rejects a reference longer than the contract keeps, before anything is sent', async () => {

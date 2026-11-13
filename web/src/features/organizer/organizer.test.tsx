@@ -57,6 +57,9 @@ async function openOrganizer(services = testServices({ wallet: createFixtureWall
 
 const createButton = () => screen.getByRole('button', { name: /^Create the event/ });
 
+/** What a create says in demo mode, where the recorded transaction creates nothing. */
+const DEMO_CREATED = 'Demo: no event was created. Live, the new event opens from here.';
+
 describe('/organizer: create an event', () => {
   it('asks to sign in first', async () => {
     renderAt('/organizer', testServices({ wallet: createFixtureWallet(null) }));
@@ -195,7 +198,7 @@ describe('/organizer: create an event', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Check the account again' }));
     await waitFor(() => expect(screen.queryByText(/Could not check that/)).toBeNull());
     fireEvent.click(createButton());
-    expect(await screen.findByText('Event 9 created.')).toBeTruthy();
+    expect(await screen.findByText(DEMO_CREATED)).toBeTruthy();
     expect(services.wallet.sent).toHaveLength(1);
   });
 
@@ -285,14 +288,26 @@ describe('/organizer: create an event', () => {
     expect(await screen.findByText('Storage budget: 0.18 NEAR')).toBeTruthy();
     expect(createButton().textContent).toBe('Create the event and pay 0.18 NEAR to the contract');
     fireEvent.click(createButton());
-    await screen.findByText(/Event 9 created\./);
+    await screen.findByText(DEMO_CREATED);
     expect(services.wallet.sent).toEqual([
       actions.createEvent({ ...VALID_TERMS, capacity: 10 }, parseNear('0.18')),
     ]);
   });
 
+  it('says in demo mode that no event was created, and links nowhere', async () => {
+    await openOrganizer();
+    fill(VALID);
+    await screen.findByText('Storage budget: 0.7 NEAR');
+    fireEvent.click(createButton());
+    expect(await screen.findByText(DEMO_CREATED)).toBeTruthy();
+    expect(screen.queryByRole('link', { name: /^Open event/ })).toBeNull();
+    expect(screen.queryByText(/\/verify\//)).toBeNull();
+  });
+
   it('sends the terms with exactly the quoted budget and links the new event', async () => {
-    const services = await openOrganizer();
+    const services = await openOrganizer(
+      testServices({ fixtureMode: false, wallet: createFixtureWallet(ORGANIZER) }),
+    );
     fill(VALID);
     await screen.findByText('Storage budget: 0.7 NEAR');
     fireEvent.click(createButton());
@@ -335,7 +350,7 @@ describe('/organizer: a create whose result is unknown', () => {
     const box = await createUnconfirmed(services);
     chain.up();
     fireEvent.click(within(box).getByRole('button', { name: 'Check again' }));
-    expect(await screen.findByText(/Event 9 created\./)).toBeTruthy();
+    expect(await screen.findByText(DEMO_CREATED)).toBeTruthy();
     // A second click would create a second event and spend a second budget.
     expect(screen.queryByRole('button', { name: /^Create the event/ })).toBeNull();
     expect(services.wallet.sent).toHaveLength(1);

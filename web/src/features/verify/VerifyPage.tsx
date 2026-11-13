@@ -93,13 +93,16 @@ function VerifyDetails({
 
   const blockers = verifierBlockers(event, accountId, time);
   const succeeded = tx.view.kind === 'done' && tx.view.result.ok;
+  // A confirm or a cancel gives the event its outcome. Demo data never changes and a live re-read
+  // can lag, so neither may offer a second outcome, which the contract would refuse for a fee.
+  const resolvedHere = succeeded && (sent === 'attest' || sent === 'cancel');
   // After a success the page waits for the contract's new state instead of offering it again.
-  const blocked = (action: VerifierAction) =>
-    tx.busy
-      ? 'A transaction is being sent.'
-      : succeeded && sent === action
-        ? 'Done.'
-        : blockers[action];
+  const blocked = (action: VerifierAction) => {
+    if (tx.busy) return 'A transaction is being sent.';
+    if (resolvedHere) return 'Done: this event now has an outcome.';
+    if (succeeded && sent === action) return 'Done.';
+    return blockers[action];
+  };
 
   function send(action: VerifierAction, call: ContractCall) {
     setPending(null);

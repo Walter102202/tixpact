@@ -286,6 +286,9 @@ function CreateEventForm({
 }
 
 function Created({ eventId, terms }: { eventId: unknown; terms: EventTerms | null }) {
+  const { fixtureMode } = useServices();
+  // The recorded transaction lends its result (event 9), but the demo data gains no event.
+  if (fixtureMode) return <p>Demo: no event was created. Live, the new event opens from here.</p>;
   if (typeof eventId !== 'number') return <p>The event was created.</p>;
   const verifyUrl = `${window.location.origin}/verify/${eventId}`;
   return (
