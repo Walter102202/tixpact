@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-// Plays the product's two stories on NEAR testnet with accounts held by this script, checks every
+// Plays the product's stories on NEAR testnet with accounts held by this script, checks every
 // result against what the rules promise, and writes docs/proof.md with one link per transaction.
+// Stories A and B are priced in NEAR. Story C is priced in the first token the contract accepts
+// and runs when it accepts one.
 //
 //   pnpm install --frozen-lockfile && pnpm build      (the script uses the built client package)
 //   CONTRACT_ID=<contract> ORGANIZER_ID=<a> VERIFIER_ID=<b> ANA_ID=<c> LUIS_ID=<d> ANYONE_ID=<e> \
@@ -8,7 +10,9 @@
 //
 // Each account's key is read from the NEAR CLI legacy keychain: <account>.json inside
 // ~/.near-credentials/testnet, or inside NEAR_CREDENTIALS_DIR. Nothing is printed from it.
-// Testnet only. It takes about eight minutes, most of it waiting for the events' time windows.
+// Story C needs the contract registered with its token (a deployment step) and a token with the
+// test faucet (fixtures/test-token): Ana takes her dollars from it. PRICE_TOKEN (10) is its price.
+// Testnet only. It takes about twelve minutes, most of it waiting for the events' time windows.
 // Exits non-zero if any step does not end as expected.
 
 import { readFile, writeFile } from 'node:fs/promises';
@@ -21,9 +25,13 @@ import {
   createRpc,
   explorerAccountUrl,
   explorerTxUrl,
+  formatAmount,
   formatNear,
+  parseAmount,
   parseNear,
+  purchaseResult,
   trackTransaction,
+  unitOf,
 } from '@ticket-escrow/client';
 import { Account, actions as near } from 'near-api-js';
 
@@ -32,6 +40,7 @@ const PRICE = parseNear(process.env.PRICE_NEAR ?? '0.5');
 const STARTS_IN_MS = Number(process.env.STARTS_IN_SECONDS ?? '150') * 1000;
 const WINDOW_MS = 30_000;
 const GAS_ALLOWANCE = parseNear('0.05');
+const TOKEN_PRICE_TEXT = process.env.PRICE_TOKEN ?? '10';
 
 function need(name) {
   const value = process.env[name];
@@ -78,10 +87,13 @@ function record(row) {
   console.log(`${row.pass ? 'ok  ' : 'FAIL'} ${row.story} ${row.title}: ${row.observed}`);
 }
 
-/** Signs and sends one contract call, then judges it the way the web does: by hash, at final. */
+/**
+ * Signs and sends one call, then judges it the way the web does: by hash, at final. The call goes
+ * to the ticket contract unless it names another receiver (a token).
+ */
 async function send(role, call) {
   const response = await signers[role].signAndSendTransaction({
-    receiverId: contractId,
+    receiverId: call.receiverId ?? contractId,
     actions: [
       near.functionCall(call.methodName, call.args, BigInt(call.gas), BigInt(call.deposit)),
     ],
@@ -110,6 +122,25 @@ async function step(story, title, proves, role, call, expect) {
   return { ok, value };
 }
 
+/**
+ * One purchase paid in a token. The transaction succeeds even when the contract rejects the
+ * purchase, because the token then gives the money back: so the verdict is read from the receipts.
+ * `expect` is `{ bought: true }` or `{ code: 'ERR_...' }`.
+ */
+async function purchase(story, title, proves, role, call, expect) {
+  const { hash, ...result } = await send(role, call);
+  const verdict = purchaseResult(result, contractId);
+  const observed = verdict.bought
+    ? `bought ticket \`${verdict.tokenId}\``
+    : `nothing bought, the contract answered \`${verdict.code ?? 'UNKNOWN'}\``;
+  const pass = expect.code ? !verdict.bought && verdict.code === expect.code : verdict.bought;
+  const expected = expect.code
+    ? `nothing bought, the contract answers \`${expect.code}\``
+    : 'a ticket is bought';
+  record({ story, title, proves, signer: ids[role], expected, observed, pass, hash });
+  return verdict;
+}
+
 /** One fact read from the chain at final finality, with no transaction. */
 function check(story, title, proves, expected, observed, pass) {
   record({ story, title, proves, signer: 'read at final', expected, observed, pass, hash: null });
@@ -134,7 +165,7 @@ async function balanceOf(accountId) {
   return BigInt((await reader.getAccountProof(accountId)).balance);
 }
 
-async function createAcceptedEvent(story, title) {
+async function createAcceptedEvent(story, title, money = {}) {
   const starts = Date.now() + STARTS_IN_MS;
   const terms = {
     title,
@@ -142,9 +173,10 @@ async function createAcceptedEvent(story, title) {
     starts_at_ms: starts,
     ends_at_ms: starts + WINDOW_MS,
     resolution_deadline_ms: starts + 2 * WINDOW_MS,
-    price: PRICE,
+    price: money.price ?? PRICE,
     capacity: 5,
     verifier_id: ids.verifier,
+    currency: money.currency ?? null,
   };
   const budget = await reader.quoteEventBudget(terms.capacity);
   const created = await step(
@@ -311,6 +343,250 @@ async function eventTakesPlace() {
   return eventId;
 }
 
+// Story C: the price is in dollars. The same rules, with a token instead of NEAR.
+async function pricedInDollars(token) {
+  const story = 'C';
+  const unit = unitOf(config, token);
+  const price = parseAmount(TOKEN_PRICE_TEXT, unit);
+  if (price === null || BigInt(price) < 2n) {
+    throw new Error(`PRICE_TOKEN "${TOKEN_PRICE_TEXT}" is not a price in ${unit.symbol}`);
+  }
+  const shown = (amount) => formatAmount(amount.toString(), unit);
+  const tokenBalance = async (accountId) => BigInt(await reader.tokenBalance(token, accountId));
+  const tokenCall = (methodName, args, deposit) => ({
+    receiverId: token,
+    methodName,
+    args,
+    gas: '30000000000000',
+    deposit,
+  });
+
+  const contractStanding = await reader.tokenRegistration(token, contractId);
+  check(
+    story,
+    `The contract is registered with ${unit.symbol}, so the token lets it hold the price`,
+    'deployment',
+    'registered',
+    contractStanding.registered ? 'registered' : 'not registered',
+    contractStanding.registered,
+  );
+  if (!contractStanding.registered) return null;
+  const registerAna = () =>
+    step(
+      story,
+      `Setup: Ana registers with ${unit.symbol}`,
+      'setup',
+      'ana',
+      actions.registerWithToken(token, ids.ana, contractStanding.minDeposit),
+      { ok: true },
+    );
+
+  // Setup. Luis must start as an account the token does not know, so a run after the first one
+  // makes him leave it: he sends what he holds to Ana and closes his registration.
+  if ((await reader.tokenRegistration(token, ids.luis)).registered) {
+    if (!(await reader.tokenRegistration(token, ids.ana)).registered) await registerAna();
+    const left = await tokenBalance(ids.luis);
+    if (left > 0n) {
+      await step(
+        story,
+        `Setup: Luis sends the ${shown(left)} of an earlier run to Ana`,
+        'setup',
+        'luis',
+        tokenCall(
+          'ft_transfer',
+          { receiver_id: ids.ana, amount: left.toString(), memo: null },
+          '1',
+        ),
+        { ok: true },
+      );
+    }
+    await step(
+      story,
+      `Setup: Luis closes his registration with ${unit.symbol}`,
+      'setup',
+      'luis',
+      tokenCall('storage_unregister', { force: null }, '1'),
+      { ok: true, value: true },
+    );
+  }
+  if (!(await reader.tokenRegistration(token, ids.ana)).registered) await registerAna();
+  if ((await tokenBalance(ids.ana)) < BigInt(price)) {
+    await step(
+      story,
+      "Setup: Ana takes test dollars from the token's faucet",
+      'setup',
+      'ana',
+      actions.faucet(token),
+      { ok: true },
+    );
+  }
+
+  const { eventId, terms } = await createAcceptedEvent(story, 'Dollar night', {
+    price,
+    currency: token,
+  });
+  const event = await reader.getEvent(eventId);
+  await step(
+    story,
+    'Ana tries to pay this event with NEAR',
+    'R4 · `t26_only_the_event_currency_buys`',
+    'ana',
+    actions.buyTicket(eventId, price),
+    { code: 'ERR_WRONG_CURRENCY' },
+  );
+
+  const anaBefore = await tokenBalance(ids.ana);
+  const heldBefore = await tokenBalance(contractId);
+  const short = (BigInt(price) - 1n).toString();
+  await purchase(
+    story,
+    `Ana sends ${shown(short)}, less than the price`,
+    'R4 · `t25_token_purchase_reserves_exact_price`',
+    'ana',
+    actions.buyTicketWithToken(contractId, { ...event, price: short }),
+    { code: 'ERR_WRONG_DEPOSIT' },
+  );
+  const anaAfterShort = await tokenBalance(ids.ana);
+  check(
+    story,
+    'The token gave the whole amount back to Ana',
+    'R4 · `t25_token_purchase_reserves_exact_price`',
+    `Ana holds ${shown(anaBefore)}`,
+    `Ana holds ${shown(anaAfterShort)}`,
+    anaAfterShort === anaBefore,
+  );
+
+  const bought = await purchase(
+    story,
+    `Ana buys a ticket for ${shown(price)}`,
+    'R1, R4 · `t25_token_purchase_reserves_exact_price`',
+    'ana',
+    actions.buyTicketWithToken(contractId, event),
+    { bought: true },
+  );
+  if (!bought.bought) throw new Error('the purchase in the token did not buy a ticket');
+  const tokenId = bought.tokenId;
+  const afterBuy = await reader.getAccounting(eventId);
+  const heldAfterBuy = await tokenBalance(contractId);
+  check(
+    story,
+    'The price is reserved in the contract, in the token, not paid to the organizer',
+    'R1, R3',
+    `principal_reserved = ${price}, organizer_available = 0, the contract holds ${shown(price)} more`,
+    `principal_reserved = ${afterBuy.principal_reserved}, organizer_available = ${afterBuy.organizer_available}, the contract holds ${shown(heldAfterBuy - heldBefore)} more`,
+    afterBuy.principal_reserved === price &&
+      afterBuy.organizer_available === '0' &&
+      heldAfterBuy - heldBefore === BigInt(price),
+  );
+
+  await step(
+    story,
+    `Ana transfers ticket ${tokenId} to Luis, whom ${unit.symbol} does not know`,
+    'R6 · `t27_token_refund_follows_the_holder`',
+    'ana',
+    actions.transferTicket(tokenId, ids.luis),
+    { ok: true },
+  );
+  await untilChainTime(eventId, terms.resolution_deadline_ms, 'the deadline, with no confirmation');
+  await step(
+    story,
+    'A stranger switches the event to refunds after the deadline',
+    'R2 · `t05_anyone_expires_after_deadline`',
+    'anyone',
+    actions.expireEvent(eventId),
+    { ok: true, value: 'Refundable' },
+  );
+  await step(
+    story,
+    'Ana, who gave the ticket away, tries to claim the refund',
+    'R1 · `t27_token_refund_follows_the_holder`',
+    'ana',
+    actions.claimRefund(tokenId),
+    { code: 'ERR_UNAUTHORIZED' },
+  );
+  // A payment the token rejects leaves a failed receipt, so this claim is not judged like the
+  // others: it must fail at the token, and the contract must answer `false` (nothing was paid).
+  const unpaid = await send('luis', actions.claimRefund(tokenId));
+  const failedAt = unpaid.failedReceipt?.executorId;
+  record({
+    story,
+    title: 'Luis claims, but the token does not know him and refuses to pay him',
+    proves: 'R7 · `t28_unregistered_holder_gets_the_right_back_once`',
+    signer: ids.luis,
+    expected: 'the token rejects the payment and `claim_refund` returns `false`',
+    observed: `${
+      failedAt === token
+        ? 'the token rejected the payment'
+        : failedAt === undefined
+          ? 'no receipt failed'
+          : `a receipt of \`${failedAt}\` failed`
+    } and \`claim_refund\` returned \`${JSON.stringify(unpaid.value)}\``,
+    pass: failedAt === token && unpaid.value === false,
+    hash: unpaid.hash,
+  });
+  const ticketAfterFailure = await reader.getTicket(tokenId);
+  const afterFailure = await reader.getAccounting(eventId);
+  const heldAfterFailure = await tokenBalance(contractId);
+  check(
+    story,
+    'Nothing was lost: the right to the refund is back on the ticket and the money is still held',
+    'R7 · `t28_unregistered_holder_gets_the_right_back_once`',
+    `claim = Refundable, refund_pending = 0, the contract still holds the ${shown(price)}`,
+    `claim = ${ticketAfterFailure?.claim}, refund_pending = ${afterFailure.refund_pending}, the contract holds ${shown(heldAfterFailure - heldBefore)} of it`,
+    ticketAfterFailure?.claim === 'Refundable' &&
+      afterFailure.refund_pending === '0' &&
+      heldAfterFailure - heldBefore === BigInt(price),
+  );
+  await step(
+    story,
+    `Luis registers with ${unit.symbol}`,
+    'R7',
+    'luis',
+    actions.registerWithToken(token, ids.luis, contractStanding.minDeposit),
+    { ok: true },
+  );
+  const luisBefore = await tokenBalance(ids.luis);
+  await step(
+    story,
+    `Luis claims again and is paid ${shown(price)}`,
+    'R1, R7 · `t28_unregistered_holder_gets_the_right_back_once`',
+    'luis',
+    actions.claimRefund(tokenId),
+    { ok: true, value: true },
+  );
+  const gained = (await tokenBalance(ids.luis)) - luisBefore;
+  check(
+    story,
+    "Luis's balance in the token grew by exactly the price",
+    'R1 · `t27_token_refund_follows_the_holder`',
+    shown(price),
+    shown(gained),
+    gained === BigInt(price),
+  );
+  await step(
+    story,
+    'Luis tries to claim the same ticket again',
+    'R8 · `t28_unregistered_holder_gets_the_right_back_once`',
+    'luis',
+    actions.claimRefund(tokenId),
+    { code: 'ERR_ALREADY_REFUNDED' },
+  );
+  const accounting = await reader.getAccounting(eventId);
+  const heldAtEnd = await tokenBalance(contractId);
+  check(
+    story,
+    'The books close: refunded once, and the contract holds no more of the token than before',
+    'R11 · accounting identity',
+    `refunds_settled = ${price}, principal_reserved = 0, organizer_available = 0, the contract holds 0 more`,
+    `refunds_settled = ${accounting.refunds_settled}, principal_reserved = ${accounting.principal_reserved}, organizer_available = ${accounting.organizer_available}, the contract holds ${heldAtEnd - heldBefore} more`,
+    accounting.refunds_settled === price &&
+      accounting.principal_reserved === '0' &&
+      accounting.organizer_available === '0' &&
+      heldAtEnd === heldBefore,
+  );
+  return eventId;
+}
+
 function table(story) {
   const head =
     '| # | Step | Signed by | Rule and test | Expected | Observed | Transaction |\n|---|---|---|---|---|---|---|\n';
@@ -330,21 +606,37 @@ function table(story) {
 const startedAt = new Date().toISOString();
 const proofBefore = await reader.getAccountProof(contractId);
 console.log(`Contract ${contractId}, code hash ${proofBefore.codeHash}`);
+const config = await reader.getConfig();
+const token = config.tokens[0]?.account_id ?? null;
 const eventA = await organizerDisappears();
 const eventB = await eventTakesPlace();
+const eventC = token === null ? null : await pricedInDollars(token);
 const proof = await reader.getAccountProof(contractId);
 const books = {
   [`event ${eventA}`]: await reader.getAccounting(eventA),
   [`event ${eventB}`]: await reader.getAccounting(eventB),
 };
+if (eventC !== null) books[`event ${eventC}`] = await reader.getAccounting(eventC);
 
-const document = `# Proof: the two stories on NEAR testnet
+const tokenUnit = token === null ? null : unitOf(config, token);
+const storyC =
+  token === null
+    ? ''
+    : `
+## C. The price is in dollars
+
+The event is priced in ${tokenUnit.symbol}, the token [\`${token}\`](${explorerAccountUrl(token)}): a test dollar with ${tokenUnit.decimals} decimals that anyone can mint from its faucet. On mainnet this place would be taken by a real dollar token. The rules are those of story A. What changes is how the money moves: the buyer pays by asking the token to transfer the price and call the contract, and a token only pays accounts registered with it. Luis is not registered, so his first claim pays nothing and loses nothing.
+
+${table('C')}
+`;
+
+const document = `# Proof: the stories on NEAR testnet
 
 Written by \`scripts/demo-scenario.mjs\` on ${startedAt}. Do not edit by hand: run the script again.
 
 Contract: [\`${contractId}\`](${explorerAccountUrl(contractId)}), code hash \`${proof.codeHash}\`, ${proof.accessKeys} access key(s) at block ${proof.blockHeight}.
 
-Every row is a real testnet transaction, judged by reading its status by hash at final finality and checking every receipt, or a view read at final finality. The accounts are demo accounts held by the script; the money is testnet NEAR. "Rule and test" names the rule in \`docs/design.md\` and the sandbox test that pins the same behaviour.
+Every row is a real testnet transaction, judged by reading its status by hash at final finality and checking every receipt, or a view read at final finality. The accounts are demo accounts held by the script; the money is testnet NEAR${token === null ? '' : ' and, in story C, a test dollar token'}. "Rule and test" names the rule in \`docs/design.md\` and the sandbox test that pins the same behaviour.
 
 Result: ${failures === 0 ? 'every step ended as expected' : `${failures} step(s) did NOT end as expected`}.
 
@@ -359,7 +651,7 @@ ${table('A')}
 The verifier agreed in advance confirms it. Only then can the organizer collect.
 
 ${table('B')}
-
+${storyC}
 ## The books after the run
 
 \`\`\`json
