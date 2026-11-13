@@ -114,21 +114,19 @@ describe('buying with tUSD', () => {
     const stale = data();
     const event = stale.events.find((e) => e.event_id === 12);
     if (event) event.phase = 'OnSale';
-    const ledger = stale.tokens[TUSD];
-    if (ledger) ledger.balances['ana.testnet'] = '20000000';
-    const wallet = createFixtureWallet('ana.testnet');
+    const wallet = createFixtureWallet('luis.testnet');
     wallet.answer = async () => ({
       txHash: TX_FIXTURES.tokenBuyRejected.hash,
-      signerId: 'ana.testnet',
+      signerId: TX_FIXTURES.tokenBuyRejected.signerId,
     });
-    await openEvent(12, services('ana.testnet', { wallet, reader: createFixtureReader(stale) }));
-    await screen.findByText('Your balance: 20 tUSD');
+    await openEvent(12, services('luis.testnet', { wallet, reader: createFixtureReader(stale) }));
+    await screen.findByText('Your balance: 40 tUSD');
     fireEvent.click(screen.getByRole('button', { name: 'Buy for 12.5 tUSD' }));
     const title = await screen.findByText('The purchase did not happen.');
     const box = title.closest('[role="alert"]') as HTMLElement;
     expect(box.textContent).toContain('The contract refused it: It is too late for this action.');
     expect(box.textContent).toContain(
-      'No ticket was bought. The token gave the 12.5 tUSD back to ana.testnet.',
+      'No ticket was bought. The token gave the 12.5 tUSD back to luis.testnet.',
     );
     // The transaction itself succeeded: the generic failed-step words would misname it.
     expect(box.textContent).not.toContain('Failed step');
