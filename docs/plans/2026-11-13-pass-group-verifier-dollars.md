@@ -52,7 +52,7 @@ pub fn ft_on_transfer(&mut self, sender_id: AccountId, amount: U128, msg: String
 - The buyer calls `ft_transfer_call({ receiver_id: <escrow>, amount: <price>, msg: "{\"event_id\":7}" })` on the token with 1 yocto. `sender_id` becomes the first holder.
 - `ft_on_transfer` applies rule R4 and three more checks: the caller (`predecessor`) is the event's `currency`; `amount == price`; `msg` parses. On any failure it **panics** with the code, so the token returns the whole amount to the buyer. New codes: `ERR_WRONG_CURRENCY`, `ERR_BAD_MESSAGE`. A wrong amount is `ERR_WRONG_DEPOSIT`.
 - `buy_ticket` on a token-priced event fails with `ERR_WRONG_CURRENCY`. `price` and `principal` are in the smallest unit of the event's currency.
-- Refunds and payouts of a token-priced event call `ft_transfer({ receiver_id, amount, memo: null })` on the token, forwarding the caller's 1 yocto, with static gas `GAS_FT_TRANSFER` (start at 20 Tgas, measure in C7), followed by the same private callback as v1. Rule R7 is unchanged: a recipient who is not registered with the token, or a token that fails, gives the right back, once.
+- Refunds and payouts of a token-priced event call `ft_transfer({ receiver_id, amount, memo: null })` on the token, forwarding the caller's 1 yocto, with static gas `GAS_FT_TRANSFER` (start at 20 Tgas, measure in C7), followed by the same private callback as v1. Rule R7 is unchanged: a recipient who is not registered with the token, or a token that fails, gives the right back, once. The callback reads only the status of the token's receipt (integrator's ruling, 2026-11-13): a receipt that succeeded settles the payment whatever it answered, and is never read as a failure.
 - The liquidity check of v1 covers NEAR events only (`total_held` sums NEAR events). For a token the contract cannot read its balance in the same call; a shortfall fails the transfer and R7 restores.
 - The operating budget stays in NEAR for every event. One event's ledger is in one currency; the accounting identity holds per event.
 - `terms_hash` covers `currency`: the Borsh tuple gains it as its last element.
@@ -93,10 +93,10 @@ tokenBalance(token, accountId): Promise<string>
 tokenRegistration(token, accountId): Promise<{ registered: boolean; minDeposit: string }>
 
 // tx.ts
-purchaseResult(outcome): { bought: true; tokenId: string } | { bought: false; code: string | null }
+purchaseResult(outcome, contractId): { bought: true; tokenId: string } | { bought: false; code: string | null }
 ```
 
-`ft_transfer_call` **succeeds as a transaction even when the purchase was rejected** (the token refunds in its resolver). `purchaseResult` decides from the receipts: bought when a `ticket_purchased` event of standard `ticket_escrow` was logged (its `token_id` is the ticket); otherwise not bought, with the `ERR_` code of the failed `ft_on_transfer` receipt. It also covers the v1 `buy_ticket` outcome.
+`ft_transfer_call` **succeeds as a transaction even when the purchase was rejected** (the token refunds in its resolver). `purchaseResult` decides from the receipts: bought when a receipt executed by the escrow (`contractId`) succeeded and logged a `ticket_purchased` event of standard `ticket_escrow` (its `token_id` is the ticket); otherwise not bought, with the `ERR_` code of the escrow's failed receipt. It also covers the `buy_ticket` outcome. The contract id is required (changed on 2026-11-13 after review): without it a look-alike log written by another contract would read as a purchase.
 
 ### Entry pass (lane P; no contract change)
 
