@@ -97,6 +97,20 @@ describe('trackTransaction on recorded statuses', () => {
     expect(result).toEqual({ ok: true });
   });
 
+  it('reads the recorded organizer and verifier calls as they settled', async () => {
+    const expected = [
+      [TX_FIXTURES.eventCreated, { ok: true, value: 9 }],
+      [TX_FIXTURES.verificationAccepted, { ok: true }],
+      [TX_FIXTURES.eventAttested, { ok: true }],
+      [TX_FIXTURES.eventCancelled, { ok: true }],
+      [TX_FIXTURES.payoutSettled, { ok: true, value: true }],
+    ] as const;
+    for (const [tx, result] of expected) {
+      const tracked = await track(rpc, tx.hash, tx.signerId);
+      expect(tracked.result, tx.hash).toEqual(result);
+    }
+  });
+
   it('maps a contract panic to its error code', async () => {
     const tx = TX_FIXTURES.buyRejected;
     const { result } = await track(rpc, tx.hash, tx.signerId);

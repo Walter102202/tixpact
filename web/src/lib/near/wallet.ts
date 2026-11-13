@@ -21,14 +21,27 @@ export interface FixtureWallet extends WalletPort {
   readonly sent: ContractCall[];
   /** How `send` answers; tests replace it. */
   answer: (call: ContractCall) => Promise<SentTx>;
+  /** Demo only: act as another fixture account without a wallet. */
+  signInAs(accountId: string): void;
 }
 
 export const FIXTURE_ACCOUNT = 'luis.testnet';
+/** The fixture accounts a demo viewer can act as: two holders, the organizer, the verifier. */
+export const DEMO_ACCOUNTS = ['luis.testnet', 'ana.testnet', 'org.testnet', 'teatro.testnet'];
+
+export function isFixtureWallet(wallet: WalletPort): wallet is FixtureWallet {
+  return 'signInAs' in wallet;
+}
 
 const RECORDED: Partial<Record<ContractCall['methodName'], RecordedTx>> = {
   buy_ticket: TX_FIXTURES.buySucceeded,
   claim_refund: TX_FIXTURES.refundSettled,
   nft_transfer: TX_FIXTURES.transferSucceeded,
+  create_event: TX_FIXTURES.eventCreated,
+  accept_verification: TX_FIXTURES.verificationAccepted,
+  attest_completed: TX_FIXTURES.eventAttested,
+  cancel_event: TX_FIXTURES.eventCancelled,
+  claim_payout: TX_FIXTURES.payoutSettled,
 };
 
 export function createFixtureWallet(accountId: string | null = FIXTURE_ACCOUNT): FixtureWallet {
@@ -57,6 +70,10 @@ export function createFixtureWallet(accountId: string | null = FIXTURE_ACCOUNT):
     },
     async signOut() {
       current = null;
+      notify();
+    },
+    signInAs(id) {
+      current = id;
       notify();
     },
     async send(call) {

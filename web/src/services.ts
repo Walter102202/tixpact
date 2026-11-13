@@ -2,6 +2,7 @@ import {
   createFixtureReader,
   createFixtureRpc,
   FIXTURE_CONTRACT_ID,
+  FIXTURE_NOW_MS,
   type Reader,
   type ReadUntilChangedOptions,
   type TrackOptions,
@@ -22,6 +23,8 @@ export interface AppServices {
   timeZone: string;
   trackOptions?: TrackOptions;
   rereadOptions?: ReadUntilChangedOptions;
+  /** The clock new terms are checked against; the chain's clock judges them again. */
+  now?: () => number;
 }
 
 export const ServicesContext = createContext<AppServices | null>(null);
@@ -46,5 +49,7 @@ export function createFixtureServices(): AppServices {
     txRpc: createFixtureRpc(),
     wallet: createFixtureWallet(null),
     timeZone: viewerTimeZone(),
+    // The fixture events are laid out around this instant.
+    now: () => FIXTURE_NOW_MS,
   };
 }

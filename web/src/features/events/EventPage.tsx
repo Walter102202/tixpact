@@ -5,6 +5,8 @@ import {
   PHASE_LABELS,
   PROMISE_TEXT,
 } from '@ticket-escrow/client';
+import { useWallet } from '../../lib/near/useWallet';
+import { Link } from '../../lib/router';
 import { useLoad } from '../../lib/useLoad';
 import { useServices } from '../../services';
 import { LoadState } from '../../ui/LoadState';
@@ -60,6 +62,7 @@ function EventDetails({
   apply: (data: EventData) => void;
 }) {
   const { timeZone } = useServices();
+  const { accountId } = useWallet();
   const { event, accounting } = data;
   const outcome = outcomeLine(event);
   const time = (ms: number) => formatDateTime(ms, timeZone);
@@ -96,6 +99,11 @@ function EventDetails({
             <dt>Confirmation deadline</dt>
             <dd>{time(event.resolution_deadline_ms)}</dd>
           </dl>
+          {accountId === event.verifier_id && (
+            <p>
+              <Link to={`/verify/${event.event_id}`}>Open the verifier page</Link>
+            </p>
+          )}
 
           {outcome && (
             <section className="outcome" aria-label="Outcome">

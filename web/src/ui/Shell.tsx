@@ -1,16 +1,18 @@
 import { APP_NAME } from '@ticket-escrow/client';
 import type { ReactNode } from 'react';
 import { useWallet } from '../lib/near/useWallet';
+import { DEMO_ACCOUNTS, isFixtureWallet } from '../lib/near/wallet';
 import { Link } from '../lib/router';
 import { useServices } from '../services';
 
 const NAV: Array<{ to: string; label: string }> = [
   { to: '/', label: 'Events' },
   { to: '/tickets', label: 'My tickets' },
+  { to: '/organizer', label: 'Organize' },
 ];
 
 export function Shell({ children }: { children: ReactNode }) {
-  const { fixtureMode, network } = useServices();
+  const { fixtureMode, network, wallet } = useServices();
   const { accountId, signIn, signOut } = useWallet();
   return (
     <>
@@ -45,10 +47,32 @@ export function Shell({ children }: { children: ReactNode }) {
         </div>
       </header>
       {fixtureMode && (
-        <p className="demo-banner">
-          Demo data: nothing on this page is on chain. Set VITE_CONTRACT_ID to read the testnet
-          contract.
-        </p>
+        <div className="demo-banner">
+          <p>
+            Demo data: nothing on this page is on chain. Set VITE_CONTRACT_ID to read the testnet
+            contract.
+          </p>
+          {isFixtureWallet(wallet) && (
+            <label className="demo-account">
+              Demo account
+              <select
+                value={accountId ?? ''}
+                onChange={(change) => wallet.signInAs(change.target.value)}
+              >
+                {accountId === null && (
+                  <option value="" disabled>
+                    Signed out
+                  </option>
+                )}
+                {DEMO_ACCOUNTS.map((id) => (
+                  <option key={id} value={id}>
+                    {id}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
       )}
       <main id="main" tabIndex={-1}>
         {children}

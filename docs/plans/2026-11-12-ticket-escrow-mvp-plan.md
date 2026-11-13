@@ -532,8 +532,8 @@ Needs Walter's go for three things: installing the Rust toolchain in his WSL, cr
 
 **Files:** `web/src/features/organizer/*`, `web/src/features/verify/*`.
 
-- [ ] Failing tests: `/organizer` form validates the terms client-side with the contract's limits, shows the storage budget from `quoteEventBudget`, and the three sentences the organizer must see (no payout before confirmation; no confirmation by the deadline means refunds; the budget is not ticket money); `/verify/1` shows the terms and enables "Accept", "Confirm the event took place" or "Declare cancelled" only for the verifier account and only in their windows, with the reason otherwise; organizer payout button "Collect 4.5 NEAR" only when `organizer_available` is above zero.
-- [ ] Implement. Run. Expected: green. Commit `feat(web): organizer and verifier flows`, tick, push.
+- [x] Failing tests: `/organizer` form validates the terms client-side with the contract's limits, shows the storage budget from `quoteEventBudget`, and the three sentences the organizer must see (no payout before confirmation; no confirmation by the deadline means refunds; the budget is not ticket money); `/verify/1` shows the terms and enables "Accept", "Confirm the event took place" or "Declare cancelled" only for the verifier account and only in their windows, with the reason otherwise; organizer payout button "Collect 4.5 NEAR" only when `organizer_available` is above zero.
+- [x] Implement. Run. Expected: green. Commit `feat(web): organizer and verifier flows`, tick, push.
 
 ### Task W4: proof page and state sweep
 

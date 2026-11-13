@@ -1,5 +1,5 @@
 import { render } from '@testing-library/react';
-import { createFixtureReader, createFixtureRpc } from '@ticket-escrow/client';
+import { createFixtureReader, createFixtureRpc, FIXTURE_NOW_MS } from '@ticket-escrow/client';
 import { App } from '../App';
 import { createFixtureWallet, type FixtureWallet } from '../lib/near/wallet';
 import type { AppServices } from '../services';
@@ -22,6 +22,7 @@ export function testServices(overrides: Partial<AppServices> = {}): AppServices 
     timeZone: TEST_TIME_ZONE,
     trackOptions: { sleep: noSleep },
     rereadOptions: { sleep: noSleep },
+    now: () => FIXTURE_NOW_MS,
     ...overrides,
     wallet,
   };

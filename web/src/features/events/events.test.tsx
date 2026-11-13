@@ -49,6 +49,24 @@ describe('shell', () => {
     renderAt('/');
     expect(screen.getByText(/Demo data: nothing on this page is on chain/)).toBeTruthy();
   });
+
+  it('on demo data lets the viewer act as each demo account', () => {
+    renderAt('/');
+    const picker = screen.getByLabelText('Demo account') as HTMLSelectElement;
+    expect([...picker.options].filter((o) => o.value !== '').map((o) => o.value)).toEqual([
+      'luis.testnet',
+      'ana.testnet',
+      'org.testnet',
+      'teatro.testnet',
+    ]);
+    fireEvent.change(picker, { target: { value: 'org.testnet' } });
+    expect(within(screen.getByRole('banner')).getByText('org.testnet')).toBeTruthy();
+  });
+
+  it('shows no demo account picker on live data', () => {
+    renderAt('/', testServices({ fixtureMode: false }));
+    expect(screen.queryByLabelText('Demo account')).toBeNull();
+  });
 });
 
 describe('/ lists the events', () => {

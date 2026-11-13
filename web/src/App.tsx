@@ -1,7 +1,9 @@
 import { EventPage } from './features/events/EventPage';
 import { HomePage } from './features/events/HomePage';
+import { OrganizerPage } from './features/organizer/OrganizerPage';
 import { TicketPage } from './features/tickets/TicketPage';
 import { TicketsPage } from './features/tickets/TicketsPage';
+import { VerifyPage } from './features/verify/VerifyPage';
 import { matchPath, usePath } from './lib/router';
 import { type AppServices, ServicesContext } from './services';
 import { Shell } from './ui/Shell';
@@ -24,6 +26,9 @@ function Routes() {
   if (matchPath('/tickets', path)) return <TicketsPage />;
   const ticket = matchPath('/tickets/:id', path);
   if (ticket?.id) return <TicketPage key={ticket.id} id={ticket.id} />;
+  if (matchPath('/organizer', path)) return <OrganizerPage />;
+  const verify = matchPath('/verify/:id', path);
+  if (verify?.id) return <VerifyPage key={verify.id} id={verify.id} />;
   return (
     <section className="page">
       <h1>Not found</h1>
