@@ -596,9 +596,9 @@ Starts when W0 is on `main`. Enters the `agents` track of the hackathon only if 
 
 ### Task I2: the documents a judge reads (by G4)
 
-- [ ] `README.md`, written for a machine reader first: what it is in two sentences; the problem with three sourced facts; how each is solved; "Try it" as numbered "do X, see Y" steps (open the hosted demo; run `./scripts/gate.sh` and see the test names pass; run the read-only deployment check); the claims table (claim → test name → transaction in `docs/proof.md`); what NEAR does here, concretely; "What is real and what is simulated" (testnet funds, demo accounts played by us, a verifier that is one account, short demo windows); trust limits; architecture and interface; AI and third-party disclosure; license.
+- [x] `README.md`, written for a machine reader first: what it is in two sentences; the problem with three sourced facts; how each is solved; "Try it" as numbered "do X, see Y" steps (open the hosted demo; run `./scripts/gate.sh` and see the test names pass; run the read-only deployment check); the claims table (claim → test name → transaction in `docs/proof.md`); what NEAR does here, concretely; "What is real and what is simulated" (testnet funds, demo accounts played by us, a verifier that is one account, short demo windows); trust limits; architecture and interface; AI and third-party disclosure; license.
 - [x] `docs/design.md`: the rules, state machines, accounting and decisions in English, derived from the spec without its market and naming sections.
-- [ ] `scripts/direct-calls.sh` (T20, done and run on testnet 2026-11-12) and a "If the website is down" section in the README (pending with the README).
+- [x] `scripts/direct-calls.sh` (T20, run on testnet 2026-11-12 and again on the C4 build on 2026-11-13) and a "If the website is down" section in the README.
 - [ ] Hosted web on Vercel or Cloudflare Pages (Walter's account), kept up until 2026-11-25.
 
 ### Task I3: hardening and the final deployment (Saturday morning)
@@ -606,7 +606,7 @@ Starts when W0 is on `main`. Enters the `agents` track of the hackathon only if 
 - [ ] Judge rehearsal, repository: two fresh sessions (Claude Code and Codex) each get only the repository on a clean Linux clone and this instruction: verify that it runs and that every README claim holds, then report what failed or could not be verified. Every finding is checked at `file:line`; real ones are fixed, test first.
 - [ ] Judge rehearsal, product (the three-step pass used in `C:\dev\fitcheck-polish`): a fresh session walks the hosted demo as a first-time judge along a fixed path and reports a 30-second comprehension test, the eight worst friction points with exact replacement copy, and anything that reads as success when it is not; a second session fixes the accepted items test-first; a third verifies each item read-only.
 - [ ] Fact check: every number, quote and link in the README, the X post and the video script is opened and confirmed against its source; anything unconfirmed is removed.
-- [ ] `cargo near build reproducible-wasm` and `near contract verify` if Docker cooperates within one hour; otherwise the README states the build is not reproducible-verified.
+- [x] (2026-11-13: not done; Docker on the development machine has no WSL integration, so the README states the build is not reproducible-verified.) `cargo near build reproducible-wasm` and `near contract verify` if Docker cooperates within one hour; otherwise the README states the build is not reproducible-verified.
 - [ ] Final deployment to the account Walter names: deploy the released wasm, `new`, create the demo events, then delete every access key (Walter's explicit OK at that moment, it cannot be undone). `scripts/verify-deployment.mjs` (T23) prints zero keys and the code hash; both go in the README and the proof page.
 - [ ] Full-history gitleaks pass, then Walter makes the repository public.
 
