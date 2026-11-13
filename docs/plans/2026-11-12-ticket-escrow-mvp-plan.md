@@ -442,11 +442,11 @@ Needs Walter's go for three things: installing the Rust toolchain in his WSL, cr
 
 **Interfaces.** Consumes C1's ledger functions. Produces `claim_refund`, `claim_payout`, `on_refund_result`, `on_payout_result`, `get_operation`, the liquidity check, the `fault-injection` feature.
 
-- [ ] Write the failing tests `t03`, `t07`, `t08`, `t09`, `t10`, `t11`, `t14` (callbacks), `t18`, `t19`, `t24`, the settlement assertions that `t04` and `t05` gain in this task, the Review Focus 3 test `claim_with_low_gas_fails_whole`, and unit tests of both callbacks for `Ok` and `Err` with a mocked promise result.
-- [ ] Run. Expected: fail.
-- [ ] Implement in this order inside each claim: checks, liquidity check, debit the ledger, record the operation, set the ticket status, emit `*_requested`, then `Promise::new(recipient).transfer(amount).then(Self::ext(current).with_static_gas(..).with_unused_gas_weight(0).on_*_result(operation_id))`. Spike S2 is the first thing this task proves; if the vanishing fixture is not deterministic, keep the unit tests as the proof of the failure branch, record a decision, and tell the integrator.
-- [ ] Run. Expected: all listed tests pass, C1's tests still pass.
-- [ ] Commit `feat(contract): refunds and payouts that reserve first and confirm in a callback`, tick, push.
+- [x] Write the failing tests `t03`, `t07`, `t08`, `t09`, `t10`, `t11`, `t14` (callbacks), `t18`, `t19`, `t24`, the settlement assertions that `t04` and `t05` gain in this task, the Review Focus 3 test `claim_with_low_gas_fails_whole`, and unit tests of both callbacks for `Ok` and `Err` with a mocked promise result.
+- [x] Run. Expected: fail.
+- [x] Implement in this order inside each claim: checks, liquidity check, debit the ledger, record the operation, set the ticket status, emit `*_requested`, then `Promise::new(recipient).transfer(amount).then(Self::ext(current).with_static_gas(..).with_unused_gas_weight(0).on_*_result(operation_id))`. Spike S2 is the first thing this task proves; if the vanishing fixture is not deterministic, keep the unit tests as the proof of the failure branch, record a decision, and tell the integrator.
+- [x] Run. Expected: all listed tests pass, C1's tests still pass.
+- [x] Commit `feat(contract): refunds and payouts that reserve first and confirm in a callback`, tick, push.
 
 ### Task C3: ticket transfers between contracts
 

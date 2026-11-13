@@ -240,6 +240,168 @@ fn terms_hash_is_sha256_of_the_borsh_terms() {
     );
 }
 
+/// A contract whose event 1 was cancelled and whose ticket "1-1" has a refund in flight as
+/// operation 1. Returns it with Ana as the claimant.
+fn contract_with_a_pending_refund() -> Contract {
+    let mut contract = contract_with_a_sold_ticket();
+    call_as(ORGANIZER, 1, 1_600_000);
+    contract.cancel_event(1, None);
+    call_as(ANA, 1, 1_700_000);
+    let _ = contract.claim_refund("1-1".to_string());
+    let ticket = contract
+        .get_ticket("1-1".to_string())
+        .expect("ticket exists");
+    assert_eq!(ticket.status, TicketStatus::RefundPending);
+    assert_eq!(ticket.pending_operation_id, Some(1));
+    let accounting = contract.get_accounting(1).expect("event exists");
+    assert_eq!(accounting.refund_pending.0, PRICE);
+    assert_eq!(accounting.principal_reserved.0, 0);
+    assert_eq!(contract.total_held, 0);
+    contract
+}
+
+/// A contract whose event 1 was attested and whose payout is in flight as operation 1.
+fn contract_with_a_pending_payout() -> Contract {
+    let mut contract = contract_with_a_sold_ticket();
+    call_as(VERIFIER, 1, ENDS);
+    contract.attest_completed(1, None);
+    call_as(ORGANIZER, 1, ENDS + 1);
+    let _ = contract.claim_payout(1);
+    let accounting = contract.get_accounting(1).expect("event exists");
+    assert_eq!(accounting.organizer_pending.0, PRICE);
+    assert_eq!(accounting.organizer_available.0, 0);
+    assert_eq!(contract.total_held, 0);
+    contract
+}
+
+/// The callback as the runtime calls it: from the contract itself, after the transfer.
+fn as_callback() {
+    call_as(ESCROW, 0, 1_800_000);
+}
+
+fn assert_identity(contract: &Contract) {
+    let ledger = &contract.load_event(1).ledger;
+    assert!(ledger.identity_holds(), "{ledger:?}");
+    assert_eq!(contract.total_held, ledger.held());
+}
+
+#[test]
+fn refund_callback_settles_a_delivered_transfer() {
+    let mut contract = contract_with_a_pending_refund();
+    as_callback();
+    assert!(contract.on_refund_result(1, Ok(())));
+
+    let ticket = contract
+        .get_ticket("1-1".to_string())
+        .expect("ticket exists");
+    assert_eq!(ticket.status, TicketStatus::Refunded);
+    assert_eq!(ticket.claim, Claim::Refunded);
+    assert_eq!(ticket.pending_operation_id, None);
+    let accounting = contract.get_accounting(1).expect("event exists");
+    assert_eq!(accounting.refunds_settled.0, PRICE);
+    assert_eq!(accounting.refund_pending.0, 0);
+    assert!(contract.get_operation(1).is_none());
+    assert_identity(&contract);
+    let logs = near_sdk::test_utils::get_logs();
+    assert!(logs.iter().any(|line| line.contains("\"refund_settled\"")));
+}
+
+#[test]
+fn refund_callback_restores_the_right_after_a_failed_transfer() {
+    let mut contract = contract_with_a_pending_refund();
+    as_callback();
+    assert!(!contract.on_refund_result(1, Err(near_sdk::PromiseError::Failed)));
+
+    let ticket = contract
+        .get_ticket("1-1".to_string())
+        .expect("ticket exists");
+    assert_eq!(ticket.status, TicketStatus::Active);
+    assert_eq!(ticket.claim, Claim::Refundable);
+    assert_eq!(ticket.pending_operation_id, None);
+    let accounting = contract.get_accounting(1).expect("event exists");
+    assert_eq!(accounting.principal_reserved.0, PRICE);
+    assert_eq!(accounting.refund_pending.0, 0);
+    assert_eq!(accounting.refunds_settled.0, 0);
+    assert_eq!(contract.total_held, PRICE);
+    assert_identity(&contract);
+    let history = contract
+        .get_ticket_history("1-1".to_string())
+        .expect("ticket exists");
+    assert_eq!(
+        history.entries.last().map(|entry| entry.kind),
+        Some(HistoryKind::RefundFailed)
+    );
+
+    // A second delivery of the same callback finds nothing to restore.
+    as_callback();
+    assert!(!contract.on_refund_result(1, Err(near_sdk::PromiseError::Failed)));
+    assert_eq!(contract.total_held, PRICE);
+    assert_identity(&contract);
+}
+
+#[test]
+fn payout_callback_settles_a_delivered_transfer() {
+    let mut contract = contract_with_a_pending_payout();
+    as_callback();
+    assert!(contract.on_payout_result(1, Ok(())));
+
+    let accounting = contract.get_accounting(1).expect("event exists");
+    assert_eq!(accounting.organizer_settled.0, PRICE);
+    assert_eq!(accounting.organizer_pending.0, 0);
+    assert!(contract.get_operation(1).is_none());
+    assert_identity(&contract);
+
+    // Nothing is left to pay.
+    call_as(ORGANIZER, 1, ENDS + 2);
+    fails_with("ERR_NOTHING_TO_PAY", || {
+        let _ = contract.claim_payout(1);
+    });
+}
+
+#[test]
+fn payout_callback_makes_the_amount_available_again_after_a_failed_transfer() {
+    let mut contract = contract_with_a_pending_payout();
+    as_callback();
+    assert!(!contract.on_payout_result(1, Err(near_sdk::PromiseError::Failed)));
+
+    let accounting = contract.get_accounting(1).expect("event exists");
+    assert_eq!(accounting.organizer_available.0, PRICE);
+    assert_eq!(accounting.organizer_pending.0, 0);
+    assert_eq!(accounting.organizer_settled.0, 0);
+    assert_eq!(contract.total_held, PRICE);
+    assert_identity(&contract);
+
+    as_callback();
+    assert!(!contract.on_payout_result(1, Err(near_sdk::PromiseError::Failed)));
+    assert_eq!(contract.total_held, PRICE);
+}
+
+#[test]
+fn a_callback_ignores_an_operation_of_the_other_kind() {
+    let mut contract = contract_with_a_pending_payout();
+    as_callback();
+    assert!(!contract.on_refund_result(1, Ok(())));
+    let operation = contract.get_operation(1).expect("still pending");
+    assert_eq!(operation.kind, OperationKind::Payout);
+    assert_eq!(
+        contract
+            .get_accounting(1)
+            .expect("event exists")
+            .organizer_pending
+            .0,
+        PRICE
+    );
+}
+
+#[test]
+fn a_payout_in_flight_blocks_a_second_one() {
+    let mut contract = contract_with_a_pending_payout();
+    call_as(ORGANIZER, 1, ENDS + 2);
+    fails_with("ERR_PAYOUT_PENDING", || {
+        let _ = contract.claim_payout(1);
+    });
+}
+
 #[test]
 fn history_keeps_the_first_entry_and_the_latest_fifteen() {
     let mut contract = contract_with_a_sold_ticket();

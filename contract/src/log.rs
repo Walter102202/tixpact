@@ -9,6 +9,7 @@ use near_sdk::serde_json::{self, Value, json};
 use near_sdk::{AccountId, env};
 
 use crate::events::{Outcome, OutcomeReason};
+use crate::settlement::Operation;
 
 const STANDARD: &str = "ticket_escrow";
 const VERSION: &str = "1.0.0";
@@ -78,5 +79,21 @@ pub fn event_resolved(event_id: u32, outcome: Outcome, reason: OutcomeReason, by
     emit(
         "event_resolved",
         json!({ "event_id": event_id, "outcome": outcome, "reason": reason, "by": by }),
+    );
+}
+
+/// `refund_requested`, `refund_settled`, `refund_failed`, `payout_requested`, `payout_settled` and
+/// `payout_failed`: each carries the operation, its recipient and its amount.
+pub fn settlement(event: &str, operation_id: u64, operation: &Operation) {
+    emit(
+        event,
+        json!({
+            "operation_id": operation_id,
+            "kind": operation.kind,
+            "event_id": operation.event_id,
+            "token_id": operation.token_id,
+            "recipient_id": operation.recipient_id,
+            "amount": U128(operation.amount),
+        }),
     );
 }
