@@ -79,5 +79,5 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | A token's `ft_transfer` gets exactly 20 Tgas (no share of unused gas, which bounds its answer); a token claim needs 60 Tgas | `2026-11-13-the-token-gets-exactly-its-static-gas.md` |
 | 2026-11-13 | A token's longest answer must still settle: measured at 300 Tgas, the long-answer tests stay strict | `2026-11-13-long-token-answers-must-settle.md` |
 | 2026-11-13 | Replaced by the next line: a token's `ft_transfer` gets exactly 20 Tgas (no share of unused gas, which bounds its answer) | `2026-11-13-the-token-gets-exactly-its-static-gas.md` |
-| 2026-11-13 | A token's `ft_transfer` gets at least 20 Tgas and the default share of unused gas, the only remedy an immutable contract has for a costly token; a token claim needs 60 Tgas | `2026-11-13-the-token-gets-at-least-its-static-gas.md` |
+| 2026-11-13 | A token's `ft_transfer` (at least 20 Tgas) and the settlement callbacks (at least 15 Tgas) share the claimant's unused gas, so a costly token can still be paid and no answer outruns the callback; a token claim needs 60 Tgas | `2026-11-13-the-token-gets-at-least-its-static-gas.md` |
 | 2026-11-13 | Only the contract account can call `new(tokens)` (`#[private]`); deploy and init go in one transaction | `2026-11-13-only-the-contract-account-calls-new.md` |

@@ -79,8 +79,9 @@ struct Extra<'a> {
     currency: Option<&'a AccountId>,
 }
 
-/// `text` made safe inside an SVG text node: markup characters escaped, control characters (which
-/// XML forbids) turned into spaces.
+/// `text` made safe inside an SVG text node: markup characters escaped; control characters and
+/// U+FFFE, U+FFFF (which XML forbids, so a strict parser would refuse the picture) turned into
+/// spaces. Every other `char` is allowed by XML 1.0.
 fn escape_xml(text: &str) -> String {
     let mut escaped = String::with_capacity(text.len());
     for character in text.chars() {
@@ -90,7 +91,9 @@ fn escape_xml(text: &str) -> String {
             '>' => escaped.push_str("&gt;"),
             '"' => escaped.push_str("&quot;"),
             '\'' => escaped.push_str("&apos;"),
-            other if other.is_control() => escaped.push(' '),
+            other if other.is_control() || matches!(other, '\u{FFFE}' | '\u{FFFF}') => {
+                escaped.push(' ')
+            }
             other => escaped.push(other),
         }
     }
