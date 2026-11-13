@@ -39,6 +39,20 @@ Addendum to `2026-11-12-ticket-escrow-mvp-plan.md`, Track W. Written on 2026-11-
 
 Sections 2 to 5 rise out of a soft blur the first time they scroll into view (the `Reveal` idea), with a short stagger between the cards of one section.
 
+## Motion and shape from David Astudillo's landing (added 2026-11-13 10:20)
+
+Walter asked again, by name, for the effects David Astudillo built for that landing (its commit `441c687`: "pill controls and an editorial landing"). Bring these five, each adapted to this project's tokens:
+
+1. **Floating translucent header.** On the landing the header is a pill that floats over the page, with a blurred translucent background, a hairline ring and a soft shadow, and it slides in on load (`LandingHeader.module.css`, `navIn`). The other routes keep the plain header.
+2. **Press response.** Buttons and pills shrink slightly while pressed (`Button.module.css`: `transform: scale(0.965)` on `:active`, with a transition), everywhere in the app, never on a disabled control.
+3. **The replay inside a window.** The ticket replay of section 02 sits in a browser-window frame: a chrome bar with three dots, an address pill that reads the page it shows (for example `/tickets/1-1`) and the "Replay" button (`AppWindow.module.css`).
+4. **Chips on the terminal.** The agent terminal of section 03 has "Try it" chips that pick which real run is typed (`AgentTerminal.tsx`): `/within-caps` (the purchase), `/over-the-cap` (the denial), `/refund-watcher` (the watcher's two lines). The chips are a tab list, reachable by keyboard.
+5. **A cap meter.** Next to the terminal, a meter of the agent's exposure cap as it stood in the real run (`Agents.tsx`, the mandate meter): "0.5 NEAR of 5 NEAR in tickets", with a mark at the per-ticket cap of 2 NEAR. The numbers are the ones in `docs/mcp.md`; the fill animates in once when it scrolls into view.
+
+All five follow the global constraints above: tokens only, off under reduced motion, nothing hidden without `IntersectionObserver`.
+
+Tests to add: the chips switch the run that is shown and work with the arrow keys; the meter states its three numbers in text (not only as a bar); the landing header is the floating one on `/` and the plain one on `/proof`.
+
 ## Also
 
 - Demo banner: "Demo data: nothing on this page is on chain." The environment variable is explained in the README, not in the interface.
