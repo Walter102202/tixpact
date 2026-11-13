@@ -97,11 +97,6 @@ function describe(error: unknown): string {
   return first instanceof Error ? first.message : String(first);
 }
 
-/**
- * Signs with a key from the environment through near-api-js. Each call reads a fresh nonce, signs
- * locally (so the hash is known before anything is sent) and submits with `waitUntil: 'INCLUDED'`.
- * Before every signature it checks that the provider is on the expected chain.
- */
 /** The public key of a secret key, as `ed25519:<base58>`. Never repeats the secret on failure. */
 export function publicKeyOf(secretKey: string): string {
   try {
@@ -113,6 +108,11 @@ export function publicKeyOf(secretKey: string): string {
   }
 }
 
+/**
+ * Signs with a key from the environment through near-api-js. Each call reads a fresh nonce, signs
+ * locally (so the hash is known before anything is sent) and submits with `waitUntil: 'INCLUDED'`.
+ * Before every signature it checks that the provider is on the expected chain.
+ */
 export function createNearSigner(options: NearSignerOptions): AgentSigner {
   const { accountId, provider } = options;
   const chainId = options.chainId ?? 'testnet';
