@@ -35,7 +35,9 @@ const STEPS = [
 export function HomePage() {
   const { reader, timeZone } = useServices();
   const events = useLoad('events', async () => {
-    const list = await readAllPages((from, limit) => reader.listEvents(from, limit));
+    const all = await readAllPages((from, limit) => reader.listEvents(from, limit));
+    // Newest first: the events a visitor can still buy come before the ones already settled.
+    const list = [...all].sort((a, b) => b.event_id - a.event_id);
     return Promise.all(
       list.map(async (event) => ({ event, unit: await unitFor(reader, event.currency) })),
     );

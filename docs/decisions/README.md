@@ -104,3 +104,4 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | A token's `ft_transfer` (at least 20 Tgas) and the settlement callbacks (at least 15 Tgas) share the claimant's unused gas, so a costly token can still be paid and no answer outruns the callback; a token claim needs 60 Tgas | `2026-11-13-the-token-gets-at-least-its-static-gas.md` |
 | 2026-11-13 | Only the contract account can call `new(tokens)` (`#[private]`); deploy and init go in one transaction | `2026-11-13-only-the-contract-account-calls-new.md` |
 | 2026-11-13 | Version 2 goes to its own account, `ticket-escrow-v2.testnet`, with the test token `tUSD` as its only listed token; every proof is played again there | `2026-11-13-version-2-goes-to-its-own-account.md` |
+| 2026-11-13 | The home page lists the newest event first, so an event still on sale is not under the settled ones | `2026-11-13-web-newest-event-first.md` |

@@ -90,6 +90,18 @@ describe('/ lists the events', () => {
     );
   });
 
+  it('newest first, so an event still on sale is not below the settled ones', async () => {
+    renderAt('/');
+    const list = await screen.findByRole('list', { name: 'Events' });
+    const titles = within(list)
+      .getAllByRole('listitem')
+      .map((li) => within(li).getAllByRole('link')[0]?.textContent);
+    const expected = [...FIXTURES.events]
+      .sort((a, b) => b.event_id - a.event_id)
+      .map((event) => event.title);
+    expect(titles).toEqual(expected);
+  });
+
   it('shows the error state when the chain cannot be read', async () => {
     const failing = {
       ...createFixtureReader(),

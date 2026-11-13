@@ -257,9 +257,9 @@ describe('the replay', () => {
 });
 
 describe('the agent terminal', () => {
-  const PURCHASE = 'https://testnet.nearblocks.io/txns/xipcWZ6r5E6rYCthHvqbKbEBHs7kYgrjMR7XYWtjdK6';
-  const EXPIRE = 'https://testnet.nearblocks.io/txns/3MgSi5t77JZ7PH2nXPq9z1FPxaPeASAn5Fiv5Hrzpti7';
-  const CLAIM = 'https://testnet.nearblocks.io/txns/5ZQummRVUDyv44cg8zK8nTqvWuGjoU85oZcuJaZaRzUS';
+  const PURCHASE = 'https://testnet.nearblocks.io/txns/aA7RAeRKomXtq5DKZWuTsfRBbw6Cj5oA3Y7FuPAP2kW';
+  const EXPIRE = 'https://testnet.nearblocks.io/txns/FYyCD9NahNzCQNs26R5uY1FydjZD5f5H1QAEguQ8NTbi';
+  const CLAIM = 'https://testnet.nearblocks.io/txns/B6qvAFgvnd2NTkGhumfT4WjhpZwHgP59d6QAzVznsJwE';
   const terminal = () => screen.getByRole('figure', { name: 'The agent on NEAR testnet' });
   const panel = () => within(terminal()).getByRole('tabpanel');
   const links = () =>
@@ -286,7 +286,7 @@ describe('the agent terminal', () => {
       '/refund-watcher',
     ]);
     expect(tabs[0]?.getAttribute('aria-selected')).toBe('true');
-    expect(panel().textContent).toContain('Bought ticket 4-1 for 0.5 NEAR.');
+    expect(panel().textContent).toContain('Bought ticket 5-1 for 0.5 NEAR.');
     expect(links()).toEqual([PURCHASE]);
   });
 
@@ -299,8 +299,8 @@ describe('the agent terminal', () => {
     );
     expect(links()).toEqual([]);
     fireEvent.click(within(terminal()).getByRole('tab', { name: '/refund-watcher' }));
-    expect(panel().textContent).toContain('expire_event 4: succeeded');
-    expect(panel().textContent).toContain('claim_refund 4-1: succeeded');
+    expect(panel().textContent).toContain('expire_event 5: succeeded');
+    expect(panel().textContent).toContain('claim_refund 5-1: succeeded');
     expect(links()).toEqual([EXPIRE, CLAIM]);
   });
 
