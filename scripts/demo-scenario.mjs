@@ -125,6 +125,11 @@ async function untilChainTime(eventId, targetMs, label) {
   }
 }
 
+/** A balance change, which is negative when a claim paid nothing and only gas was spent. */
+function signedNear(yocto) {
+  return yocto < 0n ? `-${formatNear((-yocto).toString(), 6)}` : formatNear(yocto.toString(), 6);
+}
+
 async function balanceOf(accountId) {
   return BigInt((await reader.getAccountProof(accountId)).balance);
 }
@@ -239,7 +244,7 @@ async function organizerDisappears() {
     "Luis's balance grew by the price, minus his own gas",
     'R1 · `t09_refund_pays_exact_principal`',
     `between ${formatNear((BigInt(PRICE) - BigInt(GAS_ALLOWANCE)).toString())} and ${formatNear(PRICE)} NEAR`,
-    `${formatNear(gained.toString(), 6)} NEAR`,
+    `${signedNear(gained)} NEAR`,
     gained <= BigInt(PRICE) && gained >= BigInt(PRICE) - BigInt(GAS_ALLOWANCE),
   );
   await step(
