@@ -54,8 +54,8 @@ export function DoorPage() {
   const hash = useHash();
   const pass = decodePass(hash);
   if (pass === null) return <DoorIntro unreadable={hash.length > 1} />;
-  // Keyed by the pass: a new scan starts a new check.
-  return <DoorCheck key={encodePass(pass)} pass={pass} />;
+  // Keyed by the fragment: any new arrival (even the same pass with `&x=1`) starts a new check.
+  return <DoorCheck key={hash} pass={pass} />;
 }
 
 function DoorIntro({ unreadable }: { unreadable: boolean }) {
@@ -121,18 +121,24 @@ function DoorCheck({ pass }: { pass: EntryPass }) {
   // Random, so a record left by an earlier visit is never taken for this one.
   const [instance] = useState(() => `${Date.now()}-${Math.random().toString(36).slice(2)}`);
   const checksId = useId();
+  const checkAgain = () => setAttempt((n) => n + 1);
   const load = useLoad(`door:${attempt}`, async (): Promise<DoorResult> => {
     const now = Date.now();
     const result = await checkPass(pass, contractId, passChain, now);
     const check = `${instance}:${attempt}`;
+    const base = { ...result, check, checkedAt: now };
     const earlier = admissionOf(scope, pass.ticket);
-    if (earlier !== null && earlier.check !== check) return { ...result, earlier };
-    if (!result.admitted) return { ...result, earlier: null };
+    if (earlier !== null && earlier.check !== check) {
+      // "Check again" after an Admit: the record is this door check's own, so it can be undone.
+      const mine = earlier.check.startsWith(`${instance}:`) ? earlier : null;
+      return { ...base, earlier, mine, saved: true };
+    }
+    if (!result.admitted) return { ...base, earlier: null, mine: null, saved: true };
     // Recorded when the verdict is Admit, not on a button the attendant may forget. In development
     // React runs this twice; the second run finds the record of its own check and keeps it.
     const recorded = earlier ?? { at: now, check };
     const saved = earlier !== null || recordAdmission(scope, pass.ticket, recorded);
-    return { ...result, earlier: null, recorded, saved };
+    return { ...base, earlier: null, mine: recorded, saved };
   });
 
   return (
@@ -144,7 +150,13 @@ function DoorCheck({ pass }: { pass: EntryPass }) {
       >
         {(result) => (
           <>
-            <Verdict pass={pass} result={result} scope={scope} />
+            <Verdict
+              key={result.check}
+              pass={pass}
+              result={result}
+              scope={scope}
+              checkAgain={checkAgain}
+            />
             <h2 id={checksId} className="door-checks-heading">
               The five checks
             </h2>
@@ -159,11 +171,7 @@ function DoorCheck({ pass }: { pass: EntryPass }) {
               ))}
             </ol>
             <p className="door-actions">
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setAttempt((n) => n + 1)}
-              >
+              <button type="button" className="btn btn-secondary" onClick={checkAgain}>
                 Check again
               </button>
               <button type="button" className="btn btn-secondary" onClick={() => replaceHash('')}>
@@ -180,26 +188,72 @@ function DoorCheck({ pass }: { pass: EntryPass }) {
 interface DoorResult {
   admitted: boolean;
   checks: PassCheck[];
+  /** This check's id and the time it ran. */
+  check: string;
+  checkedAt: number;
   /** An admission of this ticket recorded on this device by an earlier check. */
   earlier: Admission | null;
-  /** The admission this check recorded, and whether the browser stored it. */
-  recorded?: Admission;
-  saved?: boolean;
+  /** The admission this door check recorded (now or on an earlier attempt), which Undo removes. */
+  mine: Admission | null;
+  /** False when the browser would not store this check's admission. */
+  saved: boolean;
 }
 
-function Verdict({ pass, result, scope }: { pass: EntryPass; result: DoorResult; scope: string }) {
+function Verdict({
+  pass,
+  result,
+  scope,
+  checkAgain,
+}: {
+  pass: EntryPass;
+  result: DoorResult;
+  scope: string;
+  checkAgain: () => void;
+}) {
   const { timeZone, fixtureMode } = useServices();
-  const [undone, setUndone] = useState(false);
+  const [undo, setUndo] = useState<'done' | 'failed' | null>(null);
   const who = `Ticket ${pass.ticket} · ${pass.account}`;
   const words = fixtureMode ? WORDS.demo : WORDS.live;
   const time = (ms: number) => clockTime(ms, timeZone, true);
-  const site = (
+  const footer = (
     <>
+      <p className="verdict-time">Checked at {time(result.checkedAt)}.</p>
       {fixtureMode && <p className="verdict-demo">{DEMO_RESULT}</p>}
       <CheckingSite />
     </>
   );
+  const mine = result.mine;
+  const undoButton = mine !== null && result.saved && (
+    <button
+      type="button"
+      className="btn btn-sm btn-secondary"
+      onClick={() => setUndo(forgetAdmission(scope, pass.ticket, mine.check) ? 'done' : 'failed')}
+    >
+      Undo: scanned by mistake
+    </button>
+  );
+  const undoFailed = undo === 'failed' && (
+    <p className="tx tx-notice" role="alert">
+      The admission could not be removed: it stays recorded on this device.
+    </p>
+  );
 
+  if (undo === 'done') {
+    return (
+      <div className="verdict verdict-again" role="status">
+        <p className="verdict-word">Admission removed</p>
+        <p>{who}</p>
+        <p>
+          This device no longer remembers ticket {pass.ticket} as admitted. Check the pass again
+          before letting anyone in.{' '}
+          <button type="button" className="btn btn-sm" onClick={checkAgain}>
+            Check again
+          </button>
+        </p>
+        {footer}
+      </div>
+    );
+  }
   if (!result.admitted || result.earlier !== null) {
     return (
       <div
@@ -210,9 +264,10 @@ function Verdict({ pass, result, scope }: { pass: EntryPass; result: DoorResult;
         <p>{who}</p>
         {result.earlier !== null && (
           <p className="verdict-again-line">
-            Already admitted on this device at {time(result.earlier.at)}.
+            Already admitted on this device at {time(result.earlier.at)}. {undoButton}
           </p>
         )}
+        {undoFailed}
         <ul>
           {result.checks
             .filter((check) => !check.ok)
@@ -220,35 +275,27 @@ function Verdict({ pass, result, scope }: { pass: EntryPass; result: DoorResult;
               <li key={check.id}>{check.detail}</li>
             ))}
         </ul>
-        {site}
+        {footer}
       </div>
     );
   }
-  const recorded = result.recorded;
   return (
     <div className="verdict verdict-ok" role="status">
       <p className="verdict-word">{words.admit}</p>
       <p>{who}</p>
-      {recorded !== undefined && !result.saved && (
+      {mine !== null && !result.saved && (
         <p>
           This browser would not store the admission, so a second scan here will not be flagged.
         </p>
       )}
-      {recorded !== undefined && result.saved && !undone && (
+      {mine !== null && result.saved && (
         <p>
-          This device now remembers ticket {pass.ticket} as admitted at {time(recorded.at)}: any
-          other pass for it reads "{words.refuse}" here.{' '}
-          <button
-            type="button"
-            className="btn btn-sm btn-secondary"
-            onClick={() => setUndone(forgetAdmission(scope, pass.ticket, recorded.check))}
-          >
-            Undo: scanned by mistake
-          </button>
+          This device now remembers ticket {pass.ticket} as admitted at {time(mine.at)}: any other
+          pass for it reads "{words.refuse}" here. {undoButton}
         </p>
       )}
-      {undone && <p>Undone: this device no longer remembers ticket {pass.ticket} as admitted.</p>}
-      {site}
+      {undoFailed}
+      {footer}
     </div>
   );
 }

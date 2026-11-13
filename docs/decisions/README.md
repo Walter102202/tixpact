@@ -82,3 +82,4 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | A role of any other kind that can approve calls, `Everyone` included, makes the verifier read as a plain account | `2026-11-13-group-verifier-any-other-approver-gives-null.md` |
 | 2026-11-13 | The door page scans QR codes itself with `BarcodeDetector` where the browser has it; no new dependency; not tried on a physical phone | `2026-11-13-door-scanner-in-the-page.md` |
 | 2026-11-13 | The group verifier counts every label that can change who decides calls (`policy…`, members, upgrades, config); `needed` is the minimum; the line says "its rules now" | `2026-11-13-group-verifier-counts-every-rule-changing-label.md` |
+| 2026-11-13 | The door checks every new fragment and dates every verdict; Undo works after "Check again" and says whether it removed the admission | `2026-11-13-door-checks-every-arrival-and-undo-says-so.md` |

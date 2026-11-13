@@ -353,17 +353,59 @@ describe('the door', () => {
     expect((await verdict()).textContent).toBe('Admit');
   });
 
-  it('undoes a scan made by mistake', async () => {
+  it('undoes a scan made by mistake: the verdict says the admission was removed', async () => {
     const pass = demoPass();
     renderAt(`/door#p=${encodePass(pass)}`, live());
     await verdict();
     fireEvent.click(screen.getByRole('button', { name: 'Undo: scanned by mistake' }));
+    const status = within(screen.getByRole('status'));
+    expect(status.getByText('Admission removed', { selector: '.verdict-word' })).toBeTruthy();
     expect(
-      screen.getByText('Undone: this device no longer remembers ticket 1-3 as admitted.'),
+      status.getByText(/This device no longer remembers ticket 1-3 as admitted\./),
     ).toBeTruthy();
-    cleanup();
-    renderAt(`/door#p=${encodePass(pass)}`, live());
+    expect(screen.queryByText('Admit', { selector: '.verdict-word' })).toBeNull();
+    fireEvent.click(status.getByRole('button', { name: 'Check again' }));
     expect((await verdict()).textContent).toBe('Admit');
+  });
+
+  it('"Check again" after an Admit reads "Do not admit" with the time, and keeps Undo', async () => {
+    renderAt(`/door#p=${encodePass(demoPass())}`, live());
+    expect((await verdict()).textContent).toBe('Admit');
+    expect(screen.getByText('Checked at 21:03:00.')).toBeTruthy();
+    act(() => vi.advanceTimersByTime(5_000));
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
+    expect(await screen.findByText('Do not admit', { selector: '.verdict-word' })).toBeTruthy();
+    expect(screen.getByText(/Already admitted on this device at 21:03:00\./)).toBeTruthy();
+    expect(screen.getByText('Checked at 21:03:05.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Undo: scanned by mistake' }));
+    expect(screen.getByText('Admission removed', { selector: '.verdict-word' })).toBeTruthy();
+    expect(window.localStorage.getItem('ticket-escrow:admitted:live:ticket-escrow.testnet')).toBe(
+      '{}',
+    );
+  });
+
+  it('says so when Undo fails, and keeps the verdict', async () => {
+    renderAt(`/door#p=${encodePass(demoPass())}`, live());
+    await verdict();
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('storage is full');
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Undo: scanned by mistake' }));
+    expect(screen.getByRole('alert').textContent).toBe(
+      'The admission could not be removed: it stays recorded on this device.',
+    );
+    expect(screen.getByText('Admit', { selector: '.verdict-word' })).toBeTruthy();
+  });
+
+  it('checks again when the same pass arrives with a changed fragment', async () => {
+    const text = encodePass(demoPass());
+    renderAt(`/door#p=${text}`, live());
+    expect((await verdict()).textContent).toBe('Admit');
+    act(() => {
+      window.location.hash = `p=${text}&x=1`;
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+    expect(await screen.findByText('Do not admit', { selector: '.verdict-word' })).toBeTruthy();
   });
 
   it('does not admit a pass once the ticket was transferred after signing', async () => {
