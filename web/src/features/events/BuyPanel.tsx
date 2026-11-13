@@ -29,8 +29,12 @@ interface BuyProps {
 }
 
 export function BuyPanel(props: BuyProps) {
+  const { accountId } = useWallet();
   const currency = props.data.event.currency;
-  return currency === null ? <NearBuy {...props} /> : <TokenBuy {...props} token={currency} />;
+  if (currency === null) return <NearBuy {...props} />;
+  // One panel per account: a finished registration or faucet call stays with the account it ran
+  // for, and the next account starts from its own balance.
+  return <TokenBuy key={accountId ?? ''} {...props} token={currency} />;
 }
 
 /** What a purchase changes; the view's clock (now_ms) moves on every block. */
@@ -300,7 +304,8 @@ function Refused({
 
 /**
  * The test token's faucet: it mints `FAUCET_WHOLE_UNITS` whole units to a registered caller
- * (`fixtures/test-token`). Offered only for a token the deployment lists as having one.
+ * (`fixtures/test-token`). Offered only for a token the deployment lists as having one. Its result
+ * names the account that signed, which is the one the faucet paid, not whoever is signed in now.
  */
 function Faucet({
   account,
@@ -335,14 +340,14 @@ function Faucet({
       <TxStatus
         tx={tx}
         failureTitle="The faucet did not send anything."
-        success={() =>
+        success={(_, signerId) =>
           fixtureMode ? (
             <p>
-              Demo: nothing was sent. Live, the faucet sends {amount} to {account.accountId}.
+              Demo: nothing was sent. Live, the faucet sends {amount} to {signerId}.
             </p>
           ) : (
             <p>
-              The faucet sent {amount} to {account.accountId}.
+              The faucet sent {amount} to {signerId}.
             </p>
           )
         }

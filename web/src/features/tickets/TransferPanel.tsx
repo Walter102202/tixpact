@@ -58,6 +58,8 @@ export function TransferPanel({
 
   async function review(formEvent: FormEvent) {
     formEvent.preventDefault();
+    // A registration finished for an earlier receiver says nothing about this one.
+    registerTx.dismiss();
     const account = input.trim();
     const mine = ++reviews.current;
     setTarget(null);

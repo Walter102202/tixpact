@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import {
   createFixtureReader,
   FIXTURE_TOKEN_ID,
@@ -168,6 +168,38 @@ describe('buying with tUSD', () => {
     expect(s.wallet.sent).toEqual([
       { methodName: 'faucet', args: {}, deposit: '0', gas: '30000000000000', receiverId: TUSD },
     ]);
+  });
+
+  it('a faucet result stays with the account it ran for', async () => {
+    const s = await openEvent(10, services('ana.testnet'));
+    await screen.findByText('Your balance: 4 tUSD');
+    fireEvent.click(screen.getByRole('button', { name: 'Get 100 tUSD from the test faucet' }));
+    await screen.findByText(
+      'Demo: nothing was sent. Live, the faucet sends 100 tUSD to ana.testnet.',
+    );
+    // The demo selector switches to the organizer, who holds 0 tUSD.
+    act(() => s.wallet.signInAs('org.testnet'));
+    expect(await screen.findByText('Your balance: 0 tUSD')).toBeTruthy();
+    expect(screen.queryByText(/the faucet sends/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Get 100 tUSD from the test faucet' })).toBeTruthy();
+    expect(screen.getByText(/It sends 100 tUSD to org\.testnet\./)).toBeTruthy();
+  });
+
+  it('a registration result stays with the account it ran for', async () => {
+    const s = await openEvent(10, services('sofia.testnet'));
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Register with tUSD for 0.00125 NEAR' }),
+    );
+    await screen.findByText(
+      'Demo: nothing was registered. Live, sofia.testnet is then registered with tUSD.',
+    );
+    // teatro.testnet is not registered with tUSD either.
+    act(() => s.wallet.signInAs('teatro.testnet'));
+    expect(await screen.findByText(/teatro\.testnet is not registered with tUSD yet/)).toBeTruthy();
+    expect(screen.queryByText(/Demo: nothing was registered/)).toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Register with tUSD for 0.00125 NEAR' }),
+    ).toBeTruthy();
   });
 
   it('without a faucet, says where the money has to come from', async () => {
@@ -366,6 +398,28 @@ describe('transferring a tUSD ticket', () => {
         receiverId: TUSD,
       },
     ]);
+  });
+
+  it('a registration done for one receiver is not shown for the next one', async () => {
+    await openTicket('10-1');
+    review('sofia.testnet');
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Register sofia.testnet with tUSD for 0.00125 NEAR',
+      }),
+    );
+    await screen.findByText(/Demo: nothing was registered/);
+    // teatro.testnet is not registered with tUSD either.
+    review('teatro.testnet');
+    const confirm = await screen.findByRole('region', { name: 'Confirm the transfer' });
+    await within(confirm).findByText(/teatro\.testnet is not registered with tUSD\./);
+    expect(confirm.textContent).not.toContain('sofia.testnet');
+    expect(screen.queryByText(/Demo: nothing was registered/)).toBeNull();
+    expect(
+      within(confirm).getByRole('button', {
+        name: 'Register teatro.testnet with tUSD for 0.00125 NEAR',
+      }),
+    ).toBeTruthy();
   });
 
   it('says nothing about registration when the receiver is registered', async () => {

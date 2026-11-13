@@ -1,5 +1,5 @@
 import { actions, type Unit } from '@ticket-escrow/client';
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 import type { Refresh, TxControl } from '../../lib/near/useTx';
 import { useServices } from '../../services';
 import { TxStatus } from '../../ui/TxStatus';
@@ -31,6 +31,8 @@ export function RegisterPanel<T>({
   const self = signer === account.accountId;
   const deposit = nearExact(account.minDeposit);
   const done = tx.view.kind === 'done' && tx.view.result.ok;
+  // The account the last registration ran for, which its result names.
+  const [ranFor, setRanFor] = useState<string | null>(null);
   return (
     <div className="register-panel">
       {why}
@@ -39,12 +41,13 @@ export function RegisterPanel<T>({
           <button
             type="button"
             className="btn btn-secondary"
-            onClick={() =>
+            onClick={() => {
+              setRanFor(account.accountId);
               void tx.run(
                 actions.registerWithToken(account.token, account.accountId, account.minDeposit),
                 refresh,
-              )
-            }
+              );
+            }}
           >
             {self
               ? `Register with ${unit.symbol} for ${deposit}`
@@ -60,7 +63,7 @@ export function RegisterPanel<T>({
         tx={tx}
         failureTitle="The registration did not complete."
         failureNote="The deposit comes back to your account when the call fails."
-        success={() => <Registered account={account.accountId} unit={unit} />}
+        success={() => <Registered account={ranFor ?? account.accountId} unit={unit} />}
       />
     </div>
   );
