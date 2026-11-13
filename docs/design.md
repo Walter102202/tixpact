@@ -1,6 +1,6 @@
 # Design
 
-How the contract works and why it is built this way. The exact method signatures, JSON shapes and error codes are in the frozen interface, [version 1](plans/2026-11-12-ticket-escrow-mvp-plan.md#frozen-interface-v1) and [what version 2 adds](plans/2026-11-13-pass-group-verifier-dollars.md#frozen-interface-v2); every way to cheat we could think of, with the test that stops it, is in the [threat model](threat-model.md).
+How the contract works and why it is built this way. The exact method signatures, JSON shapes and error codes are in the frozen interface, in two parts: [events, tickets and payments in NEAR](plans/2026-11-12-ticket-escrow-mvp-plan.md#frozen-interface-v1), and [currencies, the ticket's computed text and picture, and the entry pass](plans/2026-11-13-pass-group-verifier-dollars.md#frozen-interface-v2); every way to cheat we could think of, with the test that stops it, is in the [threat model](threat-model.md).
 
 ## The idea in one paragraph
 
