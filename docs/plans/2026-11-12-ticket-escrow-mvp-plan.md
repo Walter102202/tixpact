@@ -604,10 +604,12 @@ Starts when W0 is on `main`. Enters the `agents` track of the hackathon only if 
 ### Task I3: hardening and the final deployment (Saturday morning)
 
 - [ ] Judge rehearsal, repository: two fresh sessions (Claude Code and Codex) each get only the repository on a clean Linux clone and this instruction: verify that it runs and that every README claim holds, then report what failed or could not be verified. Every finding is checked at `file:line`; real ones are fixed, test first.
+  - 2026-11-13: first pass done by a fresh Claude Code session on a clean WSL clone (`judge-rehearsal-1.md`). Every step ran and passed; its eight mismatches between the README and what it saw were checked and fixed in `8d65a7f` and `9a47a04`. A second pass runs once the hosted demo and the final key deletion are in place, together with the product rehearsal.
 - [ ] Judge rehearsal, product (the three-step pass used in `C:\dev\fitcheck-polish`): a fresh session walks the hosted demo as a first-time judge along a fixed path and reports a 30-second comprehension test, the eight worst friction points with exact replacement copy, and anything that reads as success when it is not; a second session fixes the accepted items test-first; a third verifies each item read-only.
 - [ ] Fact check: every number, quote and link in the README, the X post and the video script is opened and confirmed against its source; anything unconfirmed is removed.
 - [x] (2026-11-13: not done; Docker on the development machine has no WSL integration, so the README states the build is not reproducible-verified.) `cargo near build reproducible-wasm` and `near contract verify` if Docker cooperates within one hour; otherwise the README states the build is not reproducible-verified.
 - [ ] Final deployment to the account Walter names: deploy the released wasm, `new`, create the demo events, then delete every access key (Walter's explicit OK at that moment, it cannot be undone). `scripts/verify-deployment.mjs` (T23) prints zero keys and the code hash; both go in the README and the proof page.
+  - 2026-11-13: the released wasm is on `ticket-escrow.testnet` (name chosen by the integrator, `docs/decisions/2026-11-13-the-release-goes-to-a-clean-account.md`), with the scenario, the direct calls and the agent runs replayed there. Still open: deleting its one access key, with Walter's explicit OK.
 - [ ] Full-history gitleaks pass, then Walter makes the repository public.
 
 ---
@@ -615,6 +617,7 @@ Starts when W0 is on `main`. Enters the `agents` track of the hackathon only if 
 ## Submission (Walter with the integrator)
 
 - [ ] **S1 video.** Shot list by Friday night with the `hackathon-demo-video` skill: the problem in the first line, one complete action from a real click to a visible result (Ana buys, transfers to Luis, the organizer vanishes, Luis is refunded, Ana is not), what NEAR enables, the limits. Walter records the screen; the narrated cut is built as code.
+  - 2026-11-13: shot list written (11 shots, 2:22) and published to Walter as a private page; `scripts/demo-event.sh` creates the event the recording needs. Still open: the hosted site, the wallet rehearsal, the recording and the cut.
 - [ ] **S2 X post.** Draft by the integrator; Walter posts it. It leads with the user problem, says it was built at NEAR HACKATHON, tags `@NEARProtocol` and `#NEARHackathon`, attaches the video, links the demo and the repository.
 - [ ] **S3 submission.** Walter decides every field (project name, lead name, email, team size, tracks, mainnet payout account, links, description, consent). The integrator prints the exact JSON payload and sends it only after Walter says yes. One attempt.
 
