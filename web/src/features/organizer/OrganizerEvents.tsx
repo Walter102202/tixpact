@@ -92,6 +92,28 @@ function OrganizedRow({
   const settled = BigInt(accounting?.organizer_settled ?? '0');
   const paid = tx.view.kind === 'done' && moneyMoved(tx.view.result);
 
+  const cancelTx = useTx();
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
+  const cancelled = cancelTx.view.kind === 'done' && cancelTx.view.result.ok;
+  // R2: the organizer (or the verifier) may cancel while unresolved, before the deadline, judged
+  // at the chain time of the read. Demo data never changes, so a done cancel is not offered again.
+  const cancellable =
+    event.outcome === 'Unresolved' &&
+    event.now_ms < event.resolution_deadline_ms &&
+    !cancelled &&
+    !cancelTx.busy &&
+    !tx.busy;
+
+  function cancel() {
+    setConfirmingCancel(false);
+    void cancelTx.run(actions.cancelEvent(event.event_id, null), {
+      before: row,
+      read: reread,
+      apply,
+      key: (r) => [r.event.outcome, r.event.outcome_reason],
+    });
+  }
+
   // The amount asked for, kept for the result: the re-read shows 0 once it is paid.
   const [asked, setAsked] = useState<string | null>(null);
 
@@ -159,6 +181,41 @@ function OrganizedRow({
               Sent {nearExact(asked ?? available.toString())} to {organizer}.
             </p>
           )}
+        />
+        {cancellable && !confirmingCancel && (
+          <button
+            type="button"
+            className="btn btn-sm btn-secondary"
+            onClick={() => setConfirmingCancel(true)}
+          >
+            Cancel event
+          </button>
+        )}
+        {cancellable && confirmingCancel && (
+          <section className="confirm" aria-label="Confirm the cancellation">
+            <p>
+              Cancel {event.title} for good? Every holder can then claim their price back. This
+              cannot be undone.
+            </p>
+            <div className="confirm-actions">
+              <button type="button" className="btn" onClick={cancel}>
+                Yes, cancel the event
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setConfirmingCancel(false)}
+              >
+                Keep the event
+              </button>
+            </div>
+          </section>
+        )}
+        <TxStatus
+          tx={cancelTx}
+          failureTitle="The event was not cancelled."
+          failureNote="The event above was read again from the contract."
+          success={() => <p>Cancelled. Every holder can now claim their price back.</p>}
         />
       </div>
     </li>

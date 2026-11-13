@@ -125,9 +125,30 @@ describe('/verify/:id enables each action only for the verifier and only in its 
   it('another account: nothing, with who can act', async () => {
     await openVerify(5, 'luis.testnet');
     expect(enabled()).toEqual([]);
-    for (const action of ACTIONS) {
-      expect(reason(action)).toBe('Only teatro.testnet can accept, confirm or cancel this event.');
-    }
+    expect(reason('Accept')).toBe('Only teatro.testnet can accept or confirm this event.');
+    expect(reason('Confirm the event took place')).toBe(
+      'Only teatro.testnet can accept or confirm this event.',
+    );
+    expect(reason('Declare cancelled')).toBe(
+      'Only teatro.testnet or the organizer, org.testnet, can cancel this event.',
+    );
+  });
+
+  it('the organizer: nothing here, and where to cancel', async () => {
+    await openVerify(5, 'org.testnet');
+    expect(enabled()).toEqual([]);
+    expect(reason('Accept')).toBe('Only teatro.testnet can accept or confirm this event.');
+    expect(reason('Declare cancelled')).toBe(
+      'As the organizer, you can cancel this event from the Organize page.',
+    );
+  });
+
+  it('says who can do what', async () => {
+    await openVerify(5);
+    const lead = document.querySelector('.lead')?.textContent ?? '';
+    expect(lead).toContain(
+      'Only that account can accept the terms or confirm the event. It or the organizer, org.testnet, can declare it cancelled.',
+    );
   });
 
   it('signed out: nothing, and a way to sign in', async () => {

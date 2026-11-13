@@ -602,9 +602,17 @@ section,
 }
 .payout {
   max-width: 24rem;
+  display: grid;
+  gap: 12px;
+  justify-items: start;
 }
 .payout p {
   margin: 0;
+}
+.payout .confirm {
+  margin-top: 0;
+  display: grid;
+  gap: 12px;
 }
 
 /* Verifier */

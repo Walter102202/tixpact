@@ -139,7 +139,8 @@ function VerifyDetails({
       <h1>{event.title}</h1>
       <p className="lead">
         {event.verifier_id} decides whether this event took place. Only that account can accept the
-        terms, confirm the event, or declare it cancelled.
+        terms or confirm the event. It or the organizer, {event.organizer_id}, can declare it
+        cancelled.
       </p>
 
       <div className="event-layout">

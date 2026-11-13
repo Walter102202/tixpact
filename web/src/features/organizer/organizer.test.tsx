@@ -331,6 +331,60 @@ describe('/organizer: a create whose result is unknown', () => {
   });
 });
 
+describe('/organizer: cancel an event', () => {
+  /** The row of the organizer's event with this title. */
+  async function row(title: string): Promise<HTMLElement> {
+    const list = await screen.findByRole('list', { name: 'Your events' });
+    const item = within(list)
+      .getAllByRole('listitem')
+      .find((li) => li.querySelector('h3')?.textContent === title);
+    if (!item) throw new Error(`no row for ${title}`);
+    return item;
+  }
+
+  it('is offered only while the event is unresolved and before its deadline', async () => {
+    await openOrganizer();
+    const list = await screen.findByRole('list', { name: 'Your events' });
+    const offered = within(list)
+      .getAllByRole('listitem')
+      .filter((li) => within(li).queryByRole('button', { name: 'Cancel event' }) !== null)
+      .map((li) => li.querySelector('h3')?.textContent);
+    expect(offered).toEqual([
+      'Jazz night',
+      'Poetry reading',
+      'Chamber quartet',
+      'Rock in the park',
+      'Film premiere',
+    ]);
+  });
+
+  it('asks once more and says what follows, then cancels', async () => {
+    const services = await openOrganizer();
+    const jazz = await row('Jazz night');
+    fireEvent.click(within(jazz).getByRole('button', { name: 'Cancel event' }));
+    const confirm = within(jazz).getByRole('region', { name: 'Confirm the cancellation' });
+    expect(confirm.textContent).toContain(
+      'Every holder can then claim their price back. This cannot be undone.',
+    );
+    expect(services.wallet.sent).toEqual([]);
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Yes, cancel the event' }));
+    expect(
+      await within(jazz).findByText('Cancelled. Every holder can now claim their price back.'),
+    ).toBeTruthy();
+    expect(services.wallet.sent).toEqual([actions.cancelEvent(1, null)]);
+    expect(within(jazz).queryByRole('button', { name: 'Cancel event' })).toBeNull();
+  });
+
+  it('"Keep the event" closes the box and sends nothing', async () => {
+    const services = await openOrganizer();
+    const jazz = await row('Jazz night');
+    fireEvent.click(within(jazz).getByRole('button', { name: 'Cancel event' }));
+    fireEvent.click(within(jazz).getByRole('button', { name: 'Keep the event' }));
+    expect(within(jazz).queryByRole('region', { name: 'Confirm the cancellation' })).toBeNull();
+    expect(services.wallet.sent).toEqual([]);
+  });
+});
+
 describe('/organizer: your events and the payout', () => {
   it('offers "Collect 4.5 NEAR" only where organizer_available is above zero', async () => {
     const services = await openOrganizer();
