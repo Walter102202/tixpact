@@ -1133,3 +1133,471 @@ fn a_token_amount_is_written_in_the_token_unit() {
     let svg = decode_svg(metadata.media.as_deref().expect("a drawn ticket"));
     assert!(svg.contains(">10 tUSD<"), "{svg}");
 }
+
+const TOKEN: &str = "tusd.near";
+const OTHER_TOKEN: &str = "teur.near";
+/// 10 tUSD at 6 decimals.
+const TOKEN_PRICE: u128 = 10_000_000;
+
+fn token(account: &str, symbol: &str) -> TokenSpec {
+    TokenSpec {
+        account_id: id(account),
+        symbol: symbol.to_string(),
+        decimals: 6,
+    }
+}
+
+fn token_terms() -> EventTerms {
+    EventTerms {
+        price: U128(TOKEN_PRICE),
+        currency: Some(id(TOKEN)),
+        ..terms()
+    }
+}
+
+fn purchase_msg(event_id: u32) -> String {
+    format!("{{\"event_id\":{event_id}}}")
+}
+
+/// A contract listing tUSD and tEUR, with event 1 priced in tUSD and accepted, and ticket "1-1"
+/// bought by Ana through the token at time 1_500_000.
+fn contract_with_a_token_ticket() -> Contract {
+    call_as(ESCROW, 0, 1_000_000);
+    let mut contract = Contract::new(vec![token(TOKEN, "tUSD"), token(OTHER_TOKEN, "tEUR")]);
+    call_as(ORGANIZER, quote_event_budget(3), 1_000_000);
+    let event_id = contract.create_event(token_terms());
+    let hash = contract
+        .get_event(event_id)
+        .expect("event exists")
+        .terms_hash;
+    call_as(VERIFIER, 1, 1_000_000);
+    contract.accept_verification(event_id, hash);
+    call_as(TOKEN, 0, 1_500_000);
+    let kept = contract.ft_on_transfer(id(ANA), U128(TOKEN_PRICE), purchase_msg(event_id));
+    assert_eq!(kept, U128(0), "the whole amount is kept");
+    contract
+}
+
+#[test]
+fn a_token_purchase_mints_to_the_sender_and_keeps_the_whole_amount() {
+    let contract = contract_with_a_token_ticket();
+    let ticket = contract
+        .get_ticket("1-1".to_string())
+        .expect("ticket exists");
+    assert_eq!(ticket.owner_id, id(ANA));
+    assert_eq!(ticket.principal.0, TOKEN_PRICE);
+    assert_eq!(ticket.currency, Some(id(TOKEN)));
+    assert_eq!(ticket.claim, Claim::Reserved);
+    let accounting = contract.get_accounting(1).expect("event exists");
+    assert_eq!(accounting.currency, Some(id(TOKEN)));
+    assert_eq!(accounting.principal_received.0, TOKEN_PRICE);
+    assert_eq!(accounting.principal_reserved.0, TOKEN_PRICE);
+    assert_eq!(contract.total_held, 0, "a token event holds no NEAR");
+    assert_identity_of(&contract, 1);
+    let logs = near_sdk::test_utils::get_logs();
+    assert!(
+        logs.iter().any(|line| line.contains("\"ticket_purchased\"")
+            && line.contains("\"currency\":\"tusd.near\"")),
+        "{logs:?}"
+    );
+    let description = contract
+        .nft_token("1-1".to_string())
+        .and_then(|token| token.metadata)
+        .and_then(|metadata| metadata.description)
+        .expect("a description");
+    assert!(
+        description.ends_with("10 tUSD is reserved in the contract until the event is resolved.")
+    );
+}
+
+fn assert_identity_of(contract: &Contract, event_id: u32) {
+    let ledger = &contract.load_event(event_id).ledger;
+    assert!(ledger.identity_holds(), "{ledger:?}");
+}
+
+/// Every wrong payment panics, so the token gives the buyer the whole amount back, and leaves
+/// nothing behind: the mocked host keeps writes made before a panic, so an early write shows here.
+#[test]
+fn ft_on_transfer_rejects_every_wrong_payment_before_any_change() {
+    let mut contract = contract_with_a_token_ticket();
+    // A NEAR event, accepted, for the token-to-NEAR-event case.
+    call_as(ORGANIZER, quote_event_budget(3), 1_500_000);
+    let near_event = contract.create_event(terms());
+    let hash = contract.get_event(near_event).expect("exists").terms_hash;
+    call_as(VERIFIER, 1, 1_500_000);
+    contract.accept_verification(near_event, hash);
+
+    let mut pay = |caller: &str, amount: u128, msg: &str, now_ms: u64, code: &str| {
+        call_as(caller, 0, now_ms);
+        fails_with(code, || {
+            contract.ft_on_transfer(id(LUIS), U128(amount), msg.to_string());
+        });
+    };
+    let msg = purchase_msg(1);
+    // The caller is not a listed token, or not this event's token.
+    pay(
+        "mallory.near",
+        TOKEN_PRICE,
+        &msg,
+        1_600_000,
+        "ERR_WRONG_CURRENCY",
+    );
+    pay(ANA, TOKEN_PRICE, &msg, 1_600_000, "ERR_WRONG_CURRENCY");
+    pay(
+        OTHER_TOKEN,
+        TOKEN_PRICE,
+        &msg,
+        1_600_000,
+        "ERR_WRONG_CURRENCY",
+    );
+    // A token sent to an event priced in NEAR.
+    let near_msg = purchase_msg(near_event);
+    pay(TOKEN, PRICE, &near_msg, 1_600_000, "ERR_WRONG_CURRENCY");
+    // A message that is not exactly {"event_id":<id>}.
+    for bad in [
+        "",
+        "1",
+        "not json",
+        "{\"event_id\":\"1\"}",
+        "{\"event_id\":1,\"to\":\"x\"}",
+        "{}",
+    ] {
+        pay(TOKEN, TOKEN_PRICE, bad, 1_600_000, "ERR_BAD_MESSAGE");
+    }
+    pay(
+        TOKEN,
+        TOKEN_PRICE,
+        &" ".repeat(1_025),
+        1_600_000,
+        "ERR_LIMIT",
+    );
+    pay(
+        TOKEN,
+        TOKEN_PRICE,
+        &purchase_msg(99),
+        1_600_000,
+        "ERR_NOT_FOUND",
+    );
+    // Not exactly the price.
+    pay(TOKEN, TOKEN_PRICE - 1, &msg, 1_600_000, "ERR_WRONG_DEPOSIT");
+    pay(TOKEN, TOKEN_PRICE + 1, &msg, 1_600_000, "ERR_WRONG_DEPOSIT");
+    // Rule R4 holds for tokens too: not at the start.
+    pay(TOKEN, TOKEN_PRICE, &msg, STARTS, "ERR_TOO_LATE");
+
+    // NEAR attached to `buy_ticket` cannot buy a ticket priced in a token.
+    call_as(LUIS, TOKEN_PRICE, 1_600_000);
+    fails_with("ERR_WRONG_CURRENCY", || {
+        contract.buy_ticket(1);
+    });
+
+    let event = contract.get_event(1).expect("event exists");
+    assert_eq!(event.sold, 1);
+    let accounting = contract.get_accounting(1).expect("event exists");
+    assert_eq!(accounting.principal_received.0, TOKEN_PRICE);
+    assert!(contract.get_ticket("1-2".to_string()).is_none());
+    assert_eq!(contract.get_event(near_event).expect("exists").sold, 0);
+    assert_eq!(contract.total_held, 0);
+}
+
+#[test]
+fn token_tickets_sell_out_like_near_tickets() {
+    let mut contract = contract_with_a_token_ticket();
+    for buyer in [LUIS, ANA] {
+        call_as(TOKEN, 0, 1_600_000);
+        contract.ft_on_transfer(id(buyer), U128(TOKEN_PRICE), purchase_msg(1));
+    }
+    call_as(TOKEN, 0, 1_600_000);
+    fails_with("ERR_SOLD_OUT", || {
+        contract.ft_on_transfer(id(LUIS), U128(TOKEN_PRICE), purchase_msg(1));
+    });
+    let accounting = contract.get_accounting(1).expect("event exists");
+    assert_eq!(accounting.principal_reserved.0, 3 * TOKEN_PRICE);
+    assert_identity_of(&contract, 1);
+}
+
+#[test]
+fn create_event_accepts_only_a_listed_currency() {
+    call_as(ESCROW, 0, 1_000_000);
+    let mut contract = Contract::new(vec![token(TOKEN, "tUSD")]);
+    call_as(ORGANIZER, quote_event_budget(3), 1_000_000);
+    fails_with("ERR_INVALID_TERMS", || {
+        contract.create_event(EventTerms {
+            currency: Some(id(OTHER_TOKEN)),
+            ..token_terms()
+        });
+    });
+    assert!(contract.get_event(1).is_none());
+    call_as(ORGANIZER, quote_event_budget(3), 1_000_000);
+    assert_eq!(contract.create_event(token_terms()), 1);
+    let event = contract.get_event(1).expect("event exists");
+    assert_eq!(event.currency, Some(id(TOKEN)));
+    assert_eq!(contract.get_config().tokens, vec![token(TOKEN, "tUSD")]);
+}
+
+#[test]
+fn new_rejects_a_bad_token_list() {
+    let tokens = |n: usize| -> Vec<TokenSpec> {
+        (0..n)
+            .map(|i| token(&format!("token{i}.near"), &format!("T{i}")))
+            .collect()
+    };
+    let rejects = |code: &str, list: Vec<TokenSpec>| {
+        call_as(ESCROW, 0, 1);
+        fails_with(code, || {
+            Contract::new(list);
+        });
+    };
+    rejects("ERR_LIMIT", tokens(5));
+    let with = |edit: fn(&mut TokenSpec)| {
+        let mut list = tokens(2);
+        edit(&mut list[1]);
+        list
+    };
+    rejects("ERR_INVALID_TERMS", with(|t| t.symbol = String::new()));
+    rejects("ERR_INVALID_TERMS", with(|t| t.symbol = "T".repeat(13)));
+    rejects(
+        "ERR_INVALID_TERMS",
+        with(|t| t.symbol = "t USD".to_string()),
+    );
+    rejects(
+        "ERR_INVALID_TERMS",
+        with(|t| t.symbol = "tUSD\n".to_string()),
+    );
+    rejects("ERR_INVALID_TERMS", with(|t| t.symbol = "near".to_string()));
+    rejects("ERR_INVALID_TERMS", with(|t| t.decimals = 25));
+    rejects("ERR_INVALID_TERMS", with(|t| t.account_id = id(ESCROW)));
+    rejects(
+        "ERR_INVALID_TERMS",
+        with(|t| t.account_id = id("token0.near")),
+    );
+    rejects("ERR_INVALID_TERMS", with(|t| t.symbol = "t0".to_string()));
+
+    // At the limits it is accepted.
+    let mut list = tokens(4);
+    list[0].symbol = "T".repeat(12);
+    list[1].decimals = 24;
+    list[2].decimals = 0;
+    call_as(ESCROW, 0, 1);
+    assert_eq!(Contract::new(list.clone()).get_config().tokens, list);
+}
+
+/// Ana's token ticket after the organizer cancelled and she claimed: a refund in flight.
+fn contract_with_a_pending_token_refund() -> Contract {
+    let mut contract = contract_with_a_token_ticket();
+    call_as(ORGANIZER, 1, 1_600_000);
+    contract.cancel_event(1, None);
+    call_with_gas(ANA, 1, 1_700_000, 100);
+    let _ = contract.claim_refund("1-1".to_string());
+    contract
+}
+
+/// The function call that pays a token, as the last call created it, and the callback after it.
+struct TokenPayment {
+    token: String,
+    method: String,
+    args: near_sdk::serde_json::Value,
+    deposit: u128,
+    gas: near_sdk::Gas,
+    callback: String,
+}
+
+/// The receipts the last call created: the payment, then the callback on the escrow.
+fn token_payment() -> TokenPayment {
+    use near_sdk::mock::MockAction;
+    let receipts = near_sdk::test_utils::get_created_receipts();
+    assert_eq!(receipts.len(), 2, "a payment and its callback");
+    let MockAction::FunctionCallWeight {
+        method_name,
+        args,
+        attached_deposit,
+        prepaid_gas,
+        ..
+    } = &receipts[0].actions[0]
+    else {
+        panic!("the payment is a function call: {:?}", receipts[0].actions)
+    };
+    let MockAction::FunctionCallWeight {
+        method_name: callback,
+        ..
+    } = &receipts[1].actions[0]
+    else {
+        panic!("the callback is a function call")
+    };
+    assert_eq!(receipts[1].receiver_id, id(ESCROW));
+    TokenPayment {
+        token: receipts[0].receiver_id.to_string(),
+        method: String::from_utf8(method_name.clone()).expect("UTF-8"),
+        args: near_sdk::serde_json::from_slice(args).expect("JSON arguments"),
+        deposit: attached_deposit.as_yoctonear(),
+        gas: *prepaid_gas,
+        callback: String::from_utf8(callback.clone()).expect("UTF-8"),
+    }
+}
+
+#[test]
+fn a_token_refund_is_an_ft_transfer_of_the_principal_with_one_yocto() {
+    let contract = contract_with_a_pending_token_refund();
+    let payment = token_payment();
+    assert_eq!(payment.token, TOKEN);
+    assert_eq!(payment.method, "ft_transfer");
+    let amount = TOKEN_PRICE.to_string();
+    let expected =
+        near_sdk::serde_json::json!({ "receiver_id": ANA, "amount": amount, "memo": null });
+    assert_eq!(payment.args, expected);
+    assert_eq!(payment.deposit, 1);
+    assert_eq!(payment.gas, GAS_FT_TRANSFER);
+    assert_eq!(payment.callback, "on_refund_result");
+
+    let ticket = contract
+        .get_ticket("1-1".to_string())
+        .expect("ticket exists");
+    assert_eq!(ticket.status, TicketStatus::RefundPending);
+    let operation = contract.get_operation(1).expect("in flight");
+    assert_eq!(operation.currency, Some(id(TOKEN)));
+    assert_eq!(operation.amount.0, TOKEN_PRICE);
+    let accounting = contract.get_accounting(1).expect("event exists");
+    assert_eq!(accounting.refund_pending.0, TOKEN_PRICE);
+    assert_eq!(accounting.principal_reserved.0, 0);
+    assert_eq!(contract.total_held, 0);
+    assert_identity_of(&contract, 1);
+}
+
+#[test]
+fn a_failed_token_refund_gives_the_right_back_once_and_a_second_claim_pays() {
+    let mut contract = contract_with_a_pending_token_refund();
+    as_callback();
+    assert!(!contract.on_refund_result(1, Err(near_sdk::PromiseError::Failed)));
+    let ticket = contract
+        .get_ticket("1-1".to_string())
+        .expect("ticket exists");
+    assert_eq!(ticket.status, TicketStatus::Active);
+    assert_eq!(ticket.claim, Claim::Refundable);
+    let accounting = contract.get_accounting(1).expect("event exists");
+    assert_eq!(accounting.principal_reserved.0, TOKEN_PRICE);
+    assert_eq!(accounting.refund_pending.0, 0);
+    assert_eq!(contract.total_held, 0, "the NEAR total never counted it");
+    assert_identity_of(&contract, 1);
+    // The same callback again finds nothing.
+    as_callback();
+    assert!(!contract.on_refund_result(1, Err(near_sdk::PromiseError::Failed)));
+    assert_eq!(
+        contract
+            .get_accounting(1)
+            .expect("exists")
+            .principal_reserved
+            .0,
+        TOKEN_PRICE
+    );
+
+    // Once the holder can receive the token, a second claim pays.
+    call_with_gas(ANA, 1, 1_800_000, 100);
+    let _ = contract.claim_refund("1-1".to_string());
+    as_callback();
+    assert!(contract.on_refund_result(2, Ok(())));
+    let ticket = contract
+        .get_ticket("1-1".to_string())
+        .expect("ticket exists");
+    assert_eq!(ticket.status, TicketStatus::Refunded);
+    let accounting = contract.get_accounting(1).expect("event exists");
+    assert_eq!(accounting.refunds_settled.0, TOKEN_PRICE);
+    assert_eq!(accounting.principal_reserved.0, 0);
+    assert_identity_of(&contract, 1);
+}
+
+#[test]
+fn a_token_payout_goes_to_the_organizer_and_its_failure_restores_it() {
+    let mut contract = contract_with_a_token_ticket();
+    call_as(VERIFIER, 1, ENDS);
+    contract.attest_completed(1, None);
+    call_with_gas(ORGANIZER, 1, ENDS + 1, 100);
+    let _ = contract.claim_payout(1);
+    let payment = token_payment();
+    assert_eq!(payment.token, TOKEN);
+    assert_eq!(payment.method, "ft_transfer");
+    assert_eq!(payment.args["receiver_id"], ORGANIZER);
+    assert_eq!(payment.args["amount"], TOKEN_PRICE.to_string());
+    assert_eq!((payment.deposit, payment.gas), (1, GAS_FT_TRANSFER));
+    assert_eq!(payment.callback, "on_payout_result");
+    assert_eq!(contract.total_held, 0);
+
+    as_callback();
+    assert!(!contract.on_payout_result(1, Err(near_sdk::PromiseError::Failed)));
+    let accounting = contract.get_accounting(1).expect("event exists");
+    assert_eq!(accounting.organizer_available.0, TOKEN_PRICE);
+    assert_eq!(accounting.organizer_pending.0, 0);
+    assert_eq!(contract.total_held, 0);
+    assert_identity_of(&contract, 1);
+
+    call_with_gas(ORGANIZER, 1, ENDS + 2, 100);
+    let _ = contract.claim_payout(1);
+    as_callback();
+    assert!(contract.on_payout_result(2, Ok(())));
+    let accounting = contract.get_accounting(1).expect("event exists");
+    assert_eq!(accounting.organizer_settled.0, TOKEN_PRICE);
+    assert_identity_of(&contract, 1);
+}
+
+/// A token claim reserves gas for the token and the callback, so it asks for more than a NEAR
+/// claim, and below that it changes nothing.
+#[test]
+fn a_token_claim_needs_its_own_minimum_gas() {
+    let mut contract = contract_with_a_token_ticket();
+    call_as(ORGANIZER, 1, 1_600_000);
+    contract.cancel_event(1, None);
+    call_with_gas(ANA, 1, 1_700_000, GAS_TOKEN_CLAIM_MIN.as_tgas() - 1);
+    fails_with("ERR_INSUFFICIENT_GAS", || {
+        let _ = contract.claim_refund("1-1".to_string());
+    });
+    let ticket = contract
+        .get_ticket("1-1".to_string())
+        .expect("ticket exists");
+    assert_eq!(ticket.status, TicketStatus::Active);
+    assert!(contract.get_operation(1).is_none());
+    assert_eq!(
+        contract
+            .get_accounting(1)
+            .expect("exists")
+            .principal_reserved
+            .0,
+        TOKEN_PRICE
+    );
+    call_with_gas(ANA, 1, 1_700_000, GAS_TOKEN_CLAIM_MIN.as_tgas());
+    let _ = contract.claim_refund("1-1".to_string());
+    assert!(contract.get_operation(1).is_some());
+}
+
+/// The NEAR total counts NEAR events only, and a NEAR refund never waits for a token event.
+#[test]
+fn near_and_token_events_do_not_share_the_near_total() {
+    let mut contract = contract_with_a_token_ticket();
+    call_as(ORGANIZER, quote_event_budget(3), 1_500_000);
+    let near_event = contract.create_event(terms());
+    let hash = contract.get_event(near_event).expect("exists").terms_hash;
+    call_as(VERIFIER, 1, 1_500_000);
+    contract.accept_verification(near_event, hash);
+    call_as(LUIS, PRICE, 1_500_000);
+    assert_eq!(contract.buy_ticket(near_event), "2-1");
+    assert_eq!(contract.total_held, PRICE);
+
+    call_as(ORGANIZER, 1, 1_600_000);
+    contract.cancel_event(near_event, None);
+    call_as(ORGANIZER, 1, 1_600_000);
+    contract.cancel_event(1, None);
+    call_with_gas(LUIS, 1, 1_700_000, 100);
+    let _ = contract.claim_refund("2-1".to_string());
+    let receipts = near_sdk::test_utils::get_created_receipts();
+    assert_eq!(receipts[0].receiver_id, id(LUIS));
+    assert!(
+        matches!(
+            receipts[0].actions[0],
+            near_sdk::mock::MockAction::Transfer { .. }
+        ),
+        "a NEAR refund is a native transfer"
+    );
+    assert_eq!(contract.total_held, 0);
+    call_with_gas(ANA, 1, 1_700_000, 100);
+    let _ = contract.claim_refund("1-1".to_string());
+    assert_eq!(contract.total_held, 0);
+    assert_identity_of(&contract, 1);
+    assert_identity_of(&contract, near_event);
+}
