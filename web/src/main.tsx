@@ -7,6 +7,7 @@ import { createNearConnectWallet } from './lib/near/connector';
 import { type AppServices, createFixtureServices, viewerTimeZone } from './services';
 import './styles/tokens.css';
 import './styles/app.css';
+import './styles/landing.css';
 
 function liveServices(contractId: string, rpcUrls: string[]): AppServices {
   const rpc = createRpc(rpcUrls);

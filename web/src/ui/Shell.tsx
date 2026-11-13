@@ -2,7 +2,7 @@ import { APP_NAME } from '@ticket-escrow/client';
 import type { ReactNode } from 'react';
 import { useWallet } from '../lib/near/useWallet';
 import { DEMO_ACCOUNTS, isFixtureWallet } from '../lib/near/wallet';
-import { Link } from '../lib/router';
+import { Link, usePath } from '../lib/router';
 import { useServices } from '../services';
 import { AccountLink } from './AccountLink';
 
@@ -16,12 +16,14 @@ const NAV: Array<{ to: string; label: string }> = [
 export function Shell({ children }: { children: ReactNode }) {
   const { fixtureMode, network, wallet, contractId } = useServices();
   const { accountId, signIn, signOut } = useWallet();
+  // The landing gets the floating header; every other page keeps the plain one.
+  const floating = usePath() === '/';
   return (
     <>
       <a className="skip-link" href="#main">
         Skip to content
       </a>
-      <header className="site-header">
+      <header className={floating ? 'site-header site-header-floating' : 'site-header'}>
         <Link to="/" className="wordmark">
           {APP_NAME}
         </Link>
@@ -50,10 +52,7 @@ export function Shell({ children }: { children: ReactNode }) {
       </header>
       {fixtureMode && (
         <div className="demo-banner">
-          <p>
-            Demo data: nothing on this page is on chain. Set VITE_CONTRACT_ID to read the testnet
-            contract.
-          </p>
+          <p>Demo data: nothing on this page is on chain.</p>
           {isFixtureWallet(wallet) && (
             <label className="demo-account">
               Demo account
