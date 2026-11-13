@@ -44,7 +44,10 @@ pub use crate::accounting::{Ledger, STORAGE_BYTES_PER_EVENT, STORAGE_BYTES_PER_T
 pub use crate::currency::{MAX_DECIMALS, MAX_SYMBOL_BYTES, MAX_TOKENS, TokenSpec};
 pub use crate::errors::Code;
 pub use crate::events::{EventTerms, Outcome, OutcomeReason};
-pub use crate::settlement::{GAS_CLAIM_MIN, GAS_FOR_CALLBACK, OperationKind, OperationView};
+pub use crate::settlement::{
+    GAS_CLAIM_MIN, GAS_FOR_CALLBACK, GAS_FT_TRANSFER, GAS_TOKEN_CLAIM_MIN, OperationKind,
+    OperationView,
+};
 pub use crate::tickets::{
     GAS_FOR_RESOLVE_TRANSFER, GAS_TRANSFER_CALL_MIN, HistoryEntry, HistoryKind, TicketStatus,
 };

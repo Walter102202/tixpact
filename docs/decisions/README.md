@@ -74,3 +74,4 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | The token list given to `new` is checked strictly (`ERR_LIMIT` over 4, `ERR_INVALID_TERMS` otherwise); the currency is stored once, in the event | `2026-11-13-token-list-checks-at-new.md` |
 | 2026-11-13 | The ticket's metadata is derived when read: the web's claim words, a title cut at 26 characters, escaped text, an image under 2 KB | `2026-11-13-the-ticket-draws-its-state.md` |
 | 2026-11-13 | The token tests read interface v2 strictly where money moves, make one check fail at a time, and never accept a right restored after a payment | `2026-11-13-token-tests-read-the-interface-this-way.md` |
+| 2026-11-13 | Token payments go through the v1 reserve-first path with `ft_transfer`; `ft_on_transfer` checks its caller first; a token claim needs 60 Tgas; a listed token is trusted | `2026-11-13-token-payments-share-the-settlement-path.md` |

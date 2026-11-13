@@ -16,12 +16,13 @@ use near_contract_standards::non_fungible_token::metadata::{
 };
 use near_contract_standards::non_fungible_token::{Token, TokenId};
 use near_sdk::json_types::U128;
+use near_sdk::serde::Deserialize;
 use near_sdk::{AccountId, Gas, PromiseOrValue, env, near, serde_json};
 
 use crate::accounting::add;
 use crate::display;
 use crate::errors::{Code, ensure, ensure_one_yocto, ensure_text_fits, fail};
-use crate::events::Outcome;
+use crate::events::{EventRecord, Outcome};
 use crate::log;
 use crate::{Contract, ContractExt, HISTORY_CAP, MAX_MEMO_BYTES, MAX_MSG_BYTES, MAX_PAGE};
 
@@ -98,6 +99,13 @@ impl Ticket {
             at_ms,
         });
     }
+}
+
+/// The `msg` of a purchase paid in a token: `{"event_id":<id>}`, nothing else.
+#[derive(Deserialize)]
+#[serde(crate = "near_sdk::serde", deny_unknown_fields)]
+struct PurchaseMessage {
+    event_id: u32,
 }
 
 /// `"<event_id>-<serial>"`.
@@ -234,24 +242,18 @@ impl Contract {
             .filter_map(|index| ids.get(index))
             .collect()
     }
-}
 
-#[near]
-impl Contract {
-    /// Buys the next ticket of an event priced in NEAR for exactly its price. The buyer is its first
-    /// holder; the whole deposit is the ticket's principal and nothing is refunded by the mint
-    /// (`t17`). An event priced in a token is bought through `ft_transfer_call` on that token.
-    #[payable]
-    pub fn buy_ticket(&mut self, event_id: u32) -> TokenId {
-        let buyer = env::predecessor_account_id();
+    /// Sells the next ticket of `event` to `buyer`, who paid `paid` in the event's currency. Rule
+    /// R4 and the exact price are checked here, for both ways in (`buy_ticket` and
+    /// `ft_on_transfer`), after each has checked the currency.
+    fn sell_ticket(
+        &mut self,
+        event_id: u32,
+        mut event: EventRecord,
+        buyer: &AccountId,
+        paid: u128,
+    ) -> TokenId {
         let now_ms = env::block_timestamp_ms();
-        let deposit = env::attached_deposit().as_yoctonear();
-        let mut event = self.load_event(event_id);
-        ensure(
-            event.currency.is_none(),
-            Code::WrongCurrency,
-            "this event is priced in a token: buy it with ft_transfer_call on that token",
-        );
         ensure(
             event.outcome == Outcome::Unresolved,
             Code::AlreadyResolved,
@@ -273,23 +275,26 @@ impl Contract {
             "every ticket of this event is sold",
         );
         ensure(
-            deposit == event.price,
+            paid == event.price,
             Code::WrongDeposit,
-            "attach exactly the ticket price",
+            "pay exactly the ticket price",
         );
 
         event.sold += 1;
         let serial = event.sold;
         let token_id = token_id_for(event_id, serial);
-        event.ledger.record_purchase(deposit);
-        self.total_held = add(self.total_held, deposit);
+        event.ledger.record_purchase(paid);
+        // A token keeps its own balance: only NEAR counts in the NEAR liquidity check.
+        if event.currency.is_none() {
+            self.total_held = add(self.total_held, paid);
+        }
 
         // `None` as refund account: the standard helper would otherwise send back everything
         // above the storage cost, which here is the ticket's principal.
         self.tokens
             .internal_mint_with_refund(token_id.clone(), buyer.clone(), None, None);
         NftMint {
-            owner_id: &buyer,
+            owner_id: buyer,
             token_ids: &[&token_id],
             memo: None,
         }
@@ -298,17 +303,36 @@ impl Contract {
         let mut ticket = Ticket {
             event_id,
             serial,
-            principal: deposit,
+            principal: paid,
             status: TicketStatus::Active,
             pending_operation_id: None,
             history: Vec::new(),
             history_dropped: 0,
         };
-        ticket.record(HistoryKind::Purchased, &buyer, now_ms);
+        ticket.record(HistoryKind::Purchased, buyer, now_ms);
         self.save_ticket(&token_id, ticket);
-        log::ticket_purchased(event_id, &token_id, &buyer, deposit, None);
+        log::ticket_purchased(event_id, &token_id, buyer, paid, event.currency.as_ref());
         self.save_event(event_id, event);
         token_id
+    }
+}
+
+#[near]
+impl Contract {
+    /// Buys the next ticket of an event priced in NEAR for exactly its price. The buyer is its first
+    /// holder; the whole deposit is the ticket's principal and nothing is refunded by the mint
+    /// (`t17`). An event priced in a token is bought through `ft_transfer_call` on that token.
+    #[payable]
+    pub fn buy_ticket(&mut self, event_id: u32) -> TokenId {
+        let event = self.load_event(event_id);
+        ensure(
+            event.currency.is_none(),
+            Code::WrongCurrency,
+            "this event is priced in a token: buy it with ft_transfer_call on that token",
+        );
+        let buyer = env::predecessor_account_id();
+        let paid = env::attached_deposit().as_yoctonear();
+        self.sell_ticket(event_id, event, &buyer, paid)
     }
 
     /// Buys the next ticket of an event priced in a token. The token contract calls it while it
@@ -316,8 +340,29 @@ impl Contract {
     /// the first holder. Returns `"0"`: the whole amount is kept. Every rejection panics, so the
     /// token returns the whole amount to the buyer.
     pub fn ft_on_transfer(&mut self, sender_id: AccountId, amount: U128, msg: String) -> U128 {
-        let _ = (sender_id, amount, msg);
-        env::panic_str("not implemented")
+        // Anyone can call this method. Only a listed token's word that it received `amount`
+        // counts, so the caller is checked before anything else.
+        let token = env::predecessor_account_id();
+        ensure(
+            self.token_spec(&token).is_some(),
+            Code::WrongCurrency,
+            "only a token listed in get_config can pay for a ticket",
+        );
+        ensure_text_fits(Some(&msg), MAX_MSG_BYTES, "the msg");
+        let PurchaseMessage { event_id } = serde_json::from_str(&msg).unwrap_or_else(|_| {
+            fail(
+                Code::BadMessage,
+                "msg must be {\"event_id\":<id>} and nothing else",
+            )
+        });
+        let event = self.load_event(event_id);
+        ensure(
+            event.currency.as_ref() == Some(&token),
+            Code::WrongCurrency,
+            "this event is not priced in this token",
+        );
+        self.sell_ticket(event_id, event, &sender_id, amount.0);
+        U128(0)
     }
 }
 

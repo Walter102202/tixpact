@@ -5,7 +5,12 @@
 //! `*_requested` event, then the transfer with a private callback. The callback settles the
 //! operation if the transfer arrived and restores the right if it failed; either way it removes
 //! the operation. Nothing is retried on a timer.
+//!
+//! The transfer is the only step that depends on the currency (interface v2): a native transfer
+//! for NEAR, `ft_transfer` on the token for an event priced in a token. Everything else, the
+//! callbacks included, is the same code for both.
 
+use near_contract_standards::fungible_token::core::ext_ft_core;
 use near_contract_standards::non_fungible_token::TokenId;
 use near_sdk::json_types::U128;
 use near_sdk::{AccountId, Gas, NearToken, Promise, PromiseError, env, near};
@@ -32,6 +37,15 @@ pub const GAS_FOR_CALLBACK: Gas = if cfg!(feature = "fault-injection") {
 /// first, `docs/gas.md`), rounded up to the next multiple of 10 Tgas. Below it the call fails as a
 /// whole (Review Focus 3).
 pub const GAS_CLAIM_MIN: Gas = Gas::from_tgas(40);
+
+/// Static gas of the `ft_transfer` that pays a refund or a payout of an event priced in a token.
+/// Re-measured in C7 (`docs/gas.md`).
+pub const GAS_FT_TRANSFER: Gas = Gas::from_tgas(20);
+
+/// Least prepaid gas a claim on an event priced in a token accepts: besides the callback's static
+/// gas it reserves `GAS_FT_TRANSFER` for the token. Same rule as `GAS_CLAIM_MIN`; re-measured in
+/// C7.
+pub const GAS_TOKEN_CLAIM_MIN: Gas = Gas::from_tgas(60);
 
 /// What an operation in flight pays.
 #[near(serializers = [borsh, json])]
@@ -70,11 +84,23 @@ pub struct OperationView {
     pub started_at_ms: u64,
 }
 
-fn ensure_claim_gas() {
+/// The least gas a claim on an event priced in `currency` needs. Checked before anything is
+/// written.
+fn ensure_claim_gas(currency: Option<&AccountId>) {
+    let (minimum, sentence) = match currency {
+        None => (
+            GAS_CLAIM_MIN,
+            "attach at least 40 Tgas so the payment can be confirmed",
+        ),
+        Some(_) => (
+            GAS_TOKEN_CLAIM_MIN,
+            "attach at least 60 Tgas so the token payment can be sent and confirmed",
+        ),
+    };
     ensure(
-        env::prepaid_gas() >= GAS_CLAIM_MIN,
+        env::prepaid_gas() >= minimum,
         Code::InsufficientGas,
-        "attach at least 40 Tgas so the payment can be confirmed",
+        sentence,
     );
 }
 
@@ -110,24 +136,38 @@ impl Contract {
         );
     }
 
-    /// A transfer of `amount` to `recipient_id`, then `callback` on this contract.
-    fn transfer_then(recipient_id: AccountId, amount: u128, callback: Promise) -> Promise {
-        Promise::new(recipient_id)
-            .transfer(NearToken::from_yoctonear(amount))
-            .then(callback)
+    /// A transfer of `amount` of `currency` to `recipient_id`, then `callback` on this
+    /// contract. NEAR goes by native transfer. A token goes by `ft_transfer` on the token, with the
+    /// 1 yoctoNEAR the claimant attached (the standard requires it) and `GAS_FT_TRANSFER`; a
+    /// recipient the token does not know makes it fail, and the callback restores the right.
+    fn transfer_then(
+        currency: Option<AccountId>,
+        recipient_id: AccountId,
+        amount: u128,
+        callback: Promise,
+    ) -> Promise {
+        let transfer = match currency {
+            None => Promise::new(recipient_id).transfer(NearToken::from_yoctonear(amount)),
+            Some(token) => ext_ft_core::ext(token)
+                .with_attached_deposit(NearToken::from_yoctonear(1))
+                .with_static_gas(GAS_FT_TRANSFER)
+                .ft_transfer(recipient_id, U128(amount), None),
+        };
+        transfer.then(callback)
     }
 }
 
 #[near]
 impl Contract {
     /// The holder claims the refund of a ticket of a refundable event: exactly its principal, to
-    /// the account that holds it now. If the deadline passed without an outcome, the event is
-    /// expired first. 1 yoctoNEAR and at least 40 Tgas. Resolves to `true` once the transfer is
-    /// confirmed, `false` if it failed and the right was restored.
+    /// the account that holds it now, in the event's currency. If the deadline passed without an
+    /// outcome, the event is expired first. 1 yoctoNEAR and at least 40 Tgas, 60 Tgas for an event
+    /// priced in a token (the 1 yoctoNEAR goes on to its `ft_transfer`). Resolves to `true` once
+    /// the transfer is confirmed, `false` if it failed and the right was restored.
     #[payable]
     pub fn claim_refund(&mut self, token_id: TokenId) -> Promise {
         ensure_one_yocto();
-        ensure_claim_gas();
+        ensure_claim_gas(None);
         let caller = env::predecessor_account_id();
         let now_ms = env::block_timestamp_ms();
         let mut ticket = self.load_ticket(&token_id);
@@ -148,6 +188,8 @@ impl Contract {
         }
         let event_id = ticket.event_id;
         let mut event = self.load_event(event_id);
+        // A token payment reserves more gas: checked again once the currency is known.
+        ensure_claim_gas(event.currency.as_ref());
         Self::expire_if_due(event_id, &mut event, &caller, now_ms);
         ensure(
             event.outcome == Outcome::Refundable,
@@ -157,7 +199,9 @@ impl Contract {
 
         let amount = ticket.principal;
         event.ledger.reserve_refund(amount);
-        self.total_held = sub(self.total_held, amount);
+        if event.currency.is_none() {
+            self.total_held = sub(self.total_held, amount);
+        }
         let operation = Operation {
             kind: OperationKind::Refund,
             event_id,
@@ -173,7 +217,10 @@ impl Contract {
         let currency = event.currency.clone();
         self.save_ticket(&token_id, ticket);
         self.save_event(event_id, event);
-        self.ensure_liquidity(amount);
+        // A token claim moves no NEAR held for others: the 1 yoctoNEAR it forwards came with it.
+        if currency.is_none() {
+            self.ensure_liquidity(amount);
+        }
         log::settlement(
             "refund_requested",
             operation_id,
@@ -185,19 +232,22 @@ impl Contract {
             .with_static_gas(GAS_FOR_CALLBACK)
             .with_unused_gas_weight(0)
             .on_refund_result(operation_id);
-        Self::transfer_then(holder, amount, callback)
+        Self::transfer_then(currency, holder, amount, callback)
     }
 
-    /// The organizer claims everything the attestation made available, in one transfer.
-    /// 1 yoctoNEAR and at least 40 Tgas. Resolves to `true` once the transfer is confirmed,
-    /// `false` if it failed and the amount is available again.
+    /// The organizer claims everything the attestation made available, in one transfer in the
+    /// event's currency. 1 yoctoNEAR and at least 40 Tgas, 60 Tgas for an event priced in a token.
+    /// Resolves to `true` once the transfer is confirmed, `false` if it failed and the amount is
+    /// available again.
     #[payable]
     pub fn claim_payout(&mut self, event_id: u32) -> Promise {
         ensure_one_yocto();
-        ensure_claim_gas();
+        ensure_claim_gas(None);
         let caller = env::predecessor_account_id();
         let now_ms = env::block_timestamp_ms();
         let mut event = self.load_event(event_id);
+        // A token payment reserves more gas: checked again once the currency is known.
+        ensure_claim_gas(event.currency.as_ref());
         ensure(
             caller == event.organizer_id,
             Code::Unauthorized,
@@ -220,7 +270,9 @@ impl Contract {
         );
 
         let amount = event.ledger.reserve_payout();
-        self.total_held = sub(self.total_held, amount);
+        if event.currency.is_none() {
+            self.total_held = sub(self.total_held, amount);
+        }
         let operation = Operation {
             kind: OperationKind::Payout,
             event_id,
@@ -233,7 +285,9 @@ impl Contract {
         event.payout_operation_id = Some(operation_id);
         let currency = event.currency.clone();
         self.save_event(event_id, event);
-        self.ensure_liquidity(amount);
+        if currency.is_none() {
+            self.ensure_liquidity(amount);
+        }
         log::settlement(
             "payout_requested",
             operation_id,
@@ -245,7 +299,7 @@ impl Contract {
             .with_static_gas(GAS_FOR_CALLBACK)
             .with_unused_gas_weight(0)
             .on_payout_result(operation_id);
-        Self::transfer_then(caller, amount, callback)
+        Self::transfer_then(currency, caller, amount, callback)
     }
 
     /// Callback of `claim_refund`. Settles the refund if the transfer arrived; restores the
@@ -281,7 +335,9 @@ impl Contract {
             );
         } else {
             event.ledger.restore_refund(operation.amount);
-            self.total_held = add(self.total_held, operation.amount);
+            if event.currency.is_none() {
+                self.total_held = add(self.total_held, operation.amount);
+            }
             ticket.status = TicketStatus::Active;
             ticket.record(HistoryKind::RefundFailed, &operation.recipient_id, now_ms);
             log::settlement(
@@ -324,7 +380,9 @@ impl Contract {
             );
         } else {
             event.ledger.restore_payout(operation.amount);
-            self.total_held = add(self.total_held, operation.amount);
+            if event.currency.is_none() {
+                self.total_held = add(self.total_held, operation.amount);
+            }
             log::settlement(
                 "payout_failed",
                 operation_id,
