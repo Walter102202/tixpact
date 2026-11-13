@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react';
 import { EventPage } from './features/events/EventPage';
 import { HomePage } from './features/events/HomePage';
 import { OrganizerPage } from './features/organizer/OrganizerPage';
+import { DoorPage } from './features/pass/DoorPage';
+import { PassPage } from './features/pass/PassPage';
 import { ProofPage } from './features/proof/ProofPage';
 import { TicketPage } from './features/tickets/TicketPage';
 import { TicketsPage } from './features/tickets/TicketsPage';
@@ -43,6 +45,9 @@ function Route({ path }: { path: string }) {
   const event = matchPath('/events/:id', path);
   if (event?.id) return <EventPage key={event.id} id={event.id} />;
   if (matchPath('/tickets', path)) return <TicketsPage />;
+  const pass = matchPath('/tickets/:id/pass', path);
+  if (pass?.id) return <PassPage key={pass.id} id={pass.id} />;
+  if (matchPath('/door', path)) return <DoorPage />;
   const ticket = matchPath('/tickets/:id', path);
   if (ticket?.id) return <TicketPage key={ticket.id} id={ticket.id} />;
   if (matchPath('/organizer', path)) return <OrganizerPage />;

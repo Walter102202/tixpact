@@ -21,6 +21,35 @@ export function usePath(): string {
   );
 }
 
+function subscribeHash(onChange: () => void): () => void {
+  window.addEventListener('hashchange', onChange);
+  const off = subscribe(onChange);
+  return () => {
+    window.removeEventListener('hashchange', onChange);
+    off();
+  };
+}
+
+/** The URL fragment, `#…` or ''. Data in it (an entry pass) never reaches a server. */
+export function useHash(): string {
+  return useSyncExternalStore(
+    subscribeHash,
+    () => window.location.hash,
+    () => '',
+  );
+}
+
+/** Replaces the fragment without a new history entry, and tells `useHash`. */
+export function replaceHash(hash: string): void {
+  const { pathname, search } = window.location;
+  window.history.replaceState(
+    null,
+    '',
+    `${pathname}${search}${hash ? `#${hash.replace(/^#/, '')}` : ''}`,
+  );
+  window.dispatchEvent(new Event(NAVIGATE));
+}
+
 export function navigate(to: string): void {
   window.history.pushState(null, '', to);
   window.dispatchEvent(new Event(NAVIGATE));

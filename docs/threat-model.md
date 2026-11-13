@@ -6,14 +6,14 @@ Written before any contract code. It answers one question: who could keep or tak
 
 | Asset | Where it lives | Who may move it |
 |---|---|---|
-| The principal `P` of each ticket (the price paid) | The contract's balance, tracked per event | To the current holder if the event is `Refundable`; to the organizer if it is `Completed`. Nobody else, never both. |
+| The principal `P` of each ticket (the price paid) | The contract's balance in the event's currency (NEAR, or its balance in the event's token), tracked per event | To the current holder if the event is `Refundable`; to the organizer if it is `Completed`. Nobody else, never both. |
 | The right to that principal | The ticket token (NEP-171); the token's owner is the only record of who holds it | The holder, by transferring the ticket under R6 |
 | The event outcome | Contract state, written once | The accepted verifier (complete), the organizer or the verifier (cancel), anyone after the deadline (expire) |
 | Each event's operating budget (prepaid storage) | Contract balance, tracked per event | Nobody. It pays for storage only. |
 
 ## Who can attack
 
-A previous holder, the current holder, a buyer, the organizer, the verifier, a contract that receives a ticket, any account calling any method, and whoever holds a key of the contract account.
+A previous holder, the current holder, a buyer, the organizer, the verifier, a contract that receives a ticket, a token or an account posing as one, any account calling any method, and whoever holds a key of the contract account.
 
 ## Threats and what stops them
 
@@ -64,6 +64,21 @@ A previous holder, the current holder, a buyer, the organizer, the verifier, a c
 | C2 | Re-enter during the transfer: claim the refund or move the ticket before the transfer resolves | The ticket is locked before the transfer and until its resolver runs | R8 | `t12_transfer_call_receiver_outcomes` (`reenter`) |
 | C3 | Stretch the transfer across the start time to end up with a ticket moved late | The resolver finishes the transfer it started and clears the lock regardless of time | R6, R8 | `t13_resolver_ignores_time_window` |
 
+### A token, or an account posing as one
+
+Events can be priced in a token (NEP-141) from a list fixed at deployment. A purchase reaches the contract as a call from the token (`ft_on_transfer`), and refunds and payouts leave as calls to it (`ft_transfer`).
+
+| # | Attack | What stops it | Rule | Test |
+|---|---|---|---|---|
+| T1 | Call `ft_on_transfer` directly, or from a worthless token, to be issued a ticket without paying the event's currency | The caller must be the event's own token; a token the deployment does not list cannot price an event at all | R4 | `t26_only_the_event_currency_buys` |
+| T2 | Pay a token-priced event with NEAR, or a NEAR event with a token | `buy_ticket` rejects a token-priced event and `ft_on_transfer` rejects a NEAR one | R4 | `t26_only_the_event_currency_buys` |
+| T3 | Send less than the price, more than the price or a message that does not name an event, and keep a ticket or lose the difference | Anything but exactly the price with a readable message fails, and the token returns the whole amount to the buyer | R1, R4 | `t25_token_purchase_reserves_exact_price` |
+| T4 | Hold the ticket from an account the token cannot pay (not registered with it), so the refund leaves the books and never arrives | The token rejects the transfer and the callback restores the right exactly once; the holder registers and claims again | R7 | `t28_unregistered_holder_gets_the_right_back_once` |
+| T5 | The token fails a payout, or answers nonsense, to make the contract pay twice or lose track of a payment | Reserve first: the right is debited before the call and restored only by the private callback on a confirmed failure. A second claim during the call finds nothing | R7, R8 | `t29_token_payout_failure_paths`, `t31_a_failing_token_never_pays_twice` |
+| T6 | Use a payout in one currency to drain what is held in another | Each event's ledger is in one currency and a payment is made in that currency only | R9 | `t30_currencies_do_not_share_money` |
+| T7 | Change an event's currency after the verifier accepted it | The currency is part of the terms the verifier's acceptance covers, and terms never change | R5 | `t33_terms_hash_covers_the_currency` |
+| T8 | Add a token after deployment, for example one the attacker can mint | There is no method to add one: the list is given once, at `new` | R10 | `scripts/verify-deployment.mjs` prints the list |
+
 ### Any account
 
 | # | Attack | What stops it | Rule | Test |
@@ -80,6 +95,38 @@ A previous holder, the current holder, a buyer, the organizer, the verifier, a c
 |---|---|---|---|---|
 | K1 | Replace the code, or delete the account and keep its balance | The final deployment has no access keys, and the code has no owner, admin or upgrade method | R10 | `scripts/verify-deployment.mjs` (T23) |
 
+## Entry pass
+
+A pass moves no money, so it is outside the rules above; this section says what it proves and what it does not. A pass is a NEP-413 message signed by the holder's wallet: `Entry pass`, the contract, the ticket and the time it was signed, with the contract as the NEP-413 recipient and the time again in the first 8 bytes of the nonce. Nothing is sent to the chain or to a server. The door page (`/door`) and `node scripts/pass.mjs verify` run the same five checks (`checkPass`, `packages/client/src/pass.ts`), reading the chain at `final` at the moment of the scan.
+
+**What an admitted pass proves:** within the last five minutes, someone who controls a full-access key of the account named in the pass signed this message for this contract and this ticket; and right now that account holds the ticket, which is active and not refunded. It does not prove who is standing at the door.
+
+| # | Attack | What stops it | Check | Test (`packages/client/src/pass.test.ts`) |
+|---|---|---|---|---|
+| E1 | Change the ticket, the time or the nonce of a pass | The signature is verified over the message rebuilt from the pass, and the nonce must start with the time | `signature` | "fails the signature when the ticket in the message changes", "… the time of issue changes", "… the nonce changes", "… the signature changes" |
+| E2 | Show a pass made for a look-alike contract | The door rebuilds the message with its own contract as the recipient; a pass naming another contract fails | `signature` | "fails the signature when the recipient changes", "… names another contract than the door checks" |
+| E3 | Put another account's name on someone's pass | NEP-413 does not sign the account; the signing key must be a full-access key of the account named, read on chain | `key` | "fails the key, not the signature, when the account changes" |
+| E4 | Sell or give the ticket away, then still use a pass signed before | The holder is read at the scan, not at signing | `holder` | "holder: the ticket was transferred after the pass was signed" |
+| E5 | Use a ticket that was refunded or is being refunded | The ticket must be `Active` and its claim not `Refunded` | `ticket` | "ticket: the ticket was refunded", "ticket: a refund or a transfer to a contract is in flight" |
+| E6 | Sign with a key that was deleted, for example after a phone was lost | The access key is read at the scan; a deleted key fails | `key` | "key: the key was deleted after signing" |
+| E7 | Sign with a function-call key, which apps the holder signed into may hold | Only a full-access key speaks for the account (as NEP-413 says) | `key` | "key: a function-call key signed it" |
+| E8 | Replay an old pass | A pass admits for five minutes after signing, and one dated more than a minute ahead of the checking device is refused | `fresh` | "fresh: a pass six minutes old", "fresh: a pass dated two minutes ahead of this device", "fresh: the edges are inclusive" |
+| E9 | Scan while the RPC is down or answers garbage | A read that fails fails the checks that need it; the verdict is "Do not admit" | all | "a chain that cannot be read fails the checks it answers, and still returns all five" |
+| E10 | Forge a signature for an account whose key has small order, such as the implicit account `000…0` (its full-access key is the all-zero key) | Signatures are verified under RFC 8032's strict rules (`@noble/curves`, `zip215: false`), which refuse small-order keys; near-api-js's own `verify` (ZIP-215) would accept this forgery | `signature` | "refuses a signature forged for a small-order key, which near-api-js would accept" |
+| E11 | Hand the checker something that is not a pass, or check with a clock that reads as no time | Anything that does not match the pass's shape fails all five checks without reading the chain; a time now that is not a finite number fails `fresh` | all, `fresh` | "fails all five, without reading the chain or throwing, for a pass that is not a pass", "fails fresh when the time now is not a finite number" |
+
+The signature step accepts the known-answer vector signed by near-cli-rs 0.31.1, not by this code ("admits the pass when the chain agrees"), and the hash matches what near-api-js signs ("is the hash near-api-js signs for a NEP-413 message").
+
+What a pass does not stop:
+
+1. **A screenshot or link shared within five minutes.** Whoever shows it is admitted on any device that has no record of this ticket. A device records the ticket when its verdict is "Admit" (an "Undo" forgets a scan made by mistake); any later pass of that ticket then reads "Do not admit", with "Already admitted on this device at …" under it.
+2. **Duplicate entry is caught only per device, and not only within five minutes.** The holder can sign a new pass at any time, and can enter, then transfer the ticket so that the next holder signs a valid pass of their own. The record of admissions is per ticket but lives in one browser's storage (demo runs keep their own): another device, or the same browser after its data is cleared, admits again. A shared record needs a server or a transaction at the door, which this design does not have.
+3. **Lending the unlocked phone or the wallet.** Whoever holds them can sign a pass and is admitted: a pass proves control of a key, not who is standing at the door.
+4. **A pass the agent shows.** `show_entry_pass` returns a bearer pass: the model, and anyone who reads the conversation, can show it at the door for five minutes.
+5. **The attendant's clock.** Freshness is judged by the checking device's clock. A clock far ahead turns valid passes into "expired"; a clock far behind accepts passes older than five minutes. The sentence a failed `fresh` check shows tells the attendant to check the clock.
+6. **A key deleted after the scan.** The checks hold at the moment of the scan, not after it.
+7. **A checker the holder chooses.** A QR code or a link names a site, and the holder makes it. They can serve this public code in demo mode from their own domain, point the code at its `/door`, and an attendant who opens it reads a verdict in the real site's words. What stops it is the attendant, not the page: they open the door page from their own bookmark and scan the code with that page's own scanner (which ignores the site the code names) or paste the pass there, as the page tells them, and the page shows the address it checks from. A copy can show any address and any words, so the bookmark and the browser's address bar are the defense; the site's own demo mode never shows a bare "Admit". A lying RPC endpoint can also say "Admit" for anything; `scripts/pass.mjs verify` with an RPC of one's choice is an independent check (Limit 7 below).
+
 ## Limits
 
 What this design does not solve. The README repeats these in plain words.
@@ -90,8 +137,11 @@ What this design does not solve. The README repeats these in plain words.
 
    The transfer resolver has the same limit. If `nft_resolve_transfer` fails, the receiver contract holds the ticket and its status stays `TransferPending` for good: nobody can claim its refund or move it, and if the event becomes refundable its principal stays in the contract. Its static gas covers twice the published fee for reading the longest answer a receiver can send (4 MiB) plus its own measured work (`docs/gas.md`), and `t12_transfer_call_receiver_outcomes` returns a ticket after a 4 MiB answer. Only a protocol change that raised those costs past that margin could cause it.
 4. **A lost key.** Whoever loses access to the account that holds a ticket loses the refund. Nobody can reassign it.
-5. **A refund is the same amount of NEAR, not the same value.** The price of NEAR can move between purchase and refund.
+5. **A refund is the same amount of the same currency, not the same value.** The price of NEAR can move between purchase and refund. An event priced in a dollar token avoids that, and takes on limit 10 instead.
 6. **Until the keys are deleted.** Before the final deployment the deployer's key can change the code. The proof page and `scripts/verify-deployment.mjs` show the key list so anyone can check it is empty.
 7. **The web is not the contract.** A hostile copy of the site could show false states. Every claim can be checked without the site: `scripts/direct-calls.sh` runs the whole flow from the command line, and each screen links to the explorer.
 8. **Not audited, testnet only.** The storage and gas constants are measured, not proven, and protocol parameters can change.
-9. **Out of scope.** Entry control at the venue, proof that a holder attended, resale price limits and identity checks.
+9. **Out of scope.** Proof that a holder attended, resale price limits and identity checks. Entry control is only the five-minute pass above ("Entry pass"), with its own limits.
+10. **A token is trusted.** A token is another contract, and the ticket contract believes what it answers. A token that says a transfer failed after paying, or that it paid when it did not, cannot be caught from inside the contract. Real dollar tokens also have an issuer who can freeze an account or change the token's code; if the contract's balance were frozen, refunds in that token would fail and stay claimable, but nobody could force the issuer. This is why the list of tokens is fixed at deployment and shown to buyers. The token on testnet, `tUSD`, has no owner and anyone can mint it, so it is worth nothing.
+11. **For a token the contract cannot check its balance before paying.** With NEAR it refuses a payment that would touch money held for others. With a token it learns of a shortfall only when the transfer fails, and then restores the right. The per-event ledgers still keep one event from being credited with another's money.
+12. **An account the token does not know cannot be paid until it registers.** The claim pays nothing and loses nothing; registering costs about a thousandth of a NEAR. A holder who never registers is never paid.

@@ -1,5 +1,5 @@
 import { parseNear } from './format.js';
-import type { AccountProof, Reader } from './reader.js';
+import { type AccountProof, groupVerifierOf, type Reader } from './reader.js';
 import {
   type AccountingView,
   AccountingViewSchema,
@@ -505,6 +505,8 @@ export interface FixtureData {
    * registered account (smallest units). An account without an entry is not registered.
    */
   tokens: Record<string, { minDeposit: string; balances: Record<string, string> }>;
+  /** What `get_policy` answers per account (Sputnik DAO verifiers); every other account has none. */
+  policies?: Record<string, unknown>;
 }
 
 /** One coherent chain: the contract's balances follow from the events it holds. */
@@ -638,6 +640,7 @@ export function createFixtureReader(data: FixtureData = FIXTURES): Reader {
         minDeposit: parsed(YoctoSchema, ledger.minDeposit),
       };
     },
+    readGroupVerifier: async (accountId) => groupVerifierOf(data.policies?.[accountId]),
   };
 }
 

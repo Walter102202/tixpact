@@ -3,14 +3,18 @@
 // It signs nothing and needs no key.
 //
 //   pnpm install --frozen-lockfile && pnpm --filter @ticket-escrow/client build
-//   node scripts/verify-deployment.mjs <contract-account> [--wasm <file>] [--allow-keys]
+//   node scripts/verify-deployment.mjs <contract-account> [--wasm <file>] [--tokens <a,b>] [--allow-keys]
 //
 // Prints the account's code hash, the number of access keys, its balance and the principal the
-// contract says it holds. Exits non-zero when:
+// contract says it holds, in NEAR and in each token it accepts. Exits non-zero when:
 //   - the account has an access key (somebody could still replace the code), unless --allow-keys;
 //   - the deployed code is a test build with fault injection;
 //   - --wasm is given and the deployed code hash is not the SHA-256 of that file;
-//   - the balance does not cover the principal the contract reports as held.
+//   - --tokens is given and the tokens the contract accepts are not exactly that list (the list is
+//     fixed when the contract is created; `--tokens ""` means it must accept NEAR only);
+//   - a balance does not cover the principal the contract reports as held in that currency;
+//   - the contract is not registered with a token it accepts (the token would reject every
+//     purchase in it).
 //
 // "Held" is what the contract still owes out of its own balance: each event's reserved principal
 // plus what is available to its organizer. Payments in flight have already left the account and
@@ -18,21 +22,31 @@
 
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { createReader, createRpc, explorerAccountUrl, formatNear } from '@ticket-escrow/client';
+import {
+  createReader,
+  createRpc,
+  explorerAccountUrl,
+  formatAmount,
+  formatNear,
+} from '@ticket-escrow/client';
 import { baseEncode } from 'near-api-js';
 
 const DEFAULT_RPC_URLS = 'https://test.rpc.fastnear.com,https://near-testnet.drpc.org';
 const args = process.argv.slice(2);
 const wasmFlag = args.indexOf('--wasm');
 const wasmPath = wasmFlag === -1 ? undefined : args[wasmFlag + 1];
+const tokensFlag = args.indexOf('--tokens');
+const expectedTokens =
+  tokensFlag === -1
+    ? undefined
+    : (args[tokensFlag + 1] ?? '').split(',').filter((token) => token !== '');
 const allowKeys = args.includes('--allow-keys');
-const contractId = args.find(
-  (arg, index) => !arg.startsWith('--') && (wasmFlag === -1 || index !== wasmFlag + 1),
-);
+const flagValues = new Set([wasmFlag, tokensFlag].filter((at) => at !== -1).map((at) => at + 1));
+const contractId = args.find((arg, index) => !arg.startsWith('--') && !flagValues.has(index));
 
 if (!contractId) {
   console.error(
-    'usage: node scripts/verify-deployment.mjs <contract-account> [--wasm <file>] [--allow-keys]',
+    'usage: node scripts/verify-deployment.mjs <contract-account> [--wasm <file>] [--tokens <a,b>] [--allow-keys]',
   );
   process.exit(2);
 }
@@ -49,19 +63,31 @@ if (proof.codeHash === '1'.repeat(32)) {
 }
 const config = await reader.getConfig();
 
-let held = 0n;
-let inFlight = 0n;
-let events = 0;
+// One ledger per currency: `null` is NEAR, the rest are the tokens fixed at deployment.
+const ledgers = new Map(
+  [null, ...config.tokens.map((token) => token.account_id)].map((currency) => [
+    currency,
+    { held: 0n, inFlight: 0n, events: 0 },
+  ]),
+);
 for (let from = 0; ; from += config.max_page) {
   const page = await reader.listEvents(from, config.max_page);
   for (const event of page) {
     const books = await reader.getAccounting(event.event_id);
-    held += BigInt(books.principal_reserved) + BigInt(books.organizer_available);
-    inFlight += BigInt(books.refund_pending) + BigInt(books.organizer_pending);
-    events += 1;
+    const ledger = ledgers.get(books.currency);
+    if (ledger === undefined) {
+      problems.push(
+        `Event ${event.event_id} is priced in ${books.currency}, which the contract does not list.`,
+      );
+      continue;
+    }
+    ledger.held += BigInt(books.principal_reserved) + BigInt(books.organizer_available);
+    ledger.inFlight += BigInt(books.refund_pending) + BigInt(books.organizer_pending);
+    ledger.events += 1;
   }
   if (page.length < config.max_page) break;
 }
+const { held, inFlight, events } = ledgers.get(null);
 
 console.log(`Contract        ${contractId}  (${explorerAccountUrl(contractId)})`);
 console.log(`Block height    ${proof.blockHeight} (final)`);
@@ -77,6 +103,35 @@ if (inFlight > 0n) {
     `In flight       ${formatNear(inFlight.toString(), 6)} NEAR, payments not yet confirmed`,
   );
 }
+for (const token of config.tokens) {
+  const ledger = ledgers.get(token.account_id);
+  const unit = { symbol: token.symbol, decimals: token.decimals };
+  const [standing, balance] = await Promise.all([
+    reader.tokenRegistration(token.account_id, contractId),
+    reader.tokenBalance(token.account_id, contractId),
+  ]);
+  console.log(`\nToken           ${token.account_id}  (${explorerAccountUrl(token.account_id)})`);
+  console.log(`Registered      ${standing.registered ? 'yes' : 'NO'}`);
+  console.log(`Balance         ${formatAmount(balance, unit)}`);
+  console.log(
+    `Principal held  ${formatAmount(ledger.held.toString(), unit)} in ${ledger.events} event(s)`,
+  );
+  if (ledger.inFlight > 0n) {
+    console.log(
+      `In flight       ${formatAmount(ledger.inFlight.toString(), unit)}, payments not yet confirmed`,
+    );
+  }
+  if (!standing.registered) {
+    problems.push(
+      `The contract is not registered with ${token.account_id}: the token rejects every purchase in ${token.symbol}.`,
+    );
+  }
+  if (BigInt(balance) < ledger.held) {
+    problems.push(
+      `The ${token.symbol} balance is lower than the principal the contract reports as held in it.`,
+    );
+  }
+}
 
 if (proof.accessKeys > 0 && !allowKeys) {
   problems.push(
@@ -86,8 +141,17 @@ if (proof.accessKeys > 0 && !allowKeys) {
 if (config.fault_injection) {
   problems.push('The deployed code is a test build with fault injection.');
 }
+if (expectedTokens !== undefined) {
+  const accepted = config.tokens.map((token) => token.account_id).sort();
+  if (accepted.join(',') !== [...expectedTokens].sort().join(',')) {
+    const list = (tokens) => (tokens.length === 0 ? 'no token' : tokens.join(', '));
+    problems.push(
+      `The contract accepts ${list(accepted)}; the expected list is ${list(expectedTokens)}.`,
+    );
+  }
+}
 if (BigInt(proof.balance) < held) {
-  problems.push('The balance is lower than the principal the contract reports as held.');
+  problems.push('The NEAR balance is lower than the principal the contract reports as held.');
 }
 if (wasmPath) {
   const local = baseEncode(

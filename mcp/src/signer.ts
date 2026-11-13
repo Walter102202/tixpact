@@ -1,6 +1,7 @@
 import { type ContractCall, parseContractError } from '@ticket-escrow/client';
 import {
   Account,
+  base64Encode,
   baseEncode,
   FailoverRpcError,
   KeyPair,
@@ -28,6 +29,24 @@ export interface AgentSigner {
    * the node accepted it. Rejects with `SendError` when it was not accepted.
    */
   signAndSend(receiverId: string, call: ContractCall): Promise<string>;
+  /**
+   * Signs a NEP-413 message (an entry pass) with the agent's key. It reads and sends nothing: a
+   * NEP-413 signature can never be a transaction. A signer without it cannot show entry passes.
+   */
+  signMessage?(payload: MessageToSign): Promise<SignedMessageText>;
+}
+
+/** A NEP-413 message to sign; `passRequest` from the client builds one for an entry pass. */
+export interface MessageToSign {
+  message: string;
+  nonce: Uint8Array;
+  recipient: string;
+}
+
+/** A NEP-413 signature as wallets return it: the public key `ed25519:<base58>`, the bytes in base64. */
+export interface SignedMessageText {
+  publicKey: string;
+  signature: string;
 }
 
 /** A transaction that was signed but not confirmed as accepted by the node. */
@@ -113,7 +132,9 @@ export function publicKeyOf(secretKey: string): string {
  * locally (so the hash is known before anything is sent) and submits with `waitUntil: 'INCLUDED'`.
  * Before every signature it checks that the provider is on the expected chain.
  */
-export function createNearSigner(options: NearSignerOptions): AgentSigner {
+export function createNearSigner(
+  options: NearSignerOptions,
+): AgentSigner & Required<Pick<AgentSigner, 'signMessage'>> {
   const { accountId, provider } = options;
   const chainId = options.chainId ?? 'testnet';
   let keySigner: KeyPairSigner;
@@ -161,6 +182,10 @@ export function createNearSigner(options: NearSignerOptions): AgentSigner {
 
   return {
     accountId,
+    async signMessage({ message, nonce, recipient }) {
+      const signed = await keySigner.signNep413Message(accountId, { message, nonce, recipient });
+      return { publicKey: signed.publicKey.toString(), signature: base64Encode(signed.signature) };
+    },
     async signAndSend(receiverId, call) {
       await ensureChain();
       const action = nearActions.functionCall(

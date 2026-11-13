@@ -33,6 +33,7 @@ describe('loadConfig', () => {
       agentAccountId: null,
       caps: null,
       hasKey: false,
+      siteUrl: null,
     });
   });
 
@@ -45,6 +46,7 @@ describe('loadConfig', () => {
       agentAccountId: 'agent.testnet',
       caps: { maxPriceYocto: parseNear('1.5'), maxExposureYocto: parseNear('5') },
       hasKey: true,
+      siteUrl: null,
     });
     expect(JSON.stringify(config)).not.toContain(FAKE_KEY);
   });
@@ -137,6 +139,26 @@ describe('loadConfig', () => {
     expect(configError({ ...readOnly, RPC_URLS: 'http://rpc.testnet.near.org' }).message).toContain(
       'not an https URL',
     );
+  });
+});
+
+describe('SITE_URL', () => {
+  it('is where the door links of entry passes point, https or a local address', () => {
+    expect(loadConfig({ ...readOnly, SITE_URL: 'https://tickets.example/' }).siteUrl).toBe(
+      'https://tickets.example/',
+    );
+    expect(loadConfig({ ...readOnly, SITE_URL: 'http://localhost:5173' }).siteUrl).toBe(
+      'http://localhost:5173',
+    );
+    expect(loadConfig({ ...readOnly, SITE_URL: ' ' }).siteUrl).toBeNull();
+  });
+
+  it('refuses anything else, naming the variable', () => {
+    for (const url of ['http://tickets.example', 'javascript:alert(1)', 'tickets.example']) {
+      expect(configError({ ...readOnly, SITE_URL: url }).message, url).toBe(
+        'SITE_URL must be an https URL (or http://localhost) where the web app is served.',
+      );
+    }
   });
 });
 

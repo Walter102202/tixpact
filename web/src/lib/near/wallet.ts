@@ -1,9 +1,35 @@
-import { type ContractCall, type RecordedTx, TX_FIXTURES } from '@ticket-escrow/client';
+import {
+  type ContractCall,
+  demoPassKey,
+  nep413Hash,
+  type RecordedTx,
+  TX_FIXTURES,
+} from '@ticket-escrow/client';
+import { base64Encode } from 'near-api-js';
 
 /** A transaction the wallet says it sent. The chain decides how it ended (`trackTransaction`). */
 export interface SentTx {
   txHash: string;
   signerId: string;
+}
+
+/** A NEP-413 message to sign (an entry pass: `passRequest` in the client package). */
+export interface MessageRequest {
+  message: string;
+  nonce: Uint8Array;
+  recipient: string;
+}
+
+/** The wallet's answer to a message: who signed, with which key, and the signature as it gave it. */
+export interface SignedMessage {
+  accountId: string;
+  publicKey: string;
+  signature: string;
+}
+
+/** The connected wallet cannot sign messages (its manifest says so). */
+export class MessageSigningUnsupported extends Error {
+  override name = 'MessageSigningUnsupported';
 }
 
 /** What the screens need from a wallet. Methods are called directly inside click handlers. */
@@ -14,6 +40,11 @@ export interface WalletPort {
   signOut(): Promise<void>;
   /** Opens the wallet to sign and send one call to the contract. */
   send(call: ContractCall): Promise<SentTx>;
+  /**
+   * Opens the wallet to sign a NEP-413 message; nothing is sent. Absent, or rejecting with
+   * `MessageSigningUnsupported`, when the wallet cannot sign messages.
+   */
+  signMessage?(request: MessageRequest): Promise<SignedMessage>;
 }
 
 /** A wallet for fixture mode and tests: answers with recorded transactions, records every call. */
@@ -21,6 +52,10 @@ export interface FixtureWallet extends WalletPort {
   readonly sent: ContractCall[];
   /** How `send` answers; tests replace it. */
   answer: (call: ContractCall) => Promise<SentTx>;
+  /** Every message the wallet was asked to sign. */
+  readonly messages: MessageRequest[];
+  /** How `signMessage` answers; by default the signed-in demo account's built-in key signs. */
+  answerMessage: (request: MessageRequest) => Promise<SignedMessage>;
   /** Demo only: act as another fixture account without a wallet. */
   signInAs(accountId: string): void;
 }
@@ -93,6 +128,22 @@ export function createFixtureWallet(accountId: string | null = FIXTURE_ACCOUNT):
       if (current === null) throw new Error('Sign in first.');
       wallet.sent.push(call);
       return wallet.answer(call);
+    },
+    messages: [],
+    async answerMessage(request) {
+      if (current === null) throw new Error('Sign in first.');
+      // Demo accounts sign with their built-in keys, which the fixture chain lists as theirs.
+      const key = demoPassKey(current);
+      return {
+        accountId: current,
+        publicKey: key.getPublicKey().toString(),
+        signature: base64Encode(key.sign(nep413Hash(request)).signature),
+      };
+    },
+    async signMessage(request) {
+      if (current === null) throw new Error('Sign in first.');
+      wallet.messages.push(request);
+      return wallet.answerMessage(request);
     },
   };
   return wallet;

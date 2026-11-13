@@ -1,4 +1,4 @@
-import { createReader, createRpc } from '@ticket-escrow/client';
+import { createPassChain, createReader, createRpc } from '@ticket-escrow/client';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
@@ -8,16 +8,19 @@ import { type AppServices, createFixtureServices, viewerTimeZone } from './servi
 import './styles/tokens.css';
 import './styles/app.css';
 import './styles/landing.css';
+import './styles/pass.css';
 
 function liveServices(contractId: string, rpcUrls: string[], faucets: string[]): AppServices {
   const rpc = createRpc(rpcUrls);
+  const reader = createReader({ contractId, rpc });
   return {
     network: 'testnet',
     contractId,
     fixtureMode: false,
-    reader: createReader({ contractId, rpc }),
+    reader,
     txRpc: rpc,
     wallet: createNearConnectWallet({ contractId, rpcUrls }),
+    passChain: createPassChain(reader, rpc),
     timeZone: viewerTimeZone(),
     faucets,
   };

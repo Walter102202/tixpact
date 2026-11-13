@@ -16,13 +16,15 @@ import { useState } from 'react';
 import { money, unitFor } from '../../lib/money';
 import { useTx } from '../../lib/near/useTx';
 import { useWallet } from '../../lib/near/useWallet';
-import { Link } from '../../lib/router';
+import { Link, navigate } from '../../lib/router';
 import { useLoad } from '../../lib/useLoad';
 import { useServices } from '../../services';
 import { AccountLink } from '../../ui/AccountLink';
 import { LoadState } from '../../ui/LoadState';
 import { TxStatus } from '../../ui/TxStatus';
 import { outcomeLine } from '../events/eventCopy';
+import { EntryPassOffer } from '../pass/EntryPassOffer';
+import { passPagePath } from '../pass/passFlow';
 import { refusedByToken, SettlementRefused } from '../tokens/SettlementRefused';
 import { ClaimPanel } from './ClaimPanel';
 import { TransferPanel } from './TransferPanel';
@@ -145,6 +147,10 @@ function TicketDetails({ data, reread, apply }: { data: TicketData } & Reread) {
             <dt>Confirmation deadline</dt>
             <dd>{time(event.resolution_deadline_ms)}</dd>
           </dl>
+          <section className="pass-section" aria-labelledby="pass-heading">
+            <h2 id="pass-heading">Entry pass</h2>
+            <EntryPassOffer ticket={ticket} onSigned={(pass) => navigate(passPagePath(pass))} />
+          </section>
           <History history={history} time={time} />
         </div>
 

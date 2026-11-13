@@ -16,6 +16,7 @@ import { CurrencyFact } from '../../ui/CurrencyFact';
 import { LoadState } from '../../ui/LoadState';
 import { BuyPanel } from './BuyPanel';
 import { outcomeLine, referenceLabel, verifierStatus } from './eventCopy';
+import { groupLine, useGroupVerifier } from './groupVerifier';
 
 export interface EventData {
   event: EventView;
@@ -70,6 +71,7 @@ function EventDetails({
   const { timeZone } = useServices();
   const { accountId } = useWallet();
   const { event, accounting, unit } = data;
+  const group = useGroupVerifier(event.verifier_id);
   const outcome = outcomeLine(event);
   const time = (ms: number) => formatDateTime(ms, timeZone);
 
@@ -99,7 +101,8 @@ function EventDetails({
             </dd>
             <dt>Verifier</dt>
             <dd>
-              <AccountLink id={event.verifier_id} /> · {verifierStatus(event)}
+              <AccountLink id={event.verifier_id} /> · {group && `${groupLine(group)} · `}
+              {verifierStatus(event)}
             </dd>
             <dt>Starts</dt>
             <dd>{time(event.starts_at_ms)}</dd>

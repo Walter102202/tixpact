@@ -52,7 +52,7 @@ pub fn ft_on_transfer(&mut self, sender_id: AccountId, amount: U128, msg: String
 - The buyer calls `ft_transfer_call({ receiver_id: <escrow>, amount: <price>, msg: "{\"event_id\":7}" })` on the token with 1 yocto. `sender_id` becomes the first holder.
 - `ft_on_transfer` applies rule R4 and three more checks: the caller (`predecessor`) is the event's `currency`; `amount == price`; `msg` parses. On any failure it **panics** with the code, so the token returns the whole amount to the buyer. New codes: `ERR_WRONG_CURRENCY`, `ERR_BAD_MESSAGE`. A wrong amount is `ERR_WRONG_DEPOSIT`.
 - `buy_ticket` on a token-priced event fails with `ERR_WRONG_CURRENCY`. `price` and `principal` are in the smallest unit of the event's currency.
-- Refunds and payouts of a token-priced event call `ft_transfer({ receiver_id, amount, memo: null })` on the token, forwarding the caller's 1 yocto, with static gas `GAS_FT_TRANSFER` (start at 20 Tgas, measure in C7), followed by the same private callback as v1. Rule R7 is unchanged: a recipient who is not registered with the token, or a token that fails, gives the right back, once.
+- Refunds and payouts of a token-priced event call `ft_transfer({ receiver_id, amount, memo: null })` on the token, forwarding the caller's 1 yocto, with static gas `GAS_FT_TRANSFER` (start at 20 Tgas, measure in C7), followed by the same private callback as v1. Rule R7 is unchanged: a recipient who is not registered with the token, or a token that fails, gives the right back, once. The callback reads only the status of the token's receipt (integrator's ruling, 2026-11-13): a receipt that succeeded settles the payment whatever it answered, and is never read as a failure.
 - The liquidity check of v1 covers NEAR events only (`total_held` sums NEAR events). For a token the contract cannot read its balance in the same call; a shortfall fails the transfer and R7 restores.
 - The operating budget stays in NEAR for every event. One event's ledger is in one currency; the accounting identity holds per event.
 - `terms_hash` covers `currency`: the Borsh tuple gains it as its last element.
@@ -93,10 +93,10 @@ tokenBalance(token, accountId): Promise<string>
 tokenRegistration(token, accountId): Promise<{ registered: boolean; minDeposit: string }>
 
 // tx.ts
-purchaseResult(outcome): { bought: true; tokenId: string } | { bought: false; code: string | null }
+purchaseResult(outcome, contractId): { bought: true; tokenId: string } | { bought: false; code: string | null }
 ```
 
-`ft_transfer_call` **succeeds as a transaction even when the purchase was rejected** (the token refunds in its resolver). `purchaseResult` decides from the receipts: bought when a `ticket_purchased` event of standard `ticket_escrow` was logged (its `token_id` is the ticket); otherwise not bought, with the `ERR_` code of the failed `ft_on_transfer` receipt. It also covers the v1 `buy_ticket` outcome.
+`ft_transfer_call` **succeeds as a transaction even when the purchase was rejected** (the token refunds in its resolver). `purchaseResult` decides from the receipts: bought when a receipt executed by the escrow (`contractId`) succeeded and logged a `ticket_purchased` event of standard `ticket_escrow` (its `token_id` is the ticket); otherwise not bought, with the `ERR_` code of the escrow's failed receipt. It also covers the `buy_ticket` outcome. The contract id is required (changed on 2026-11-13 after review): without it a look-alike log written by another contract would read as a purchase.
 
 ### Entry pass (lane P; no contract change)
 
@@ -143,29 +143,29 @@ signature  ed25519:ZQFWWD6ZAFSE1TJ5oSKoHpSWMihvSRaXVrK71ctXj99uQwv4VFFrWw9o4RSab
 
 Files: `packages/client/src/pass.ts`, `pass.test.ts`, export from `index.ts`; `scripts/pass.mjs`; `mcp/src/tools.ts` and its tests; `docs/threat-model.md` (section "Entry pass").
 
-- [ ] Tests first: the known-answer vector verifies; changing any of message, nonce, recipient, account or signature fails `signature`; each of the other four checks fails alone with its sentence (transferred ticket, function-call key, deleted key, refunded ticket, pass six minutes old, pass two minutes ahead); `decodePass` reads a bare pass and a URL and returns `null` on garbage.
-- [ ] Implement `pass.ts` with the crypto already in the workspace (near-api-js and its dependencies); add no dependency for it.
-- [ ] `node scripts/pass.mjs verify <pass or URL>` (env `CONTRACT_ID`, RPC as the other scripts): prints the five checks, one per line, `ok` or `NO` with the sentence, then `ADMIT` or `DO NOT ADMIT`; exit 0 or 1. `node scripts/pass.mjs encode` reads the JSON the NEAR CLI prints on stdin plus `--ticket`, `--issued`, `--nonce` and prints the pass, so a pass can be made with the CLI alone.
-- [ ] MCP tool `show_entry_pass { token_id }`: refuses when the agent does not hold the ticket; otherwise signs with the agent's key and returns the pass and, when `SITE_URL` is set, the door link. It signs no transaction. Tool count and every place that prints it change from 10 to 11 (the integrator updates the README).
-- [ ] Threat model: what a pass proves, a screenshot shared inside five minutes, a key deleted after signing, a function-call key, the attendant's clock, no record of admissions shared between devices.
+- [x] Tests first: the known-answer vector verifies; changing any of message, nonce, recipient, account or signature fails `signature`; each of the other four checks fails alone with its sentence (transferred ticket, function-call key, deleted key, refunded ticket, pass six minutes old, pass two minutes ahead); `decodePass` reads a bare pass and a URL and returns `null` on garbage.
+- [x] Implement `pass.ts` with the crypto already in the workspace (near-api-js and its dependencies); add no dependency for it.
+- [x] `node scripts/pass.mjs verify <pass or URL>` (env `CONTRACT_ID`, RPC as the other scripts): prints the five checks, one per line, `ok` or `NO` with the sentence, then `ADMIT` or `DO NOT ADMIT`; exit 0 or 1. `node scripts/pass.mjs encode` reads the JSON the NEAR CLI prints on stdin plus `--ticket`, `--issued`, `--nonce` and prints the pass, so a pass can be made with the CLI alone.
+- [x] MCP tool `show_entry_pass { token_id }`: refuses when the agent does not hold the ticket; otherwise signs with the agent's key and returns the pass and, when `SITE_URL` is set, the door link. It signs no transaction. Tool count and every place that prints it change from 10 to 11 (the integrator updates the README).
+- [x] Threat model: what a pass proves, a screenshot shared inside five minutes, a key deleted after signing, a function-call key, the attendant's clock, no record of admissions shared between devices.
 
 ### Task P2: the holder's pass page and the door page
 
 Files: `web/src/features/pass/`, `web/src/lib/router.tsx`, `web/src/lib/near/` (message signing), the ticket page, tests.
 
-- [ ] The ticket page offers "Show entry pass" to the signed-in holder of an `Active` ticket that is not refunded. Anyone else reads: `Only the holder can show the entry pass for this ticket.`
-- [ ] The wallet signs the message through near-connect's `signMessage` (read its types in `node_modules` and in `C:\dev\near-project-reports\sources\`; Meteor and Intear are the two wallets). The account in the answer must be the connected one. A wallet that cannot sign messages gets a sentence, not an error.
-- [ ] The pass view: a QR code of `<origin>/door#p=<pass>`, the ticket and holder, a countdown to expiry, "Sign a new pass" once expired, and a link that opens the door check in a new tab. The pass travels in the URL fragment so it reaches no server. One small QR dependency without dependencies of its own is allowed (list it for the README).
-- [ ] `/door`: with a pass in the URL it runs `checkPass` against the chain and shows one verdict, large: `Admit` with the ticket and holder, or `Do not admit` with the failing sentences, and the five checks below. Without a pass it explains itself and takes a pasted link. A valid pass can be marked as admitted; the same ticket shown again on this device reads `Already admitted on this device at 21:03`. Kept in `localStorage`, wrapped in try/catch.
-- [ ] Demo mode (no `VITE_CONTRACT_ID`): demo accounts sign with built-in demo keys that the fixture chain lists as their full-access keys, so both pages work end to end and are marked as demo data like the rest.
-- [ ] Tests: holder and non-holder, expiry and re-sign, a pass that turns invalid after the ticket is transferred, the door's verdicts, the second scan.
+- [x] The ticket page offers "Show entry pass" to the signed-in holder of an `Active` ticket that is not refunded. Anyone else reads: `Only the holder can show the entry pass for this ticket.`
+- [x] The wallet signs the message through near-connect's `signMessage` (read its types in `node_modules` and in `C:\dev\near-project-reports\sources\`; Meteor and Intear are the two wallets). The account in the answer must be the connected one. A wallet that cannot sign messages gets a sentence, not an error.
+- [x] The pass view: a QR code of `<origin>/door#p=<pass>`, the ticket and holder, a countdown to expiry, "Sign a new pass" once expired, and a link that opens the door check in a new tab. The pass travels in the URL fragment so it reaches no server. One small QR dependency without dependencies of its own is allowed (list it for the README).
+- [x] `/door`: with a pass in the URL it runs `checkPass` against the chain and shows one verdict, large: `Admit` with the ticket and holder, or `Do not admit` with the failing sentences, and the five checks below. Without a pass it explains itself and takes a pasted link. A valid pass can be marked as admitted; the same ticket shown again on this device reads `Already admitted on this device at 21:03`. Kept in `localStorage`, wrapped in try/catch.
+- [x] Demo mode (no `VITE_CONTRACT_ID`): demo accounts sign with built-in demo keys that the fixture chain lists as their full-access keys, so both pages work end to end and are marked as demo data like the rest.
+- [x] Tests: holder and non-holder, expiry and re-sign, a pass that turns invalid after the ticket is transferred, the door's verdicts, the second scan.
 
 ### Task P3: an event page that says its verifier is a group
 
 Files: `packages/client/src/reader.ts` (+ tests, fixtures), `web/src/features/events/`.
 
-- [ ] `readGroupVerifier(accountId): Promise<{ members: string[]; needed: number } | null>`: calls `get_policy` on the account. It answers only for a Sputnik DAO policy with exactly one role of kind `Group` whose permissions let it approve function calls (`*:*`, `call:*`, `*:VoteApprove` or `call:VoteApprove`) under `RoleWeight`; `needed` is `min(n, floor(n * num / den) + 1)` for a ratio threshold `[num, den]` (the role's `vote_policy.call` if present, else `default_vote_policy`). Anything else, or a failed view, is `null`.
-- [ ] The event page and the verifier line then read: `<account> · a group of 3: 2 must agree (a, b, c)`. A plain account reads as today.
+- [x] `readGroupVerifier(accountId): Promise<{ members: string[]; needed: number } | null>`: calls `get_policy` on the account. It answers only for a Sputnik DAO policy with exactly one role of kind `Group` whose permissions let it approve function calls (`*:*`, `call:*`, `*:VoteApprove` or `call:VoteApprove`) under `RoleWeight`; `needed` is `min(n, floor(n * num / den) + 1)` for a ratio threshold `[num, den]` (the role's `vote_policy.call` if present, else `default_vote_policy`). Anything else, or a failed view, is `null`.
+- [x] The event page and the verifier line then read: `<account> · a group of 3: 2 must agree (a, b, c)`. A plain account reads as today.
 
 ## Lane D: a verifier that is a group (integrator)
 

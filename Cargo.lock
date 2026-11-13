@@ -1362,6 +1362,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "hostile-token"
+version = "0.1.0"
+dependencies = [
+ "near-contract-standards",
+ "near-sdk",
+]
+
+[[package]]
 name = "http"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3636,6 +3644,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "test-token"
+version = "0.1.0"
+dependencies = [
+ "near-contract-standards",
+ "near-sdk",
+]
+
+[[package]]
 name = "testresult"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3672,7 +3688,7 @@ dependencies = [
 
 [[package]]
 name = "ticket-escrow"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "cargo-near-build",
  "near-api",
