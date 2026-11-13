@@ -118,7 +118,13 @@ function CreateEventForm({
       ? quote.state.data.budget
       : null;
   const quoteFailed = capacity !== null && quote.state.status === 'error';
-  const check = checkTerms(values, { config, organizer, contractId, nowMs: now?.() ?? Date.now() });
+  const check = checkTerms(values, {
+    config,
+    organizer,
+    contractId,
+    nowMs: now?.() ?? Date.now(),
+    timeZone,
+  });
   const verifier = check.errors['Verifier account'] ? null : values['Verifier account'].trim();
 
   // A mistyped named verifier would lock the budget in an event nobody can accept, or hand the

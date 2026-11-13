@@ -22,11 +22,63 @@ const FOUR_DECIMALS = 10n ** 20n;
 
 export const EMPTY_FORM: FormValues = Object.fromEntries(FIELDS.map((f) => [f, ''])) as FormValues;
 
-/** A `datetime-local` value read in the viewer's zone, or null when it is empty or invalid. */
-export function parseLocalTime(value: string): number | null {
-  if (value === '') return null;
-  const ms = new Date(value).getTime();
-  return Number.isNaN(ms) ? null : ms;
+const LOCAL_TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/;
+
+/** How far `timeZone`'s wall clock is ahead of UTC at the instant `utcMs` (Santiago in November: -3 h). */
+function zoneOffsetMs(utcMs: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+  }).formatToParts(new Date(utcMs));
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((p) => p.type === type)?.value);
+  const wall = Date.UTC(
+    part('year'),
+    part('month') - 1,
+    part('day'),
+    part('hour'),
+    part('minute'),
+    part('second'),
+  );
+  return wall - (utcMs - (utcMs % 1000));
+}
+
+/**
+ * A `datetime-local` value ("2026-11-20T20:00") read as a wall-clock time in `timeZone`, the zone
+ * the form names, never the process's. Null when empty or not a real date and time. Near a
+ * daylight-saving change, an hour that is skipped or repeated maps to an instant next to it.
+ */
+export function parseLocalTime(value: string, timeZone: string): number | null {
+  const match = LOCAL_TIME.exec(value);
+  if (!match) return null;
+  const [year, month, day, hour, minute, second] = match.slice(1).map((n) => Number(n ?? 0)) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  const wall = Date.UTC(year, month - 1, day, hour, minute, second);
+  const read = new Date(wall);
+  // Date.UTC rolls 30 February over to March; a real date reads back as itself.
+  const real =
+    read.getUTCFullYear() === year &&
+    read.getUTCMonth() === month - 1 &&
+    read.getUTCDate() === day &&
+    read.getUTCHours() === hour &&
+    read.getUTCMinutes() === minute &&
+    read.getUTCSeconds() === second;
+  if (!real) return null;
+  // The offset at a first guess, then at the answer, which differ only across a change of offset.
+  const guess = wall - zoneOffsetMs(wall, timeZone);
+  return wall - zoneOffsetMs(guess, timeZone);
 }
 
 /** The capacity as a whole number inside the contract's limit, or null. */
@@ -43,6 +95,8 @@ export interface TermsContext {
   /** The contract, which the contract refuses as verifier. */
   contractId: string;
   nowMs: number;
+  /** The zone the form's times are read in. */
+  timeZone: string;
 }
 
 /**
@@ -51,7 +105,7 @@ export interface TermsContext {
  */
 export function checkTerms(
   values: FormValues,
-  { config, organizer, contractId, nowMs }: TermsContext,
+  { config, organizer, contractId, nowMs, timeZone }: TermsContext,
 ): { errors: FieldErrors; terms: EventTerms | null } {
   const errors: FieldErrors = {};
   const title = values.Title.trim();
@@ -67,9 +121,9 @@ export function checkTerms(
     if (long) errors.Venue = long;
   }
 
-  const starts = parseLocalTime(values.Starts);
-  const ends = parseLocalTime(values.Ends);
-  const deadline = parseLocalTime(values['Confirmation deadline']);
+  const starts = parseLocalTime(values.Starts, timeZone);
+  const ends = parseLocalTime(values.Ends, timeZone);
+  const deadline = parseLocalTime(values['Confirmation deadline'], timeZone);
   if (starts === null) errors.Starts = 'Pick when the event starts.';
   else if (starts <= nowMs) errors.Starts = 'The start must be in the future.';
   if (ends === null) errors.Ends = 'Pick when the event ends.';

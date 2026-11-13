@@ -37,14 +37,13 @@ function fill(values: Partial<Record<Field, string>>) {
   }
 }
 
-const local = (value: string) => new Date(value).getTime();
-
+/** VALID's times in the test zone, America/Santiago, which keeps UTC-3 in November. */
 const VALID_TERMS: EventTerms = {
   title: VALID.Title,
   venue: VALID.Venue,
-  starts_at_ms: local(VALID.Starts),
-  ends_at_ms: local(VALID.Ends),
-  resolution_deadline_ms: local(VALID['Confirmation deadline']),
+  starts_at_ms: Date.UTC(2026, 10, 20, 23, 0),
+  ends_at_ms: Date.UTC(2026, 10, 21, 2, 0),
+  resolution_deadline_ms: Date.UTC(2026, 10, 23, 2, 0),
   price: parseNear('1.5'),
   capacity: 50,
   verifier_id: 'teatro.testnet',
