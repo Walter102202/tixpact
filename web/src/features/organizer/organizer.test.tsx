@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import {
   actions,
   createFixtureReader,
@@ -94,6 +94,12 @@ describe('/organizer: create an event', () => {
       'The verifier must be another account, not you.',
     ],
     [
+      'the verifier is the contract',
+      { 'Verifier account': 'ticket-escrow.testnet' },
+      'Verifier account',
+      'The verifier must be another account than the contract.',
+    ],
+    [
       'the verifier is not a testnet account',
       { 'Verifier account': 'teatro.testne' },
       'Verifier account',
@@ -155,6 +161,69 @@ describe('/organizer: create an event', () => {
       expect(services.wallet.sent).toEqual([]);
     },
   );
+
+  it('says when the verifier account does not exist, and sends nothing', async () => {
+    const services = await openOrganizer();
+    fill({ ...VALID, 'Verifier account': 'teatro-typo.testnet' });
+    expect(
+      await screen.findByText('No account named teatro-typo.testnet exists on testnet.'),
+    ).toBeTruthy();
+    expect(screen.getByLabelText('Verifier account').getAttribute('aria-invalid')).toBe('true');
+    fireEvent.click(createButton());
+    expect(await screen.findByText(/nothing was sent/)).toBeTruthy();
+    expect(services.wallet.sent).toEqual([]);
+  });
+
+  it('says when the verifier cannot be checked, sends nothing, and checks again on request', async () => {
+    let fails = true;
+    const fixtures = createFixtureReader();
+    const reader: Reader = {
+      ...fixtures,
+      accountExists: (id) =>
+        fails
+          ? Promise.reject(new Error('every endpoint timed out'))
+          : (fixtures.accountExists?.(id) ?? Promise.resolve(true)),
+    };
+    const services = await openOrganizer(
+      testServices({ reader, wallet: createFixtureWallet(ORGANIZER) }),
+    );
+    fill(VALID);
+    expect(await screen.findByText(/Could not check that teatro\.testnet exists/)).toBeTruthy();
+    fireEvent.click(createButton());
+    expect(services.wallet.sent).toEqual([]);
+    fails = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Check the account again' }));
+    await waitFor(() => expect(screen.queryByText(/Could not check that/)).toBeNull());
+    fireEvent.click(createButton());
+    expect(await screen.findByText('Event 9 created.')).toBeTruthy();
+    expect(services.wallet.sent).toHaveLength(1);
+  });
+
+  it('keeps the button disabled while the verifier is being checked, and says why', async () => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fixtures = createFixtureReader();
+    const reader: Reader = {
+      ...fixtures,
+      accountExists: async (id) => {
+        await gate;
+        return (await fixtures.accountExists?.(id)) ?? true;
+      },
+    };
+    await openOrganizer(testServices({ reader, wallet: createFixtureWallet(ORGANIZER) }));
+    fill(VALID);
+    await screen.findByText('Storage budget: 0.7 NEAR');
+    const button = createButton() as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    const reasonId = button.getAttribute('aria-describedby');
+    expect(reasonId && document.getElementById(reasonId)?.textContent).toBe(
+      'Checking that teatro.testnet exists on testnet…',
+    );
+    release();
+    await waitFor(() => expect((createButton() as HTMLButtonElement).disabled).toBe(false));
+  });
 
   it('sends the terms with exactly the quoted budget and links the new event', async () => {
     const services = await openOrganizer();

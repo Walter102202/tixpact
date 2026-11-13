@@ -447,7 +447,17 @@ export function createFixtureReader(data: FixtureData = FIXTURES): Reader {
       ),
     // Fixture mode only shows the contract account, so every account reads as the contract.
     getAccountProof: async () => structuredClone(data.accountProof),
+    // The accounts the fixture data names exist; any other does not.
+    accountExists: async (accountId) => fixtureAccounts(data).has(accountId),
   };
+}
+
+function fixtureAccounts(data: FixtureData): Set<string> {
+  return new Set([
+    data.contractId,
+    ...data.events.flatMap((e) => [e.organizer_id, e.verifier_id]),
+    ...data.tickets.map((t) => t.owner_id),
+  ]);
 }
 
 // Recorded transaction statuses, in the shape `EXPERIMENTAL_tx_status` returns at `FINAL`.

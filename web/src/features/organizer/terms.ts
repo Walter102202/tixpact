@@ -36,15 +36,22 @@ export function parseCapacity(value: string, config: Config): number | null {
   return capacity >= 1 && capacity <= config.max_capacity ? capacity : null;
 }
 
+/** What the checks need besides the form. */
+export interface TermsContext {
+  config: Config;
+  organizer: string;
+  /** The contract, which the contract refuses as verifier. */
+  contractId: string;
+  nowMs: number;
+}
+
 /**
  * The checks `create_event` makes, run before the wallet opens so a mistake costs no fee
  * (plan, "Rules" and "Limits"). The contract checks them again at its own clock.
  */
 export function checkTerms(
   values: FormValues,
-  config: Config,
-  organizer: string,
-  nowMs: number,
+  { config, organizer, contractId, nowMs }: TermsContext,
 ): { errors: FieldErrors; terms: EventTerms | null } {
   const errors: FieldErrors = {};
   const title = values.Title.trim();
@@ -96,6 +103,8 @@ export function checkTerms(
     errors['Verifier account'] = invalidVerifier;
   } else if (verifier === organizer) {
     errors['Verifier account'] = 'The verifier must be another account, not you.';
+  } else if (verifier === contractId) {
+    errors['Verifier account'] = 'The verifier must be another account than the contract.';
   }
 
   if (

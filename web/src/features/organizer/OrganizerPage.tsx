@@ -1,5 +1,6 @@
 import { actions, type Config, type EventTerms } from '@ticket-escrow/client';
 import { type FormEvent, useCallback, useId, useState } from 'react';
+import { isNamedAccount, missingAccountMessage } from '../../lib/accounts';
 import { type Refresh, useTx } from '../../lib/near/useTx';
 import { useWallet } from '../../lib/near/useWallet';
 import { Link } from '../../lib/router';
@@ -9,7 +10,14 @@ import { LoadState } from '../../ui/LoadState';
 import { TxStatus } from '../../ui/TxStatus';
 import { nearExact } from '../events/eventCopy';
 import { type OrganizedEvent, OrganizerEvents, readOrganizedEvents } from './OrganizerEvents';
-import { checkTerms, EMPTY_FORM, type Field, type FormValues, parseCapacity } from './terms';
+import {
+  checkTerms,
+  EMPTY_FORM,
+  type Field,
+  type FieldErrors,
+  type FormValues,
+  parseCapacity,
+} from './terms';
 
 export function OrganizerPage() {
   const { accountId, signIn } = useWallet();
@@ -92,7 +100,7 @@ function CreateEventForm({
   organizer: string;
   refresh: Refresh<OrganizedEvent[]>;
 }) {
-  const { reader, timeZone, now } = useServices();
+  const { reader, timeZone, now, contractId } = useServices();
   const tx = useTx();
   const formId = useId();
   const [values, setValues] = useState<FormValues>(EMPTY_FORM);
@@ -104,22 +112,50 @@ function CreateEventForm({
     capacity === null ? Promise.resolve(null) : reader.quoteEventBudget(capacity),
   );
   const budget = quote.state.status === 'ready' ? quote.state.data : null;
-  const check = checkTerms(values, config, organizer, now?.() ?? Date.now());
-  const errors = submitted ? check.errors : {};
-
+  const check = checkTerms(values, { config, organizer, contractId, nowMs: now?.() ?? Date.now() });
   const verifier = check.errors['Verifier account'] ? null : values['Verifier account'].trim();
+
+  // A mistyped named verifier would lock the budget in an event nobody can accept, or hand the
+  // role to whoever registers that name: check it exists before the button works.
+  const toCheck = verifier !== null && isNamedAccount(verifier) ? verifier : null;
+  const known = useLoad(`verifier:${toCheck ?? ''}`, async () => ({
+    id: toCheck,
+    exists:
+      toCheck === null || reader.accountExists === undefined
+        ? true
+        : await reader.accountExists(toCheck),
+  }));
+  // Only the answer for the id now in the field counts.
+  const found =
+    known.state.status === 'ready' && known.state.data.id === toCheck
+      ? known.state.data.exists
+      : null;
+  const checkFailed = toCheck !== null && known.state.status === 'error';
+  const checking = toCheck !== null && found === null && !checkFailed;
+  let verifierProblem: string | null = null;
+  if (checkFailed) {
+    verifierProblem = `Could not check that ${toCheck} exists. Nothing is sent until it is checked.`;
+  } else if (toCheck !== null && found === false) {
+    verifierProblem = missingAccountMessage(toCheck);
+  }
+
+  const errors: FieldErrors = {
+    ...(submitted ? check.errors : {}),
+    ...(verifierProblem === null ? {} : { 'Verifier account': verifierProblem }),
+  };
   const done = tx.view.kind === 'done' && tx.view.result.ok;
 
   function submit(formEvent: FormEvent) {
     formEvent.preventDefault();
     setSubmitted(true);
-    if (check.terms === null || budget === null) return;
+    if (check.terms === null || budget === null || (toCheck !== null && found !== true)) return;
     setSent(check.terms);
     // Sent straight from the click: the wallet opens a popup, which browsers allow only here.
     void tx.run(actions.createEvent(check.terms, budget), refresh);
   }
 
   const waitingForQuote = capacity !== null && budget === null;
+  const waiting = checking ? `Checking that ${toCheck} exists on testnet…` : null;
   return (
     <section className="create-event" aria-labelledby={`${formId}-heading`}>
       <h2 id={`${formId}-heading`}>Create an event</h2>
@@ -160,6 +196,11 @@ function CreateEventForm({
                   {error}
                 </p>
               )}
+              {field === 'Verifier account' && checkFailed && (
+                <button type="button" className="btn btn-sm btn-secondary" onClick={known.reload}>
+                  Check the account again
+                </button>
+              )}
             </div>
           );
         })}
@@ -180,17 +221,29 @@ function CreateEventForm({
           </ul>
         </div>
 
-        {submitted && Object.keys(check.errors).length > 0 && (
+        {submitted && Object.keys(errors).length > 0 && (
           <p className="field-error" role="alert">
             Fix the fields marked above; nothing was sent.
           </p>
         )}
         {!tx.busy && !done && (
-          <button type="submit" className="btn" disabled={waitingForQuote}>
-            {budget === null
-              ? 'Create the event'
-              : `Create the event and pay ${nearExact(budget)} to the contract`}
-          </button>
+          <>
+            <button
+              type="submit"
+              className="btn"
+              disabled={waitingForQuote || waiting !== null}
+              aria-describedby={waiting === null ? undefined : `${formId}-waiting`}
+            >
+              {budget === null
+                ? 'Create the event'
+                : `Create the event and pay ${nearExact(budget)} to the contract`}
+            </button>
+            {waiting !== null && (
+              <p id={`${formId}-waiting`} className="muted">
+                {waiting}
+              </p>
+            )}
+          </>
         )}
       </form>
 

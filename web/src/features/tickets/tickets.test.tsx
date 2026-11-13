@@ -222,7 +222,7 @@ describe('transferring a ticket', () => {
     };
     await openTicket('1-3', testServices({ wallet, reader: createFixtureReader(data) }));
     review('ana.testnet');
-    const confirm = screen.getByRole('region', { name: 'Confirm the transfer' });
+    const confirm = await screen.findByRole('region', { name: 'Confirm the transfer' });
     expect(confirm.textContent).toContain('ana.testnet');
     expect(confirm.textContent).toContain('You will lose the right to the refund');
     fireEvent.click(
@@ -236,10 +236,55 @@ describe('transferring a ticket', () => {
 
   it('writes a long account out in full', async () => {
     const long = 'a-very-long-account-name-that-takes-the-refund-right.testnet';
-    await openTicket('1-3');
+    const reader: Reader = { ...createFixtureReader(), accountExists: async () => true };
+    await openTicket('1-3', testServices({ reader }));
     review(long);
-    const confirm = screen.getByRole('region', { name: 'Confirm the transfer' });
+    const confirm = await screen.findByRole('region', { name: 'Confirm the transfer' });
     expect(within(confirm).getByText(long)).toBeTruthy();
+  });
+
+  it('refuses a named account that does not exist: anyone could register it', async () => {
+    const services = testServices();
+    await openTicket('1-3', services);
+    review('ana-typo.testnet');
+    expect(
+      await screen.findByText('No account named ana-typo.testnet exists on testnet.'),
+    ).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Confirm the transfer' })).toBeNull();
+    expect(services.wallet.sent).toEqual([]);
+  });
+
+  it('does not ask about an implicit account, which is bound to its key', async () => {
+    const implicit = 'ab'.repeat(32);
+    const asked: string[] = [];
+    const fixtures = createFixtureReader();
+    const reader: Reader = {
+      ...fixtures,
+      accountExists: async (id) => {
+        asked.push(id);
+        return false;
+      },
+    };
+    await openTicket('1-3', testServices({ reader }));
+    review(implicit);
+    const confirm = await screen.findByRole('region', { name: 'Confirm the transfer' });
+    expect(within(confirm).getByText(implicit)).toBeTruthy();
+    expect(asked).toEqual([]);
+  });
+
+  it('shows no confirm box when the account cannot be checked', async () => {
+    const reader: Reader = {
+      ...createFixtureReader(),
+      accountExists: () => Promise.reject(new Error('every endpoint timed out')),
+    };
+    const services = testServices({ reader });
+    await openTicket('1-3', services);
+    review('ana.testnet');
+    expect(
+      await screen.findByText('Could not check that ana.testnet exists. Try again in a moment.'),
+    ).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Confirm the transfer' })).toBeNull();
+    expect(services.wallet.sent).toEqual([]);
   });
 
   it('rejects an invalid account and the current holder before anything is sent', async () => {
@@ -285,7 +330,9 @@ describe('transferring a ticket', () => {
     };
     await openTicket('1-3', testServices({ fixtureMode: false, reader, wallet }));
     review('ana.testnet');
-    fireEvent.click(screen.getByRole('button', { name: 'Transfer ticket 1-3 to ana.testnet' }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Transfer ticket 1-3 to ana.testnet' }),
+    );
     expect(await screen.findByText('Ticket 1-3 now belongs to ana.testnet.')).toBeTruthy();
     expect(fact('Holder')).toBe('ana.testnet');
   });
@@ -294,7 +341,9 @@ describe('transferring a ticket', () => {
     const { txRpc, release } = gatedRpc();
     await openTicket('1-3', testServices({ txRpc }));
     review('ana.testnet');
-    fireEvent.click(screen.getByRole('button', { name: 'Transfer ticket 1-3 to ana.testnet' }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Transfer ticket 1-3 to ana.testnet' }),
+    );
     await screen.findByText('Sending');
     expect(screen.queryByRole('region', { name: 'Confirm the transfer' })).toBeNull();
     expect(screen.queryByRole('button', { name: /^Transfer ticket/ })).toBeNull();
@@ -306,7 +355,9 @@ describe('transferring a ticket', () => {
     const services = testServices({ fixtureMode: false, txRpc: deadRpc });
     await openTicket('1-3', services);
     review('ana.testnet');
-    fireEvent.click(screen.getByRole('button', { name: 'Transfer ticket 1-3 to ana.testnet' }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Transfer ticket 1-3 to ana.testnet' }),
+    );
     const notice = await screen.findByText(/its result could not be read yet/);
     expect(screen.queryByRole('region', { name: 'Confirm the transfer' })).toBeNull();
     const input = () => screen.getByLabelText('Send to account') as HTMLInputElement;

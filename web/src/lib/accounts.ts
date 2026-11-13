@@ -13,3 +13,13 @@ export function testnetAccountError(id: string): string | null {
   if (id.endsWith('.testnet') || IMPLICIT.test(id) || ETH_IMPLICIT.test(id)) return null;
   return 'Testnet accounts end in .testnet.';
 }
+
+/**
+ * Whether `id` is a named account. While one does not exist anyone can register it, so a typo
+ * could hand a ticket or the verifier role to a stranger. An implicit id is bound to its key.
+ */
+export function isNamedAccount(id: string): boolean {
+  return !IMPLICIT.test(id) && !ETH_IMPLICIT.test(id);
+}
+
+export const missingAccountMessage = (id: string) => `No account named ${id} exists on testnet.`;
