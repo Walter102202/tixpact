@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "near-api-js": {
+      "source": "near/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/near-api-js/SKILL.md",
+      "computedHash": "479324685943b82645f325ee81f66ea3a10ba9eb5a9f33d618e9550b4061b1d0"
+    },
+    "near-dapp": {
+      "source": "near/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/near-dapp/SKILL.md",
+      "computedHash": "c347367ff7a231dee066b4ed0e6caedc20e147cd10c076fe7d7bc5b7995287e7"
+    },
+    "near-smart-contracts": {
+      "source": "near/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/near-smart-contracts/SKILL.md",
+      "computedHash": "0615674e279d5a509a648ff0e4e03a9cedfb2fb1dda7901ddeaa737903e68eb1"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@ticket-escrow/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Web app: buy, hold, transfer and claim tickets straight from the contract.",
+  "scripts": {
+    "dev": "vite --port 5173 --strictPort",
+    "build": "vite build",
+    "preview": "vite preview --port 5173 --strictPort",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@hot-labs/near-connect": "0.12.0",
+    "@ticket-escrow/client": "workspace:*",
+    "near-api-js": "7.5.3",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.3.0",
+    "typescript": "6.0.3",
+    "util": "0.12.5",
+    "vite": "8.3.8",
+    "vitest": "5.1.0"
+  }
+}

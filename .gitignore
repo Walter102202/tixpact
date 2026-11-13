@@ -1,0 +1,19 @@
+# Private, local only
+proyecto_entradas_near_diseno_y_fuentes.md
+docs/hackathon/
+.claude/settings.local.json
+.claude/worktrees/
+.playwright-mcp/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Build output and caches
+node_modules/
+dist/
+target/
+coverage/
+.data/
+neardev/
