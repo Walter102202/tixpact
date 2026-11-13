@@ -447,6 +447,8 @@ describe('/organizer: cancel an event', () => {
     expect(confirm.textContent).toContain(
       'Every holder can then claim their price back. This cannot be undone.',
     );
+    // The clicked button stays, so keyboard focus is not dropped while the box is open.
+    expect(within(jazz).getByRole('button', { name: 'Cancel event' })).toBeTruthy();
     expect(services.wallet.sent).toEqual([]);
     fireEvent.click(within(confirm).getByRole('button', { name: 'Yes, cancel the event' }));
     expect(
@@ -454,6 +456,9 @@ describe('/organizer: cancel an event', () => {
     ).toBeTruthy();
     expect(services.wallet.sent).toEqual([actions.cancelEvent(1, null)]);
     expect(within(jazz).queryByRole('button', { name: 'Cancel event' })).toBeNull();
+    // Demo data still says unresolved; the row follows the cancel that just succeeded.
+    expect(jazz.textContent).toContain('Open for refunds: the organizer receives nothing.');
+    expect(jazz.textContent).not.toContain('Nothing to collect until');
   });
 
   it.each([
@@ -476,6 +481,7 @@ describe('/organizer: cancel an event', () => {
     fireEvent.click(within(jazz).getByRole('button', { name: 'Cancel event' }));
     fireEvent.click(within(jazz).getByRole('button', { name: 'Keep the event' }));
     expect(within(jazz).queryByRole('region', { name: 'Confirm the cancellation' })).toBeNull();
+    expect(document.activeElement).toBe(within(jazz).getByRole('button', { name: 'Cancel event' }));
     expect(services.wallet.sent).toEqual([]);
   });
 });
@@ -563,6 +569,10 @@ describe('/organizer: your events and the payout', () => {
     expect(item('Opera gala')).toContain('Sending 4.5 NEAR to org.testnet');
     expect(item('Jazz night')).toContain('Nothing to collect until teatro.testnet confirms');
     expect(item('Summer festival')).toContain('Open for refunds: the organizer receives nothing');
+    // Unresolved, but nobody can confirm it any more.
+    expect(item('Stand-up comedy')).toContain(
+      'The deadline passed without a confirmation: the organizer receives nothing, and every holder can claim their price back.',
+    );
     expect(within(list).queryAllByRole('button', { name: /^Collect / })).toEqual([]);
   });
 

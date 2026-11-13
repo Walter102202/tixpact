@@ -6,7 +6,7 @@ import {
   PHASE_LABELS,
   type Reader,
 } from '@ticket-escrow/client';
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useRef, useState } from 'react';
 import { useTx } from '../../lib/near/useTx';
 import { readAllPages } from '../../lib/pages';
 import { Link } from '../../lib/router';
@@ -94,6 +94,7 @@ function OrganizedRow({
 
   const cancelTx = useTx();
   const [confirmingCancel, setConfirmingCancel] = useState(false);
+  const cancelButton = useRef<HTMLButtonElement>(null);
   const cancelled = cancelTx.view.kind === 'done' && cancelTx.view.result.ok;
   // R2: the organizer (or the verifier) may cancel while unresolved, before the deadline, judged
   // at the chain time of the read. Demo data never changes, so a done cancel is not offered again.
@@ -143,14 +144,22 @@ function OrganizedRow({
         Collect {nearExact(available.toString())} to {organizer}
       </button>
     );
+  } else if (event.outcome === 'Refundable' || cancelled) {
+    // A done cancel counts before the re-read shows it: demo data never changes.
+    payout = <p className="muted">Open for refunds: the organizer receives nothing.</p>;
+  } else if (event.outcome === 'Unresolved' && event.now_ms >= event.resolution_deadline_ms) {
+    payout = (
+      <p className="muted">
+        The deadline passed without a confirmation: the organizer receives nothing, and every holder
+        can claim their price back.
+      </p>
+    );
   } else if (event.outcome === 'Unresolved') {
     payout = (
       <p className="muted">
         Nothing to collect until {event.verifier_id} confirms the event took place.
       </p>
     );
-  } else if (event.outcome === 'Refundable') {
-    payout = <p className="muted">Open for refunds: the organizer receives nothing.</p>;
   } else if (settled > 0n) {
     payout = <p className="muted">Collected {nearExact(settled.toString())}.</p>;
   } else {
@@ -190,8 +199,10 @@ function OrganizedRow({
             </p>
           )}
         />
-        {cancellable && !confirmingCancel && (
+        {cancellable && (
+          // Stays while the box is open, so keyboard focus is not dropped.
           <button
+            ref={cancelButton}
             type="button"
             className="btn btn-sm btn-secondary"
             onClick={() => setConfirmingCancel(true)}
@@ -212,7 +223,10 @@ function OrganizedRow({
               <button
                 type="button"
                 className="btn btn-secondary"
-                onClick={() => setConfirmingCancel(false)}
+                onClick={() => {
+                  setConfirmingCancel(false);
+                  cancelButton.current?.focus();
+                }}
               >
                 Keep the event
               </button>
