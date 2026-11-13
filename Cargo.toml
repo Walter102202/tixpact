@@ -1,0 +1,28 @@
+[workspace]
+resolver = "3"
+# `fixtures/*` holds test-only contracts (plan: Tasks C2 and C3). They are never deployed outside the sandbox.
+members = ["contract", "fixtures/*"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+repository = "https://github.com/Walter102202/ticket-escrow-near"
+
+[workspace.dependencies]
+near-sdk = "5.30.1"
+near-contract-standards = "5.30.1"
+
+# `cfg(near)` was introduced in `near-sdk` v5.27.0 and is an expected cfg.
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(near)'] }
+
+[profile.release]
+codegen-units = 1
+# Optimize for small code size.
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+# Arithmetic on money must never wrap silently.
+overflow-checks = true

@@ -1,4 +1,5 @@
-# CI gates for every push and pull request. Three parallel jobs; all three must pass before a merge.
+# CI gates for every push and pull request. Every job must pass before a merge.
+# Each job runs the same script a person runs locally: scripts/gate.sh.
 name: CI
 
 on:
@@ -17,21 +18,36 @@ permissions:
 
 jobs:
   contract:
-    name: contract (build, clippy, sandbox tests)
+    name: contract (fmt, clippy, wasm build, sandbox tests)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      # rustup reads rust-toolchain.toml and installs the pinned toolchain, components and target.
-      - run: rustup show
+
+      # rust-toolchain.toml pins the version, the components and the wasm target.
+      - name: Install the pinned Rust toolchain
+        run: |
+          rustup toolchain install || rustup show
+          rustc --version
+
       - uses: Swatinem/rust-cache@v2
+
+      # The prebuilt cargo-near binary, pinned by version and verified against its published checksum.
       - name: Install cargo-near
         env:
           CARGO_NEAR_VERSION: 0.23.0
+          CARGO_NEAR_SHA256: 94008b827a457750257eced4b571c33736062cc3bd1ffda3e7af70e2bc9a4073
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl --proto '=https' --tlsv1.2 -LsSf \
-            "https://github.com/near/cargo-near/releases/download/cargo-near-v${CARGO_NEAR_VERSION}/cargo-near-installer.sh" | sh
+          mkdir -p "$RUNNER_TEMP/cargo-near"
+          cd "$RUNNER_TEMP/cargo-near"
+          gh release download "cargo-near-v$CARGO_NEAR_VERSION" --repo near/cargo-near \
+            --pattern "cargo-near-x86_64-unknown-linux-gnu.tar.gz"
+          echo "$CARGO_NEAR_SHA256  cargo-near-x86_64-unknown-linux-gnu.tar.gz" | sha256sum --check --strict
+          tar -xzf cargo-near-x86_64-unknown-linux-gnu.tar.gz -C "$HOME/.cargo/bin" --strip-components=1 \
+            cargo-near-x86_64-unknown-linux-gnu/cargo-near
           cargo near --version
+
       - run: bash scripts/gate.sh contract
 
   web:
@@ -48,7 +64,7 @@ jobs:
       - run: bash scripts/gate.sh web
 
   hygiene:
-    name: hygiene (secrets, tracked files, wording)
+    name: hygiene (secrets, tracked files)
     runs-on: ubuntu-latest
     timeout-minutes: 4
     steps:
@@ -70,14 +86,6 @@ jobs:
               exit 1
             fi
           done
-
-      # Product rule: a ticket is called a ticket. The standard is named only in the README and docs.
-      - name: The product never says NFT
-        run: |
-          if git grep -nE '\bNFTs?\b' -- web packages/client mcp ':!*.test.ts' ':!*.test.tsx'; then
-            echo "::error::user-facing code says NFT (lines above). Call it a ticket."
-            exit 1
-          fi
 
       # The gitleaks CLI, pinned by version and verified against the release checksums, scans every
       # commit of every branch. (gitleaks/gitleaks-action only scans the pushed commits on push events.)

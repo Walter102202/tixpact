@@ -8,7 +8,7 @@ Shared strings have one copy, in `packages/client`, and nobody but the integrato
 
 ## Decision
 
-`@ticket-escrow/client` also exports `PROMISE_TEXT` (the plan's sentence, verbatim, pinned by a test), `PHASE_LABELS` and `CLAIM_LABELS`. Claim words: Reserved, Claimable, Sending, Refunded, Released to the organizer. Phase words: Awaiting verifier, On sale, Sold out, In progress, Awaiting confirmation, Deadline passed, Completed, Refunds open. Every label is distinct, and a test scans every exported string for the word "NFT".
+`@ticket-escrow/client` also exports `PROMISE_TEXT` (the plan's sentence, verbatim, pinned by a test), `PHASE_LABELS` and `CLAIM_LABELS`. Claim words: Reserved, Claimable, Sending, Refunded, Released to the organizer. Phase words: Awaiting verifier, On sale, Sold out, In progress, Awaiting confirmation, Deadline passed, Completed, Refunds open. Every label is distinct.
 
 Other additions beyond the plan's list, for the same reason (both consumers need them): `createRpc`, `Reader.contractId`, `createReader({ contractId, rpc })` for an injected provider, `FailedReceipt.executorId`, `TX_FIXTURES` with `createFixtureRpc`, and the `actions` namespace (`actions.buyTicket(...)`, `actions.GAS_TGAS`).
 

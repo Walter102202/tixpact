@@ -30,12 +30,17 @@ What this costs, what it rules out, and what would make us revisit it.
 
 ## Index
 
-Newest first. Add one line per record.
+Add one line per record at the end of the table (the file merges by union, so two branches never conflict here).
 
 | Date | Decision | File |
 |---|---|---|
-| 2026-11-12 | The promise sentence and the phase and claim words live in the client package | [2026-11-12-shared-words-live-in-client.md](2026-11-12-shared-words-live-in-client.md) |
-| 2026-11-12 | Each RPC endpoint gets three attempts before the next one is tried | [2026-11-12-rpc-retries-before-failover.md](2026-11-12-rpc-retries-before-failover.md) |
-| 2026-11-12 | Amounts round toward zero; times use a 24-hour clock with the zone name | [2026-11-12-amount-and-time-display.md](2026-11-12-amount-and-time-display.md) |
-| 2026-11-12 | View schemas drop unknown fields; what we send is strict | [2026-11-12-view-schemas-tolerate-extra-fields.md](2026-11-12-view-schemas-tolerate-extra-fields.md) |
-| 2026-11-12 | A transaction is judged on its final status, and any failed receipt makes it a failure | [2026-11-12-tx-tracking-judged-at-final.md](2026-11-12-tx-tracking-judged-at-final.md) |
+| 2026-11-12 | A transaction is judged on its final status, and any failed receipt makes it a failure | `2026-11-12-tx-tracking-judged-at-final.md` |
+| 2026-11-12 | View schemas drop unknown fields; what we send is strict | `2026-11-12-view-schemas-tolerate-extra-fields.md` |
+| 2026-11-12 | Amounts round toward zero; times use a 24-hour clock with the zone name | `2026-11-12-amount-and-time-display.md` |
+| 2026-11-12 | Each RPC endpoint gets three attempts before the next one is tried | `2026-11-12-rpc-retries-before-failover.md` |
+| 2026-11-12 | The promise sentence and the phase and claim words live in the client package | `2026-11-12-shared-words-live-in-client.md` |
+| 2026-11-12 | The Rust and NEAR tools were installed from verified archives | `2026-11-12-rust-toolchain-installed-from-verified-archives.md` |
+| 2026-11-12 | One cargo workspace; sandbox tests use `near-sandbox` with `near-api` | `2026-11-12-one-cargo-workspace-and-the-template-harness.md` |
+| 2026-11-12 | A cancellation's reason is stored in `evidence_ref` | `2026-11-12-cancel-reason-shares-evidence-ref.md` |
+| 2026-11-12 | Times are shown in the viewer's time zone, with the offset written out | `2026-11-12-times-shown-in-the-viewers-zone.md` |
+| 2026-11-12 | The web offers the refund claim as soon as the deadline has passed | `2026-11-12-claim-shown-when-event-is-expirable.md` |
