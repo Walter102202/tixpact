@@ -442,7 +442,9 @@ fn contract_with_a_transfer_in_flight() -> Contract {
     contract
 }
 
-/// The resolver as the runtime calls it, at `now_ms`, with the receiver's answer `answer`.
+/// The resolver as the runtime calls it, at `now_ms`, with the receiver's answer `answer` and
+/// exactly its static gas. The mocked host charges its own fees (the register copy of the
+/// answer, storage) against that gas and panics past it; the wasm's own work is not metered.
 fn resolve_with(contract: &mut Contract, answer: near_sdk::PromiseResult, now_ms: u64) -> bool {
     use near_contract_standards::non_fungible_token::core::NonFungibleTokenResolver;
     testing_env!(
@@ -451,6 +453,7 @@ fn resolve_with(contract: &mut Contract, answer: near_sdk::PromiseResult, now_ms
             .predecessor_account_id(id(ESCROW))
             .block_timestamp(now_ms * 1_000_000)
             .account_balance(NearToken::from_near(1_000))
+            .prepaid_gas(GAS_FOR_RESOLVE_TRANSFER)
             .build(),
         near_sdk::test_vm_config(),
         near_sdk::RuntimeFeesConfig::test(),
@@ -462,9 +465,11 @@ fn resolve_with(contract: &mut Contract, answer: near_sdk::PromiseResult, now_ms
 
 /// Resolves the in-flight transfer with `answer` and checks who holds the ticket afterwards. Each
 /// answer gets its own test: the mocked storage is per test thread, so one contract per test.
-fn resolve_and_check(answer: near_sdk::PromiseResult, kept: bool) {
+/// Returns the gas the mocked host charged the resolver.
+fn resolve_and_check(answer: near_sdk::PromiseResult, kept: bool) -> near_sdk::Gas {
     let mut contract = contract_with_a_transfer_in_flight();
     assert_eq!(resolve_with(&mut contract, answer, 1_600_001), kept);
+    let used = env::used_gas();
     let ticket = contract
         .get_ticket("1-1".to_string())
         .expect("ticket exists");
@@ -482,6 +487,7 @@ fn resolve_and_check(answer: near_sdk::PromiseResult, kept: bool) {
     };
     assert_eq!(last.kind, expected);
     assert_eq!(last.account_id, id(holder));
+    used
 }
 
 #[test]
@@ -854,5 +860,11 @@ fn resolver_returns_the_ticket_on_the_largest_answer() {
     // `false` padded to 4 MiB, the protocol's limit: valid JSON, but longer than a boolean.
     let mut answer = vec![b' '; 4 * 1024 * 1024];
     answer[..5].copy_from_slice(b"false");
-    resolve_and_check(near_sdk::PromiseResult::Successful(answer), false);
+    // The resolver runs with exactly its static gas, so a host fee on the copy that outgrew it
+    // would already have aborted the call. The sandbox test in `gas.rs` meters the wasm too.
+    let used = resolve_and_check(near_sdk::PromiseResult::Successful(answer), false);
+    assert!(
+        used < GAS_FOR_RESOLVE_TRANSFER,
+        "the host charged {used} of the resolver's {GAS_FOR_RESOLVE_TRANSFER}"
+    );
 }

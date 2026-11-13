@@ -32,9 +32,9 @@ use crate::{Contract, ContractExt, HISTORY_CAP, MAX_MEMO_BYTES, MAX_MSG_BYTES, M
 pub const GAS_FOR_RESOLVE_TRANSFER: Gas = Gas::from_tgas(40);
 
 /// Least prepaid gas `nft_transfer_call` accepts: the resolver's static gas plus five times the
-/// most the call itself burns (4.23 Tgas measured, `docs/gas.md`), rounded up to 10 Tgas. It does
-/// not protect the lock (the resolver's gas is reserved when the promise is created, or the call
-/// fails as a whole); it only guarantees the receiver about 25 Tgas.
+/// most the call itself burns (4.23 Tgas measured, `docs/gas.md`), rounded up to the next multiple
+/// of 10 Tgas. It does not protect the lock (the resolver's gas is reserved when the promise is
+/// created, or the call fails as a whole); it only guarantees the receiver about 25 Tgas.
 pub const GAS_TRANSFER_CALL_MIN: Gas = Gas::from_tgas(70);
 
 /// Where a ticket stands, as stored. `TransferPending` and `RefundPending` are locks (R8).
