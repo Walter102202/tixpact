@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as actions from './actions.js';
 import { ERROR_MESSAGES } from './errors.js';
 import { createFixtureRpc, FIXTURE_CONTRACT_ID, TX_FIXTURES } from './fixtures.js';
 import {
@@ -168,6 +169,60 @@ describe('trackTransaction on recorded statuses', () => {
       receiver_id: 'tusd.testnet',
       actions: [{ FunctionCall: { method_name: 'faucet', deposit: '0' } }],
     });
+  });
+
+  it('reads a token refund and a token payout the token refused as failed on the token, with false', async () => {
+    const cases = [
+      {
+        tx: TX_FIXTURES.tokenClaimRefused,
+        call: actions.claimRefund('11-4'),
+        recipient: 'sofia.testnet',
+        events: logged('refund_requested', 'refund_failed'),
+      },
+      {
+        tx: TX_FIXTURES.tokenPayoutRefused,
+        call: actions.claimPayout(12),
+        recipient: 'org.testnet',
+        events: logged('payout_requested', 'payout_failed'),
+      },
+    ];
+    for (const { tx, call, recipient, events } of cases) {
+      // The recording is the call the client builds, sent to the escrow.
+      const sent = tx.status.transaction as {
+        signer_id: string;
+        receiver_id: string;
+        actions: Array<{ FunctionCall: Record<string, unknown> }>;
+      };
+      expect(sent.receiver_id, tx.hash).toBe(FIXTURE_CONTRACT_ID);
+      expect(sent.actions).toEqual([
+        {
+          FunctionCall: {
+            method_name: call.methodName,
+            args: btoa(JSON.stringify(call.args)),
+            gas: Number(call.gas),
+            deposit: call.deposit,
+          },
+        },
+      ]);
+      const { result } = await track(rpc, tx.hash, tx.signerId);
+      expect(result, tx.hash).toEqual({
+        ok: false,
+        failedReceipt: {
+          receiptId: tx.failedReceiptId,
+          step: 'other',
+          executorId: 'tusd.testnet',
+          error: {
+            code: 'UNKNOWN',
+            message: `The contract rejected the call: The account ${recipient} is not registered`,
+          },
+        },
+        value: false,
+        events,
+      });
+      expect(moneyMoved(result), tx.hash).toBe(false);
+      // The chain calls the transaction a success: the callback returned false.
+      expect(TxStatusSchema.parse(tx.status).status).toEqual({ SuccessValue: btoa('false') });
+    }
   });
 
   it('reads a payout whose transfer to the organizer failed as failed, with false', async () => {
