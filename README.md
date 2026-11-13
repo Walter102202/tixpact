@@ -6,7 +6,7 @@ Why NEAR: the verifier is an account name a buyer can read before paying, the co
 
 Built at NEAR HACKATHON 2026. It runs on **testnet**, it is **not audited**, and it must not hold real money. The web app carries a working name, TixPact.
 
-**Status on 2026-11-13.** The contract named below holds the released build. It still has one access key, and the proof page and `scripts/verify-deployment.mjs` say so; deleting that key is the last step before the submission. Every contract call here was signed from scripts, the command line and the agent; the web app reads this contract, and signing from a browser wallet has not been walked through yet. The entry pass was signed with the NEAR CLI and admitted by the door page reading this contract ([output](docs/proof-entry-pass.md)); signing one from a browser wallet, and scanning it with a phone's camera, have not been walked through either.
+**Status on 2026-11-13.** The contract named below holds the released build. It still has one access key, and the proof page and `scripts/verify-deployment.mjs` say so; deleting that key, and the key of the test token's account, is the last step before the submission. Every contract call here was signed from scripts, the command line and the agent; the web app reads this contract, and signing from a browser wallet has not been walked through yet. The entry pass was signed with the NEAR CLI and admitted by the door page reading this contract ([output](docs/proof-entry-pass.md)); signing one from a browser wallet, and scanning it with a phone's camera, have not been walked through either.
 
 | | |
 |---|---|
