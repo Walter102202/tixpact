@@ -106,6 +106,7 @@ Tests are sandbox tests in [`contract/tests/`](contract/tests/), one function pe
 | The organizer's payout follows the same safe path. | `t18_payout_failure_paths` | B7, B8 |
 | One event can never pay with another event's money. | `t19_events_do_not_share_money` | |
 | A verifier who lies is believed. This is a limit, stated and tested. | `t21_false_attestation_is_a_trust_limit` | |
+| The verifier can be a group: one member alone neither accepts the terms nor confirms the event. | `scripts/group-verifier.sh` | [`docs/proof-group-verifier.md`](docs/proof-group-verifier.md) |
 | The ticket is a standard NFT that wallets and explorers understand. | `t22_standard_token_surface` | |
 | The whole flow works from the command line alone. | `scripts/direct-calls.sh` | |
 | The deployed contract is not a test build, holds at least what it owes, and its access keys are counted from the chain (zero once the last key is deleted). | `scripts/verify-deployment.mjs` | |
@@ -114,6 +115,7 @@ Tests are sandbox tests in [`contract/tests/`](contract/tests/), one function pe
 ## What NEAR does here
 
 - **Named accounts with removable keys.** The verifier is an account name a buyer can read before paying. The contract account's keys are deleted at the end, after which nobody, including us, can change the code or move its balance.
+- **An account can be a group.** The verifier is any account, and on NEAR an account can be a Sputnik DAO whose calls are decided by votes. On testnet an event was accepted, and later confirmed, only when two of three members had voted, with no change to this contract ([proof](docs/proof-group-verifier.md)).
 - **Asynchronous payments handled as such.** On NEAR a transfer runs in a later block and can fail on its own. Every payment here debits the right first, records a pending operation, and settles it in a private callback: confirmed on success, restored on failure, never retried blindly.
 - **The NFT standards (NEP-171, 177, 181).** The ticket's ownership record is the standard one, and it is the only one: the refund cannot follow a stale copy.
 - **Storage staking.** State costs balance, so the organizer prepays a measured budget for the whole event and ticket money is never used for it.
@@ -138,14 +140,14 @@ The caps do not bound what the agent spends over time: fund its account only wit
 |---|---|
 | The contract, deployed on NEAR testnet, with the rules above enforced on chain. | The money: testnet NEAR from the faucet, worth nothing. |
 | Every transaction in `docs/proof.md`; each can be opened in the explorer. | The people: organizer, verifier, Ana and Luis are accounts we created and played ourselves. |
-| The tests: a real local node, real deployments, real failed transfers. | The verifier: a single account. A real one would be a venue, an auditor or a group with its own voting rules. |
+| The tests: a real local node, real deployments, real failed transfers. | The verifiers: accounts we hold. In the two stories the verifier is one account; in the [group proof](docs/proof-group-verifier.md) it is a DAO where two of three must vote, and all three are ours. |
 | The agent, reading and writing that contract, and the web app, reading it (signing from a browser wallet: see the status above). | The time scale: demo events last minutes so a deadline can be watched. |
 
 Nothing in the product is decided by an AI or by a server of ours. There is no backend: the web reads the chain through public RPC endpoints.
 
 ## Limits
 
-1. **A verifier who lies is believed.** If the verifier confirms an event that did not happen, the organizer is paid. The contract fixes who decides and when, not whether they are right.
+1. **A verifier who lies is believed.** If the verifier confirms an event that did not happen, the organizer is paid. The contract fixes who decides and when, not whether they are right. A group as verifier raises how many must lie, not whether they can.
 2. **A silent verifier means refunds**, even for an event that took place. The organizer bears that risk when choosing the verifier.
 3. **A failed callback can leave one payment pending for good**, and a failed transfer resolver can leave one ticket locked for good. We chose a stuck payment over a double payment, and there is no admin to unstick either. The gas reserved for both keeps a measured margin ([`docs/gas.md`](docs/gas.md)), which a protocol change could still exceed.
 4. **A lost key is a lost ticket.**
@@ -166,7 +168,8 @@ packages/client/   TypeScript: typed views and calls, transaction tracking, the 
 web/               React app (Vite): events, tickets, transfers, claims, an organizer and verifier desk, the proof page
 mcp/               MCP server: an agent with its own account and a spending cap
 scripts/           gate.sh (all checks), demo-scenario.mjs (writes docs/proof.md), direct-calls.sh, verify-deployment.mjs,
-                   demo-event.sh (one event with a deadline minutes away, to play the refund from the web app)
+                   demo-event.sh (one event with a deadline minutes away, to play the refund from the web app),
+                   group-verifier.sh (an event whose verifier is a DAO: two of three must vote)
 docs/              design, threat model, proof, gas, the agent guide, toolchain, one file per decision
 ```
 
