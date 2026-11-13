@@ -1,0 +1,6 @@
+# False positives of the secret scan, by fingerprint (commit:file:rule:line).
+# All three are the public account name of the test token in VITE_FAUCET_TOKENS=tusd.ticket-escrow-v2.testnet,
+# read by the "generic-api-key" rule as a key. See .gitleaks.toml.
+34760b0387c11c95ca9798ef170f7a14fe54f132:vercel.json:generic-api-key:5
+34760b0387c11c95ca9798ef170f7a14fe54f132:README.md:generic-api-key:51
+34760b0387c11c95ca9798ef170f7a14fe54f132:README.md:generic-api-key:267

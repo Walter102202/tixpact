@@ -1,0 +1,14 @@
+# Secret scan of the CI (job "hygiene"): the default gitleaks rules, plus one exception.
+#
+# The README and vercel.json pass the name of the test token's account to the web build:
+# VITE_FAUCET_TOKENS=<account>.testnet. An account name on NEAR is public by design, but the
+# default "generic-api-key" rule reads "TOKENS=<value>" as a key. Only lines of that exact shape
+# are let through; everything else is scanned as before.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Public NEAR testnet account names given to VITE_FAUCET_TOKENS"
+regexTarget = "line"
+regexes = ['''VITE_FAUCET_TOKENS=[a-z0-9._-]+\.testnet([ "']|$)''']
