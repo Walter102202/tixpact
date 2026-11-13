@@ -477,6 +477,20 @@ section,
 .claim-panel {
   margin-top: 16px;
 }
+.ticket-picture {
+  /* Not the page gutter every other section gets: it sits inside the ticket's column. */
+  padding: 32px 0 0;
+}
+.ticket-picture h2 {
+  font-size: 22px;
+}
+.ticket-picture-image {
+  display: block;
+  width: 100%;
+  max-width: 360px;
+  height: auto;
+  margin-bottom: 12px;
+}
 .history {
   padding: 32px 0 0;
 }

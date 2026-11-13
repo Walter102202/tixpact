@@ -95,3 +95,4 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | The entry pass and the prices in dollars share one demo reader; the countdown test waits for its interval | `2026-11-13-web-pass-and-prices-share-one-demo-reader.md` |
 | 2026-11-13 | The door checks every new fragment and dates every verdict; Undo works after "Check again" and says whether it removed the admission | `2026-11-13-door-checks-every-arrival-and-undo-says-so.md` |
 | 2026-11-13 | The group verifier also counts `factory_info_update` (Sputnik v3: replaces the factory, which can then replace the DAO's code) | `2026-11-13-group-verifier-counts-factory-info-update.md` |
+| 2026-11-13 | The ticket page shows the ticket as wallets show it: the contract's picture in an `<img>`, checked against its hash, and its sentence | `2026-11-13-web-ticket-as-wallets-show-it.md` |

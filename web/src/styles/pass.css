@@ -14,6 +14,8 @@
 
 .pass-section {
   margin-top: 32px;
+  /* Inside the ticket's column: without this it took the page gutter of every section. */
+  padding: 0;
 }
 .pass-section h2 {
   font-size: 22px;

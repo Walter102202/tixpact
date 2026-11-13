@@ -1,6 +1,7 @@
 import { FailoverRpcError, FailoverRpcProvider, JsonRpcProvider } from 'near-api-js';
 import { AccountDoesNotExistError } from 'near-api-js/rpc-errors';
 import { z } from 'zod';
+import { NftTokenSchema, type TicketDisplay, ticketDisplayOf } from './display.js';
 import {
   AccountIdSchema,
   type AccountingView,
@@ -98,6 +99,12 @@ export interface Reader {
    * account, any other policy, or a failed view. Optional, so readers written before it stay valid.
    */
   readGroupVerifier?(accountId: string): Promise<GroupVerifier | null>;
+  /**
+   * The ticket as wallets show it (NEP-171 `nft_token`): the title, description and drawn ticket
+   * the contract derives at every read. Null for a ticket that does not exist; a media that is not
+   * an SVG data URL reads as null. Optional, so readers written before it stay valid.
+   */
+  ticketDisplay?(tokenId: string): Promise<TicketDisplay | null>;
 }
 
 /** An account's standing with a NEP-141 token, for `actions.registerWithToken`. */
@@ -238,6 +245,8 @@ export function createReader(options: ReaderOptions): Reader {
       view('get_ticket_history', { token_id: tokenId }, TicketHistorySchema.nullable()),
     getOperation: (operationId) =>
       view('get_operation', { operation_id: operationId }, OperationViewSchema.nullable()),
+    ticketDisplay: async (tokenId) =>
+      ticketDisplayOf(await view('nft_token', { token_id: tokenId }, NftTokenSchema)),
 
     async getAccountProof(accountId) {
       const account = parse(
