@@ -17,6 +17,7 @@ import { useWallet } from '../../lib/near/useWallet';
 import { Link } from '../../lib/router';
 import { useLoad } from '../../lib/useLoad';
 import { useServices } from '../../services';
+import { AccountLink } from '../../ui/AccountLink';
 import { LoadState } from '../../ui/LoadState';
 import { TxStatus } from '../../ui/TxStatus';
 import { near, outcomeLine } from '../events/eventCopy';
@@ -116,8 +117,8 @@ function TicketDetails({ data, reread, apply }: { data: TicketData } & Reread) {
       </p>
       <h1>Ticket {ticket.token_id}</h1>
       <p className="lead">
-        A NEAR NFT (NEP-171) on the contract {contractId}. Whoever holds it holds the right to its
-        refund.
+        A NEAR NFT (NEP-171) on the contract <AccountLink id={contractId} />. Whoever holds it holds
+        the right to its refund.
       </p>
 
       <div className="event-layout">
@@ -128,7 +129,9 @@ function TicketDetails({ data, reread, apply }: { data: TicketData } & Reread) {
               <Link to={`/events/${event.event_id}`}>{event.title}</Link>
             </dd>
             <dt>Holder</dt>
-            <dd className="account-id">{ticket.owner_id}</dd>
+            <dd>
+              <AccountLink id={ticket.owner_id} />
+            </dd>
             <dt>Price paid</dt>
             <dd>{near(ticket.principal)}</dd>
             <dt>{moneyFact(ticket)}</dt>

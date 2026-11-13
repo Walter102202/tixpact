@@ -13,6 +13,7 @@ import { Link } from '../../lib/router';
 import { tooLong } from '../../lib/text';
 import { useLoad } from '../../lib/useLoad';
 import { useServices } from '../../services';
+import { AccountLink } from '../../ui/AccountLink';
 import { LoadState } from '../../ui/LoadState';
 import { TxStatus } from '../../ui/TxStatus';
 import { near } from '../events/eventCopy';
@@ -133,9 +134,13 @@ function VerifyDetails({
               <Link to={`/events/${event.event_id}`}>{event.title}</Link>, {event.venue}
             </dd>
             <dt>Organizer</dt>
-            <dd className="account-id">{event.organizer_id}</dd>
+            <dd>
+              <AccountLink id={event.organizer_id} />
+            </dd>
             <dt>Verifier</dt>
-            <dd className="account-id">{event.verifier_id}</dd>
+            <dd>
+              <AccountLink id={event.verifier_id} />
+            </dd>
             <dt>Starts</dt>
             <dd>{time(event.starts_at_ms)}</dd>
             <dt>Ends</dt>

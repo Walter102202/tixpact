@@ -9,6 +9,7 @@ import { useWallet } from '../../lib/near/useWallet';
 import { Link } from '../../lib/router';
 import { useLoad } from '../../lib/useLoad';
 import { useServices } from '../../services';
+import { AccountLink } from '../../ui/AccountLink';
 import { LoadState } from '../../ui/LoadState';
 import { BuyPanel } from './BuyPanel';
 import { near, outcomeLine, referenceLabel, verifierStatus } from './eventCopy';
@@ -87,10 +88,12 @@ function EventDetails({
               {event.sold} of {event.capacity}
             </dd>
             <dt>Organizer</dt>
-            <dd>{event.organizer_id}</dd>
+            <dd>
+              <AccountLink id={event.organizer_id} />
+            </dd>
             <dt>Verifier</dt>
             <dd>
-              {event.verifier_id} · {verifierStatus(event)}
+              <AccountLink id={event.verifier_id} /> · {verifierStatus(event)}
             </dd>
             <dt>Starts</dt>
             <dd>{time(event.starts_at_ms)}</dd>

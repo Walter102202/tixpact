@@ -4,6 +4,7 @@ import { useWallet } from '../lib/near/useWallet';
 import { DEMO_ACCOUNTS, isFixtureWallet } from '../lib/near/wallet';
 import { Link } from '../lib/router';
 import { useServices } from '../services';
+import { AccountLink } from './AccountLink';
 
 const NAV: Array<{ to: string; label: string }> = [
   { to: '/', label: 'Events' },
@@ -13,7 +14,7 @@ const NAV: Array<{ to: string; label: string }> = [
 ];
 
 export function Shell({ children }: { children: ReactNode }) {
-  const { fixtureMode, network, wallet } = useServices();
+  const { fixtureMode, network, wallet, contractId } = useServices();
   const { accountId, signIn, signOut } = useWallet();
   return (
     <>
@@ -81,6 +82,9 @@ export function Shell({ children }: { children: ReactNode }) {
       <footer className="site-footer">
         <p>
           {APP_NAME} runs on NEAR {network}. No real money moves here.
+        </p>
+        <p className="muted">
+          Contract: <AccountLink id={contractId} />
         </p>
       </footer>
     </>
