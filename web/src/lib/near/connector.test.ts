@@ -1,6 +1,7 @@
 import { NearConnector, type WalletManifest } from '@hot-labs/near-connect';
 import { describe, expect, it } from 'vitest';
-import { limitWallets, TESTNET_WALLETS } from './connector';
+import { limitWallets, signMessageWith, TESTNET_WALLETS } from './connector';
+import { MessageSigningUnsupported } from './wallet';
 
 /** A sandbox wallet as the near-connect manifest lists it, with only what the selector reads. */
 function wallet(id: string, testnet = true): WalletManifest {
@@ -91,5 +92,48 @@ describe('the wallet selector offers only the wallets verified on testnet', () =
     ]);
     limitWallets(connector, TESTNET_WALLETS);
     expect(ids(connector)).toEqual(['intear-wallet']);
+  });
+});
+
+describe('signing a message through near-connect', () => {
+  const request = {
+    message: 'Entry pass',
+    nonce: new Uint8Array(32),
+    recipient: 'ticket-escrow.testnet',
+  };
+
+  function fakeWallet(signMessage: boolean) {
+    const asked: unknown[] = [];
+    const manifest = wallet('meteor-wallet');
+    manifest.features.signMessage = signMessage;
+    return {
+      asked,
+      wallet: {
+        manifest,
+        async signMessage(params: unknown) {
+          asked.push(params);
+          return { accountId: 'luis.testnet', publicKey: 'ed25519:k', signature: 'c2ln' };
+        },
+      },
+    };
+  }
+
+  it('asks the wallet for the signed-in account on testnet and returns its answer as given', async () => {
+    const { wallet: w, asked } = fakeWallet(true);
+    const signed = await signMessageWith(w, 'luis.testnet', request);
+    expect(signed).toEqual({
+      accountId: 'luis.testnet',
+      publicKey: 'ed25519:k',
+      signature: 'c2ln',
+    });
+    expect(asked).toEqual([{ ...request, network: 'testnet', signerId: 'luis.testnet' }]);
+  });
+
+  it('refuses before opening a wallet whose manifest cannot sign messages', async () => {
+    const { wallet: w, asked } = fakeWallet(false);
+    await expect(signMessageWith(w, 'luis.testnet', request)).rejects.toBeInstanceOf(
+      MessageSigningUnsupported,
+    );
+    expect(asked).toEqual([]);
   });
 });

@@ -1,8 +1,10 @@
 import {
+  createFixturePassChain,
   createFixtureReader,
   createFixtureRpc,
   FIXTURE_CONTRACT_ID,
   FIXTURE_NOW_MS,
+  type PassChain,
   type Reader,
   type ReadUntilChangedOptions,
   type TrackOptions,
@@ -19,6 +21,8 @@ export interface AppServices {
   reader: Reader;
   txRpc: TxStatusRpc;
   wallet: WalletPort;
+  /** What the door reads to check an entry pass: access keys and tickets. */
+  passChain: PassChain;
   /** IANA zone every time is shown in: the viewer's. */
   timeZone: string;
   trackOptions?: TrackOptions;
@@ -41,13 +45,16 @@ export function viewerTimeZone(): string {
 
 /** Demo mode: fixture data, recorded transactions, and a wallet that signs in as luis.testnet. */
 export function createFixtureServices(): AppServices {
+  const reader = createFixtureReader();
   return {
     network: 'testnet',
     contractId: FIXTURE_CONTRACT_ID,
     fixtureMode: true,
-    reader: createFixtureReader(),
+    reader,
     txRpc: createFixtureRpc(),
     wallet: createFixtureWallet(null),
+    // Demo accounts sign passes with built-in keys that this chain lists as theirs.
+    passChain: createFixturePassChain(reader),
     timeZone: viewerTimeZone(),
     // The fixture events are laid out around this instant.
     now: () => FIXTURE_NOW_MS,

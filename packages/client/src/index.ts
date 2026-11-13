@@ -29,9 +29,28 @@ export {
   parseNear,
   unitOf,
 } from './format.js';
+export type { EntryPass, PassChain, PassCheck, PassRequest, PassRpc } from './pass.js';
+export {
+  checkPass,
+  createFixturePassChain,
+  createPassChain,
+  decodePass,
+  demoPassKey,
+  doorUrl,
+  encodePass,
+  nep413Hash,
+  PASS_SKEW_MS,
+  PASS_TTL_MS,
+  passMessage,
+  passNonce,
+  passRequest,
+  signedPass,
+  signPassWithKey,
+} from './pass.js';
 export type {
   AccountProof,
   CallFunctionParams,
+  GroupVerifier,
   Reader,
   ReaderOptions,
   ReaderRpc,
@@ -40,7 +59,7 @@ export type {
   ViewAccessKeyListParams,
   ViewAccountParams,
 } from './reader.js';
-export { createReader, createRpc } from './reader.js';
+export { createReader, createRpc, groupVerifierOf } from './reader.js';
 export { canClaimRefund } from './rules.js';
 export * from './schemas.js';
 export type {
