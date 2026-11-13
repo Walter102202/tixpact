@@ -786,7 +786,11 @@ function recordedCall(spec: {
   gasTgas: number;
   /** The call's return value; omitted for a method that returns nothing. */
   value?: unknown;
+  /** The account called: the escrow contract unless given (a token, in interface v2). */
+  receiverId?: string;
+  logs?: string[];
 }): RecordedTx {
+  const receiverId = spec.receiverId ?? FIXTURE_CONTRACT_ID;
   const returned = { SuccessValue: spec.value === undefined ? '' : base64Json(spec.value) };
   return {
     hash: spec.hash,
@@ -803,9 +807,10 @@ function recordedCall(spec: {
       },
       returned,
       [
-        outcome(spec.receiptId, FIXTURE_CONTRACT_ID, returned, [spec.refundId]),
+        outcome(spec.receiptId, receiverId, returned, [spec.refundId], spec.logs),
         outcome(spec.refundId, spec.signerId, GAS_REFUND),
       ],
+      receiverId,
     ),
   };
 }
@@ -1198,6 +1203,40 @@ export const TX_FIXTURES = {
       ],
     ),
   },
+
+  /**
+   * Sofia registers with tUSD (`storage_deposit`, registration only, exactly the minimum), so a
+   * refund can reach her. The token returns her storage balance.
+   */
+  tokenRegistered: recordedCall({
+    hash: 'v5tmsYbVCWb8u41W7jqtxdqfyAqeJFzGXAXWFemWgUx2',
+    receiptId: 'ekAYRWGUfwBjXSwKMvqZYZqU5waivhjo8Wie5jTiv65h',
+    refundId: '4hkPKqzvHhV2gbk2wiev5fGLbFHL2gtSPGYFS5caCzWb',
+    signerId: SOFIA,
+    receiverId: TUSD,
+    method: 'storage_deposit',
+    args: { account_id: SOFIA, registration_only: true },
+    deposit: parseNear('0.00125'),
+    gasTgas: 30,
+    value: { total: parseNear('0.00125'), available: '0' },
+  }),
+
+  /** Ana asks the test token for its faucet: 100 tUSD minted to her, returned as the amount. */
+  faucetMinted: recordedCall({
+    hash: 'tFpFJ46EVTE5UBdJWycCkax4wohE2QK6mL6ZFAVga7qi',
+    receiptId: 'VmDvR8L6idM5KJoVpXC5hLhq1PFQGS4rUPwTqtftdyds',
+    refundId: 'MvVQvpwznoXKhpgAZjMB5mQzaTYsqssXq9movcfXpKyp',
+    signerId: ANA,
+    receiverId: TUSD,
+    method: 'faucet',
+    args: {},
+    deposit: '0',
+    gasTgas: 30,
+    value: usd(100),
+    logs: [
+      `EVENT_JSON:${JSON.stringify({ standard: 'nep141', version: '1.0.0', event: 'ft_mint', data: [{ owner_id: ANA, amount: usd(100), memo: 'faucet' }] })}`,
+    ],
+  }),
 
   /** Luis buys ticket 10-3 with 10 tUSD (`ft_transfer_call`): the contract keeps it all. */
   tokenBuySucceeded: tokenPurchase({

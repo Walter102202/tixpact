@@ -127,6 +127,49 @@ describe('trackTransaction on recorded statuses', () => {
     }
   });
 
+  it('reads the recorded token registration and faucet calls as they settled, on the token', async () => {
+    const registered = await track(
+      rpc,
+      TX_FIXTURES.tokenRegistered.hash,
+      TX_FIXTURES.tokenRegistered.signerId,
+    );
+    expect(registered.result).toEqual({
+      ok: true,
+      value: { total: '1250000000000000000000', available: '0' },
+      events: [],
+    });
+    const minted = await track(
+      rpc,
+      TX_FIXTURES.faucetMinted.hash,
+      TX_FIXTURES.faucetMinted.signerId,
+    );
+    expect(minted.result).toEqual({ ok: true, value: '100000000', events: logged('ft_mint') });
+    expect(minted.result.events?.[0]?.executorId).toBe('tusd.testnet');
+    for (const tx of [TX_FIXTURES.tokenRegistered, TX_FIXTURES.faucetMinted]) {
+      const status = TxStatusSchema.parse(tx.status);
+      expect(status.receipts_outcome[0]?.outcome.executor_id, tx.hash).toBe('tusd.testnet');
+    }
+    // Each recording is the call the builder makes, sent to the token.
+    const sent = (tx: { status: Record<string, unknown> }) =>
+      tx.status.transaction as { receiver_id: string; actions: unknown[] };
+    expect(sent(TX_FIXTURES.tokenRegistered)).toMatchObject({
+      receiver_id: 'tusd.testnet',
+      actions: [
+        {
+          FunctionCall: {
+            method_name: 'storage_deposit',
+            args: btoa(JSON.stringify({ account_id: 'sofia.testnet', registration_only: true })),
+            deposit: '1250000000000000000000',
+          },
+        },
+      ],
+    });
+    expect(sent(TX_FIXTURES.faucetMinted)).toMatchObject({
+      receiver_id: 'tusd.testnet',
+      actions: [{ FunctionCall: { method_name: 'faucet', deposit: '0' } }],
+    });
+  });
+
   it('reads a payout whose transfer to the organizer failed as failed, with false', async () => {
     const tx = TX_FIXTURES.payoutTransferFailed;
     const { result } = await track(rpc, tx.hash, tx.signerId);
