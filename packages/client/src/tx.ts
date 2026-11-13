@@ -1,6 +1,7 @@
 import { base64Decode, bytesToString } from 'near-api-js';
 import { z } from 'zod';
 import { type ContractError, parseContractError } from './errors.js';
+import { TokenIdSchema } from './schemas.js';
 
 // After the wallet returns, the transaction is judged by the chain, not by the wallet: its status
 // is re-read by hash with every receipt, and any failed receipt makes the result a failure, even
@@ -246,7 +247,42 @@ export function summarizeTransaction(status: TxStatus): TxResult {
     ok,
     ...(failedReceipt === undefined ? {} : { failedReceipt }),
     ...(value === undefined ? {} : { value }),
+    events: outcomes.filter((o) => succeeded(o.outcome.status)).flatMap(eventsOf),
   };
+}
+
+const EVENT_PREFIX = 'EVENT_JSON:';
+const EventLogSchema = z.object({
+  standard: z.string(),
+  version: z.string(),
+  event: z.string(),
+  data: z.unknown(),
+});
+
+/** The NEP-297 events in one outcome's logs; a malformed `EVENT_JSON:` log is skipped. */
+function eventsOf({ id, outcome }: z.infer<typeof OutcomeWithIdSchema>): ContractEvent[] {
+  return outcome.logs.flatMap((log) => {
+    if (!log.startsWith(EVENT_PREFIX)) return [];
+    let json: unknown;
+    try {
+      json = JSON.parse(log.slice(EVENT_PREFIX.length));
+    } catch {
+      return [];
+    }
+    const parsed = EventLogSchema.safeParse(json);
+    return parsed.success
+      ? [{ executorId: outcome.executor_id, receiptId: id, ...parsed.data, data: parsed.data.data }]
+      : [];
+  });
+}
+
+const PurchasedSchema = z.looseObject({ token_id: TokenIdSchema });
+
+/** The ticket id of a `ticket_purchased` event, whose data is one record or a list of one. */
+function purchasedTicket(data: unknown): string | null {
+  const record = Array.isArray(data) ? data[0] : data;
+  const parsed = PurchasedSchema.safeParse(record);
+  return parsed.success ? parsed.data.token_id : null;
 }
 
 /**
@@ -266,9 +302,19 @@ export function moneyMoved(result: TxResult): boolean {
  * code of the failed receipt, or null when there is none.
  */
 export function purchaseResult(outcome: TxResult, contractId?: string): PurchaseResult {
-  void outcome;
-  void contractId;
-  throw new Error('purchaseResult is not implemented yet (lane K2, task K1)');
+  for (const event of outcome.events ?? []) {
+    if (event.standard !== 'ticket_escrow' || event.event !== 'ticket_purchased') continue;
+    if (contractId !== undefined && event.executorId !== contractId) continue;
+    const tokenId = purchasedTicket(event.data);
+    if (tokenId !== null) return { bought: true, tokenId };
+  }
+  // A result built by hand, without the events: a v1 `buy_ticket` returns the ticket id.
+  const returned = TokenIdSchema.safeParse(outcome.value);
+  if (outcome.events === undefined && outcome.ok && returned.success) {
+    return { bought: true, tokenId: returned.data };
+  }
+  const code = outcome.failedReceipt?.error.code;
+  return { bought: false, code: code === undefined || code === 'UNKNOWN' ? null : code };
 }
 
 export interface ReadUntilChangedOptions {

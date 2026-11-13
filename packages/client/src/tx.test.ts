@@ -5,6 +5,7 @@ import {
   explorerAccountUrl,
   explorerTxUrl,
   moneyMoved,
+  purchaseResult,
   readUntilChanged,
   summarizeTransaction,
   type TxStage,
@@ -14,6 +15,10 @@ import {
 } from './tx.js';
 
 const noSleep = async () => {};
+
+/** The NEP-297 events a result should list, by name, in order. */
+const logged = (...names: string[]) =>
+  names.map((event) => expect.objectContaining({ event, receiptId: expect.any(String) }));
 
 type Outcome = { id: string; outcome: Record<string, unknown> };
 
@@ -82,28 +87,39 @@ describe('trackTransaction on recorded statuses', () => {
   it('returns ok: true and the decoded value when every receipt succeeded', async () => {
     const tx = TX_FIXTURES.refundSettled;
     const { result } = await track(rpc, tx.hash, tx.signerId);
-    expect(result).toEqual({ ok: true, value: true });
+    expect(result).toEqual({
+      ok: true,
+      value: true,
+      events: logged('refund_requested', 'refund_settled'),
+    });
   });
 
   it('decodes a string return value', async () => {
     const tx = TX_FIXTURES.buySucceeded;
     const { result } = await track(rpc, tx.hash, tx.signerId);
-    expect(result).toEqual({ ok: true, value: '1-4' });
+    expect(result).toEqual({
+      ok: true,
+      value: '1-4',
+      events: logged('nft_mint', 'ticket_purchased'),
+    });
   });
 
   it('reads a transfer that returns nothing as ok with no value', async () => {
     const tx = TX_FIXTURES.transferSucceeded;
     const { result } = await track(rpc, tx.hash, tx.signerId);
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ ok: true, events: logged('nft_transfer') });
   });
 
   it('reads the recorded organizer and verifier calls as they settled', async () => {
     const expected = [
-      [TX_FIXTURES.eventCreated, { ok: true, value: 9 }],
-      [TX_FIXTURES.verificationAccepted, { ok: true }],
-      [TX_FIXTURES.eventAttested, { ok: true }],
-      [TX_FIXTURES.eventCancelled, { ok: true }],
-      [TX_FIXTURES.payoutSettled, { ok: true, value: true }],
+      [TX_FIXTURES.eventCreated, { ok: true, value: 9, events: [] }],
+      [TX_FIXTURES.verificationAccepted, { ok: true, events: [] }],
+      [TX_FIXTURES.eventAttested, { ok: true, events: [] }],
+      [TX_FIXTURES.eventCancelled, { ok: true, events: [] }],
+      [
+        TX_FIXTURES.payoutSettled,
+        { ok: true, value: true, events: logged('payout_requested', 'payout_settled') },
+      ],
     ] as const;
     for (const [tx, result] of expected) {
       const tracked = await track(rpc, tx.hash, tx.signerId);
@@ -244,6 +260,8 @@ describe('a transaction is ok only when every outcome succeeded', () => {
     expect(summarizeTransaction(TxStatusSchema.parse(unknown))).toEqual({
       ok: false,
       value: true,
+      // The callback has not run, so its refund_settled is not an event yet.
+      events: logged('refund_requested'),
     });
   });
 
@@ -253,7 +271,11 @@ describe('a transaction is ok only when every outcome succeeded', () => {
     const result = await trackTransaction(rpc, settled.hash, settled.signerId, () => {}, {
       sleep: noSleep,
     });
-    expect(result).toEqual({ ok: true, value: true });
+    expect(result).toEqual({
+      ok: true,
+      value: true,
+      events: logged('refund_requested', 'refund_settled'),
+    });
     expect(rpc.requests).toBe(2);
     const stuck = answering(started);
     await expect(
@@ -285,6 +307,7 @@ describe('a transaction is ok only when every outcome succeeded', () => {
         step: 'transaction',
         error: { code: 'UNKNOWN', message: 'The account does not have enough NEAR for this.' },
       },
+      events: [],
     });
   });
 });
@@ -305,8 +328,156 @@ describe('moneyMoved', () => {
       receipts.filter((r) => r.id !== tx.failedReceiptId),
     );
     const result = summarizeTransaction(TxStatusSchema.parse(withoutFailure));
-    expect(result).toEqual({ ok: true, value: false });
+    expect(result).toEqual({
+      ok: true,
+      value: false,
+      events: logged('refund_requested', 'refund_failed'),
+    });
     expect(moneyMoved(result)).toBe(false);
+  });
+});
+
+describe('purchaseResult', () => {
+  const rpc = createFixtureRpc();
+  const judged = async (tx: { hash: string; signerId: string }) =>
+    (await track(rpc, tx.hash, tx.signerId)).result;
+
+  it('reads a token purchase the contract kept as bought, with the ticket it logged', async () => {
+    const result = await judged(TX_FIXTURES.tokenBuySucceeded);
+    expect(result.ok).toBe(true);
+    // The transaction's value is the token resolver's: the amount kept, not the ticket id.
+    expect(result.value).toBe('10000000');
+    expect(purchaseResult(result)).toEqual({ bought: true, tokenId: '10-3' });
+    expect(purchaseResult(result, FIXTURE_CONTRACT_ID)).toEqual({ bought: true, tokenId: '10-3' });
+  });
+
+  it('reads a token purchase the contract rejected as not bought, although the transaction succeeded', async () => {
+    const tx = TX_FIXTURES.tokenBuyRejected;
+    const status = TxStatusSchema.parse(tx.status);
+    // The chain calls the transaction a success: the token refunded the buyer in its resolver.
+    expect(status.status).toEqual({ SuccessValue: btoa('"0"') });
+    const result = await judged(tx);
+    expect(result.failedReceipt?.receiptId).toBe(tx.failedReceiptId);
+    expect(result.failedReceipt?.executorId).toBe(FIXTURE_CONTRACT_ID);
+    expect(purchaseResult(result, FIXTURE_CONTRACT_ID)).toEqual({
+      bought: false,
+      code: 'ERR_TOO_LATE',
+    });
+  });
+
+  it('reads a purchase the token refused before the contract ran as not bought, with no code', async () => {
+    const result = await judged(TX_FIXTURES.tokenBuyUnfunded);
+    expect(result.ok).toBe(false);
+    expect(purchaseResult(result, FIXTURE_CONTRACT_ID)).toEqual({ bought: false, code: null });
+  });
+
+  it('covers the v1 buy_ticket outcomes too', async () => {
+    expect(purchaseResult(await judged(TX_FIXTURES.buySucceeded), FIXTURE_CONTRACT_ID)).toEqual({
+      bought: true,
+      tokenId: '1-4',
+    });
+    expect(purchaseResult(await judged(TX_FIXTURES.buyRejected), FIXTURE_CONTRACT_ID)).toEqual({
+      bought: false,
+      code: 'ERR_SOLD_OUT',
+    });
+  });
+
+  it('ignores a ticket_purchased log of a receipt that failed', () => {
+    const tx = TX_FIXTURES.tokenBuyRejected;
+    const bought = TxStatusSchema.parse(TX_FIXTURES.tokenBuySucceeded.status);
+    const purchasedLogs = bought.receipts_outcome[1]?.outcome.logs ?? [];
+    // ft_on_transfer logged the purchase, then panicked: the log is in the outcome, the ticket is not.
+    const loggedThenFailed = edited(tx.status, (receipts) =>
+      receipts.map((r, i) =>
+        i === 1 ? { ...r, outcome: { ...r.outcome, logs: purchasedLogs } } : r,
+      ),
+    );
+    const result = summarizeTransaction(TxStatusSchema.parse(loggedThenFailed));
+    expect(result.events?.some((e) => e.event === 'ticket_purchased')).toBe(false);
+    expect(purchaseResult(result)).toEqual({ bought: false, code: 'ERR_TOO_LATE' });
+  });
+
+  it('with the contract id, counts only the ticket_purchased logged by that contract', async () => {
+    // A token that writes a look-alike log in its own receipt does not make a purchase.
+    const forged = edited(TX_FIXTURES.tokenBuyRejected.status, (receipts) =>
+      receipts.map((r, i) =>
+        i === 0
+          ? {
+              ...r,
+              outcome: {
+                ...r.outcome,
+                logs: [
+                  `EVENT_JSON:${JSON.stringify({ standard: 'ticket_escrow', version: '2.0.0', event: 'ticket_purchased', data: [{ event_id: 12, token_id: '12-9' }] })}`,
+                ],
+              },
+            }
+          : r,
+      ),
+    );
+    const result = summarizeTransaction(TxStatusSchema.parse(forged));
+    expect(purchaseResult(result, FIXTURE_CONTRACT_ID)).toEqual({
+      bought: false,
+      code: 'ERR_TOO_LATE',
+    });
+    expect(purchaseResult(result)).toEqual({ bought: true, tokenId: '12-9' });
+  });
+
+  it('reads a ticket_purchased whose data is an object, and skips malformed logs', () => {
+    const base = summarizeTransaction(TxStatusSchema.parse(TX_FIXTURES.tokenBuyRejected.status));
+    const event = (data: unknown) => ({
+      executorId: FIXTURE_CONTRACT_ID,
+      receiptId: 'r',
+      standard: 'ticket_escrow',
+      version: '2.0.0',
+      event: 'ticket_purchased',
+      data,
+    });
+    expect(purchaseResult({ ...base, events: [event({ token_id: '10-4' })] })).toEqual({
+      bought: true,
+      tokenId: '10-4',
+    });
+    expect(purchaseResult({ ...base, events: [event([{ token_id: 'ten' }])] })).toEqual({
+      bought: false,
+      code: 'ERR_TOO_LATE',
+    });
+    const noisy = edited(TX_FIXTURES.buySucceeded.status, (receipts) =>
+      receipts.map((r, i) =>
+        i === 0
+          ? {
+              ...r,
+              outcome: {
+                ...r.outcome,
+                logs: [
+                  'EVENT_JSON:{not json',
+                  'EVENT_JSON:{"standard":1}',
+                  'plain text',
+                  ...((r.outcome.logs as string[]) ?? []),
+                ],
+              },
+            }
+          : r,
+      ),
+    );
+    const result = summarizeTransaction(TxStatusSchema.parse(noisy));
+    expect(result.events?.map((e) => e.event)).toEqual(['nft_mint', 'ticket_purchased']);
+    expect(purchaseResult(result)).toEqual({ bought: true, tokenId: '1-4' });
+  });
+
+  it('reads a hand-built result without events by its returned ticket id', () => {
+    expect(purchaseResult({ ok: true, value: '1-4' })).toEqual({ bought: true, tokenId: '1-4' });
+    expect(purchaseResult({ ok: true, value: '10000000' })).toEqual({ bought: false, code: null });
+    expect(purchaseResult({ ok: false, value: '1-4' })).toEqual({ bought: false, code: null });
+    expect(
+      purchaseResult({
+        ok: false,
+        failedReceipt: {
+          receiptId: 'r',
+          step: 'contract',
+          executorId: FIXTURE_CONTRACT_ID,
+          error: { code: 'UNKNOWN', message: 'The call ran out of gas before it finished.' },
+        },
+      }),
+    ).toEqual({ bought: false, code: null });
   });
 });
 

@@ -71,3 +71,6 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | The wallet selector offers only Meteor and Intear, through an allow list on `availableWallets` | `2026-11-13-web-wallet-selector-meteor-and-intear.md` |
 | 2026-11-13 | The landing states the problem and plays the refund: motion decided at mount, sticky floating header, fixed event columns | `2026-11-13-web-landing-problem-and-motion.md` |
 | 2026-11-13 | The release goes to a clean account, `ticket-escrow.testnet`, with the same wasm; its key is deleted only with Walter present | `2026-11-13-the-release-goes-to-a-clean-account.md` |
+| 2026-11-13 | Client v2: token calls name their receiver, terms default to NEAR, token reads are `Reader` methods, views require `currency` | `2026-11-13-client-v2-interface-additions.md` |
+| 2026-11-13 | A purchase is judged by the `ticket_purchased` event of a receipt that succeeded, from the contract when its id is given | `2026-11-13-client-v2-purchase-verdict-from-logged-events.md` |
+| 2026-11-13 | `FIXTURES` stays the NEAR chain; `FIXTURES_WITH_TOKENS` adds three tUSD events, one per outcome | `2026-11-13-client-v2-fixtures-keep-near-set-and-add-a-token-set.md` |
