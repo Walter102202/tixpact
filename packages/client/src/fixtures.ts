@@ -1312,7 +1312,121 @@ export const TX_FIXTURES = {
       TUSD,
     ),
   },
+
+  /**
+   * Sofia claims ticket 11-4 (25 tUSD) without being registered with tUSD: the contract reserves the
+   * refund and sends `ft_transfer`, the token refuses it, and the callback restores the right and
+   * returns `false`. The transaction itself succeeds; no money moved.
+   */
+  tokenClaimRefused: tokenSettlementRefused({
+    hash: 'r6oiWxRwYeeppasLRMkgKCkkBJGWo4ud36FY6QXqDD3Q',
+    ids: [
+      'qn3k4sAzLUxBuRHAVdGKL1PxHPpoJCsTvHBP6a1dGyL5',
+      'NzTRctyhAxR9zcwvUqvkzfD1XqYnaTdby2bC37t3tnyA',
+      'yoctshwTA6kYo7EgUDJMvA4Vn28XhAmKyHZ3vm9T4tuv',
+      '6Q36Cm9EJQbsBY7UMkn2EqW5usk5Kpyjq1oYqfA8CXYg',
+      '4H459RGx2VP3WBL2t8oVXoS5RKX23LM4ibPWbNZrk8Hu',
+    ],
+    signerId: SOFIA,
+    method: 'claim_refund',
+    args: { token_id: '11-4' },
+    operation: {
+      operation_id: 13,
+      kind: 'Refund',
+      event_id: 11,
+      token_id: '11-4',
+      recipient_id: SOFIA,
+      amount: usd(25),
+    },
+  }),
+
+  /**
+   * org.testnet collects the 25 tUSD of event 12 after it unregistered from tUSD (the view fixtures
+   * keep it registered; this is the case where it is not): the token refuses the `ft_transfer`, the
+   * callback makes the 25 tUSD available again and returns `false`.
+   */
+  tokenPayoutRefused: tokenSettlementRefused({
+    hash: 'ERqzLzVbRf7jQXTCzU8UEqJCN3rc4vdJatx5VxTmHncA',
+    ids: [
+      'JdVu35Nzg1DVAGoxyEYdeQE4fh7KGfVVdBsC2WfxeixU',
+      'kQ7ZWLqFVfrNMcKoedhT5vsi5DPCBeuTqZw743Z8ugkh',
+      'pJmwwigTna5M73mdd4qAonvjKPShFxzmo4FEZpqGyyi1',
+      'J6tMccZVNDQ5UwPT8WtGratsqLAChrAHHoyQ9Ve8fi3Y',
+      'VKVyHm8jBSfU3effRRS2LF72ZHBfzoaSZ8XwMFQ2C1JA',
+    ],
+    signerId: ORGANIZER,
+    method: 'claim_payout',
+    args: { event_id: 12 },
+    operation: {
+      operation_id: 14,
+      kind: 'Payout',
+      event_id: 12,
+      token_id: null,
+      recipient_id: ORGANIZER,
+      amount: usd(25),
+    },
+  }),
 } satisfies Record<string, RecordedTx>;
+
+/**
+ * A refund or payout of a token event that the token refused, as contract v2 runs it: the escrow
+ * reserves first and calls `ft_transfer` on the token with 1 yoctoNEAR; the token panics because the
+ * recipient is not registered (and returns the yoctoNEAR to the escrow); the escrow's callback
+ * restores the right and returns `false`, which is the transaction's value.
+ */
+function tokenSettlementRefused(spec: {
+  hash: string;
+  /** Receipt ids: the escrow's call, `ft_transfer`, the callback, the yoctoNEAR back, the gas refund. */
+  ids: [string, string, string, string, string];
+  signerId: string;
+  method: 'claim_refund' | 'claim_payout';
+  args: Record<string, unknown>;
+  operation: {
+    operation_id: number;
+    kind: 'Refund' | 'Payout';
+    event_id: number;
+    token_id: string | null;
+    recipient_id: string;
+    amount: string;
+  };
+}): RecordedTx {
+  const [callId, transferId, callbackId, depositBackId, refundId] = spec.ids;
+  const prefix = spec.operation.kind === 'Refund' ? 'refund' : 'payout';
+  const logged = (event: string) => eventJson(event, { ...spec.operation, currency: TUSD });
+  const refusal = panicked(`The account ${spec.operation.recipient_id} is not registered`);
+  const notMoved = { SuccessValue: base64Json(false) };
+  return {
+    hash: spec.hash,
+    signerId: spec.signerId,
+    failedReceiptId: transferId,
+    status: recordedStatus(
+      spec.hash,
+      spec.signerId,
+      { method: spec.method, argsBase64: base64Json(spec.args), deposit: '1', gasTgas: 100 },
+      notMoved,
+      [
+        outcome(
+          callId,
+          FIXTURE_CONTRACT_ID,
+          { SuccessReceiptId: callbackId },
+          [transferId, callbackId],
+          [logged(`${prefix}_requested`)],
+        ),
+        outcome(transferId, TUSD, refusal, [depositBackId]),
+        outcome(
+          callbackId,
+          FIXTURE_CONTRACT_ID,
+          notMoved,
+          [refundId],
+          [logged(`${prefix}_failed`)],
+        ),
+        // The failed call's 1 yoctoNEAR comes back to the escrow in a later receipt.
+        outcome(depositBackId, FIXTURE_CONTRACT_ID, GAS_REFUND),
+        outcome(refundId, spec.signerId, GAS_REFUND),
+      ],
+    ),
+  };
+}
 
 /** A receipt status for a contract panic with this message. */
 function panicked(message: string) {
