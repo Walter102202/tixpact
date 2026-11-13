@@ -597,7 +597,7 @@ Starts when W0 is on `main`. Enters the `agents` track of the hackathon only if 
 ### Task I2: the documents a judge reads (by G4)
 
 - [ ] `README.md`, written for a machine reader first: what it is in two sentences; the problem with three sourced facts; how each is solved; "Try it" as numbered "do X, see Y" steps (open the hosted demo; run `./scripts/gate.sh` and see the test names pass; run the read-only deployment check); the claims table (claim → test name → transaction in `docs/proof.md`); what NEAR does here, concretely; "What is real and what is simulated" (testnet funds, demo accounts played by us, a verifier that is one account, short demo windows); trust limits; architecture and interface; AI and third-party disclosure; license.
-- [ ] `docs/design.md`: the rules, state machines, accounting and decisions in English, derived from the spec without its market and naming sections.
+- [x] `docs/design.md`: the rules, state machines, accounting and decisions in English, derived from the spec without its market and naming sections.
 - [ ] `scripts/direct-calls.sh` (T20) and a "If the website is down" section in the README.
 - [ ] Hosted web on Vercel or Cloudflare Pages (Walter's account), kept up until 2026-11-25.
 
