@@ -696,7 +696,8 @@ async fn claim_with_low_gas_fails_whole() -> TestResult {
     let token_id = escrow.buy(&cast.luis, event_id, PRICE).await?;
     escrow.cancel(&cast.organizer, event_id).await?;
 
-    for tgas in [30, 59] {
+    let minimum = ticket_escrow::GAS_CLAIM_MIN.as_tgas();
+    for tgas in [minimum / 2, minimum - 1] {
         let result = escrow.claim_refund(&cast.luis, &token_id, tgas).await?;
         assert_fails_with(&result, "ERR_INSUFFICIENT_GAS");
         assert!(

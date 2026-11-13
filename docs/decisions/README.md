@@ -44,3 +44,4 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-12 | Error codes and behaviour for the cases the frozen interface does not name | `2026-11-12-codes-for-cases-the-interface-does-not-name.md` |
 | 2026-11-12 | The liquidity check runs after the reservation is written | `2026-11-12-liquidity-check-after-the-reservation.md` |
 | 2026-11-13 | `nft_transfer_call` needs 50 Tgas; `t13` holds the transfer open with a receiver that waits for `release` | `2026-11-13-transfer-call-minimum-gas-and-held-receiver.md` |
+| 2026-11-13 | Storage and gas constants come from measured worst cases; static gas keeps five times the worst case | `2026-11-13-measured-storage-and-gas-constants.md` |

@@ -25,11 +25,13 @@ use crate::log;
 use crate::{Contract, ContractExt, HISTORY_CAP, MAX_MEMO_BYTES, MAX_MSG_BYTES, MAX_PAGE};
 
 /// Static gas of `nft_resolve_transfer`. The standard gives its resolver a fixed 5 Tgas; ours
-/// also clears the lock and may move the ticket back, so it gets its own amount.
+/// also clears the lock and may move the ticket back, so it gets its own amount: five times its
+/// measured worst case (3.11 Tgas, `docs/gas.md`) or more, rounded up to 5 Tgas.
 pub const GAS_FOR_RESOLVE_TRANSFER: Gas = Gas::from_tgas(20);
 
-/// Least prepaid gas `nft_transfer_call` accepts: its own work, a share for the receiver and the
-/// resolver's static gas. Below it the call fails as a whole.
+/// Least prepaid gas `nft_transfer_call` accepts: the resolver's static gas plus five times the
+/// most the call itself burns (4.23 Tgas measured, `docs/gas.md`), rounded up to 10 Tgas; the
+/// receiver gets what is left. Below it the call fails as a whole.
 pub const GAS_TRANSFER_CALL_MIN: Gas = Gas::from_tgas(50);
 
 /// Where a ticket stands, as stored. `TransferPending` and `RefundPending` are locks (R8).

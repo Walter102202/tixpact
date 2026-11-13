@@ -7,8 +7,9 @@
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
+use near_api::types::transaction::actions::FunctionCallAction;
 use near_api::types::transaction::result::ExecutionFinalResult;
-use near_api::types::{PublicKey, Reference};
+use near_api::types::{Action, PublicKey, Reference};
 use near_api::{Account, AccountId, Chain, Contract, NearGas, NearToken, NetworkConfig, Signer};
 use near_sandbox::Sandbox;
 use near_sandbox::config::{
@@ -320,6 +321,18 @@ fn build_wasm(opts: cargo_near_build::BuildOpts) -> Vec<u8> {
     std::fs::read(path).expect("the built wasm is readable")
 }
 
+/// yoctoNEAR per byte of storage on this protocol version.
+pub const STORAGE_BYTE_COST: u128 = 10_000_000_000_000_000_000;
+/// Gas of each function call inside an [`Escrow::batch`], in Tgas.
+pub const TGAS_PER_CALL: u64 = 25;
+
+/// A 64-character sandbox account id, the longest NEAR allows.
+pub fn long_id(name: &str) -> String {
+    let id = format!("{name:x<56}.sandbox");
+    assert_eq!(id.len(), 64);
+    id
+}
+
 /// The people of the story, each with 20 NEAR.
 pub struct Cast {
     pub organizer: Account,
@@ -386,6 +399,35 @@ impl Escrow<'_> {
             .deposit(deposit)
             .gas(NearGas::from_tgas(tgas))
             .with_signer(signer.0.clone(), self.chain.signer.clone())
+            .send_to(&self.chain.network)
+            .await?;
+        Ok(result
+            .into_full()
+            .ok_or("send_to returned before the transaction ran")?)
+    }
+
+    /// One transaction from `signer` to the escrow, with one function call of
+    /// [`TGAS_PER_CALL`] per `(method, args, deposit in yoctoNEAR)`. If any call fails, none of
+    /// them changes anything.
+    pub async fn batch(
+        &self,
+        signer: &Account,
+        calls: Vec<(&str, Value, u128)>,
+    ) -> TestResult<ExecutionFinalResult> {
+        let actions = calls
+            .into_iter()
+            .map(|(method, args, deposit)| {
+                Action::FunctionCall(Box::new(FunctionCallAction {
+                    method_name: method.to_string(),
+                    args: args.to_string().into_bytes(),
+                    gas: NearGas::from_tgas(TGAS_PER_CALL),
+                    deposit: NearToken::from_yoctonear(deposit),
+                }))
+            })
+            .collect();
+        let result = near_api::Transaction::construct(signer.0.clone(), self.id())
+            .add_actions(actions)
+            .with_signer(self.chain.signer.clone())
             .send_to(&self.chain.network)
             .await?;
         Ok(result

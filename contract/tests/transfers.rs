@@ -300,8 +300,8 @@ async fn t13_resolver_ignores_time_window() -> TestResult {
 
 #[tokio::test]
 async fn transfer_call_with_low_gas_fails_whole() -> TestResult {
-    // Below 50 Tgas the call fails before it locks or moves anything. At exactly 50 Tgas the
-    // receiver still answers and the resolver still clears the lock.
+    // Below GAS_TRANSFER_CALL_MIN the call fails before it locks or moves anything. At exactly
+    // the minimum the receiver still answers and the resolver still clears the lock.
     let chain = TestChain::start().await?;
     let cast = chain.cast().await?;
     let escrow = chain.escrow().await?;
@@ -314,9 +314,10 @@ async fn transfer_call_with_low_gas_fails_whole() -> TestResult {
         .await?;
     escrow.accept(&cast.verifier, event_id).await?;
     let token_id = escrow.buy(&cast.ana, event_id, PRICE).await?;
+    let minimum = ticket_escrow::GAS_TRANSFER_CALL_MIN.as_tgas();
 
     let low = escrow
-        .transfer_call(&cast.ana, &receiver.0, &token_id, "keep", 49)
+        .transfer_call(&cast.ana, &receiver.0, &token_id, "keep", minimum - 1)
         .await?;
     assert_fails_with(&low, "ERR_INSUFFICIENT_GAS");
     let ticket = escrow.ticket(&token_id).await?;
@@ -325,7 +326,7 @@ async fn transfer_call_with_low_gas_fails_whole() -> TestResult {
     assert_eq!(history_of(&escrow, &token_id).await?.len(), 1);
 
     let at_minimum = escrow
-        .transfer_call(&cast.ana, &receiver.0, &token_id, "keep", 50)
+        .transfer_call(&cast.ana, &receiver.0, &token_id, "keep", minimum)
         .await?;
     let failures = receipt_failure_texts(&at_minimum);
     assert!(failures.is_empty(), "{failures:?}");

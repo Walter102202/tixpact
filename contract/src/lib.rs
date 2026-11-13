@@ -33,7 +33,7 @@ use near_contract_standards::non_fungible_token::{NonFungibleToken, TokenId};
 use near_sdk::store::{LookupMap, Vector};
 use near_sdk::{PanicOnDefault, env, near};
 
-pub use crate::accounting::Ledger;
+pub use crate::accounting::{Ledger, STORAGE_BYTES_PER_EVENT, STORAGE_BYTES_PER_TICKET};
 pub use crate::errors::Code;
 pub use crate::events::{EventTerms, Outcome, OutcomeReason};
 pub use crate::settlement::{GAS_CLAIM_MIN, GAS_FOR_CALLBACK, OperationKind, OperationView};

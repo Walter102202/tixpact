@@ -17,17 +17,20 @@ use crate::log;
 use crate::tickets::{HistoryKind, TicketStatus};
 use crate::{Contract, ContractExt};
 
-/// Static gas of `on_refund_result` and `on_payout_result`. The `fault-injection` test build
-/// lowers it so far that the callback runs out of gas after its transfer (`t11`, `t18`).
+/// Static gas of `on_refund_result` and `on_payout_result`. Measured worst case 2.43 Tgas
+/// (`docs/gas.md`); the contract cannot be upgraded, so this keeps five times that or more,
+/// rounded up to 5 Tgas. The `fault-injection` test build lowers it so far that the callback runs
+/// out of gas after its transfer (`t11`, `t18`).
 pub const GAS_FOR_CALLBACK: Gas = if cfg!(feature = "fault-injection") {
     Gas::from_ggas(100)
 } else {
     Gas::from_tgas(15)
 };
 
-/// Least prepaid gas `claim_refund` and `claim_payout` accept: the claim itself, the transfer and
-/// the callback's static gas. Below it the call fails as a whole (Review Focus 3).
-pub const GAS_CLAIM_MIN: Gas = Gas::from_tgas(60);
+/// Least prepaid gas `claim_refund` and `claim_payout` accept: the callback's static gas plus five
+/// times the most the claim itself burns (3.17 Tgas measured, `docs/gas.md`), rounded up to
+/// 10 Tgas. Below it the call fails as a whole (Review Focus 3).
+pub const GAS_CLAIM_MIN: Gas = Gas::from_tgas(40);
 
 /// What an operation in flight pays.
 #[near(serializers = [borsh, json])]
@@ -67,7 +70,7 @@ fn ensure_claim_gas() {
     ensure(
         env::prepaid_gas() >= GAS_CLAIM_MIN,
         Code::InsufficientGas,
-        "attach at least 60 Tgas so the payment can be confirmed",
+        "attach at least 40 Tgas so the payment can be confirmed",
     );
 }
 
@@ -115,7 +118,7 @@ impl Contract {
 impl Contract {
     /// The holder claims the refund of a ticket of a refundable event: exactly its principal, to
     /// the account that holds it now. If the deadline passed without an outcome, the event is
-    /// expired first. 1 yoctoNEAR and at least 60 Tgas. Resolves to `true` once the transfer is
+    /// expired first. 1 yoctoNEAR and at least 40 Tgas. Resolves to `true` once the transfer is
     /// confirmed, `false` if it failed and the right was restored.
     #[payable]
     pub fn claim_refund(&mut self, token_id: TokenId) -> Promise {
@@ -176,7 +179,7 @@ impl Contract {
     }
 
     /// The organizer claims everything the attestation made available, in one transfer.
-    /// 1 yoctoNEAR and at least 60 Tgas. Resolves to `true` once the transfer is confirmed,
+    /// 1 yoctoNEAR and at least 40 Tgas. Resolves to `true` once the transfer is confirmed,
     /// `false` if it failed and the amount is available again.
     #[payable]
     pub fn claim_payout(&mut self, event_id: u32) -> Promise {

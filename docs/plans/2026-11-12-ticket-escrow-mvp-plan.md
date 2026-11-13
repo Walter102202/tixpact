@@ -464,11 +464,11 @@ Needs Walter's go for three things: installing the Rust toolchain in his WSL, cr
 
 **Files:** modify `contract/src/accounting.rs`, `tickets.rs`, `views.rs`; create `docs/gas.md`; tests `contract/tests/storage.rs`.
 
-- [ ] Write the failing tests `t16` and `history_keeps_first_and_latest` (after 20 transfers: 16 entries, the first is `Purchased`, `dropped` is 5).
-- [ ] Run. Expected: fail.
-- [ ] Implement: measure the worst-case bytes of an event and of a ticket (64-character accounts, maximum texts, full history, a pending operation) with `env::storage_usage()` deltas after `flush()`; set `storage_per_event` and `storage_per_ticket` from the measurements plus a 20% margin; measure the gas of every method and of both callbacks in the sandbox, set the contract-side gas constants to the measured maximum plus margin, and write the table in `docs/gas.md`. Report any client-side gas value that should change under "Needs the integrator".
-- [ ] Run. Expected: the whole suite passes; `get_config` shows the measured constants and `fault_injection: false`.
-- [ ] Commit `feat(contract): measured storage budget, bounded ticket history and gas table`, tick, push. End the report with `STATUS: DONE`.
+- [x] Write the failing tests `t16` and `history_keeps_first_and_latest` (after 20 transfers: 16 entries, the first is `Purchased`, `dropped` is 5).
+- [x] Run. Expected: fail.
+- [x] Implement: measure the worst-case bytes of an event and of a ticket (64-character accounts, maximum texts, full history, a pending operation) with `env::storage_usage()` deltas after `flush()`; set `storage_per_event` and `storage_per_ticket` from the measurements plus a 20% margin; measure the gas of every method and of both callbacks in the sandbox, set the contract-side gas constants to the measured maximum plus margin, and write the table in `docs/gas.md`. Report any client-side gas value that should change under "Needs the integrator".
+- [x] Run. Expected: the whole suite passes; `get_config` shows the measured constants and `fault_injection: false`.
+- [x] Commit `feat(contract): measured storage budget, bounded ticket history and gas table`, tick, push. End the report with `STATUS: DONE`.
 
 ---
 

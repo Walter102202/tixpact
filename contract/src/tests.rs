@@ -614,14 +614,14 @@ fn transfer_call_checks_everything_before_any_change() {
     });
     unchanged(&contract);
 
-    call_with_gas(ANA, 1, 1_600_000, 49);
+    call_with_gas(ANA, 1, 1_600_000, GAS_TRANSFER_CALL_MIN.as_tgas() - 1);
     fails_with("ERR_INSUFFICIENT_GAS", || {
         let _ = contract.nft_transfer_call(receiver(), token(), None, None, "keep".into());
     });
     unchanged(&contract);
 
     // At the limits it goes through.
-    call_with_gas(ANA, 1, 1_600_000, 50);
+    call_with_gas(ANA, 1, 1_600_000, GAS_TRANSFER_CALL_MIN.as_tgas());
     let _ = contract.nft_transfer_call(
         receiver(),
         token(),
@@ -633,4 +633,166 @@ fn transfer_call_checks_everything_before_any_change() {
         .get_ticket("1-1".to_string())
         .expect("ticket exists");
     assert_eq!(ticket.status, TicketStatus::TransferPending);
+}
+
+/// `storage_usage` every measured call starts from. The mocked host resets the counter on each
+/// `testing_env!` but keeps the stored data, so each call's delta is read inside its own context.
+const BASE_USAGE: u64 = 10_000_000;
+
+/// A 64-character account id, the longest NEAR allows.
+fn long(name: &str) -> AccountId {
+    let id = format!("{name:x<59}.near");
+    assert_eq!(id.len(), 64);
+    id.parse().expect("valid account id")
+}
+
+/// Runs one call as `predecessor` and returns the bytes of storage it added, with every `store`
+/// collection written.
+fn bytes_added(
+    contract: &mut Contract,
+    predecessor: &AccountId,
+    deposit: u128,
+    now_ms: u64,
+    call: impl FnOnce(&mut Contract),
+) -> i64 {
+    testing_env!(
+        VMContextBuilder::new()
+            .current_account_id(id(ESCROW))
+            .predecessor_account_id(predecessor.clone())
+            .signer_account_id(predecessor.clone())
+            .attached_deposit(NearToken::from_yoctonear(deposit))
+            .block_timestamp(now_ms * 1_000_000)
+            .account_balance(NearToken::from_near(100_000))
+            .storage_usage(BASE_USAGE)
+            .build()
+    );
+    call(contract);
+    contract.events.flush();
+    contract.tickets.flush();
+    contract.operations.flush();
+    i64::try_from(near_sdk::env::storage_usage()).expect("small") - BASE_USAGE as i64
+}
+
+/// The largest event terms: 64-character verifier, longest title and venue, full capacity.
+fn largest_terms() -> EventTerms {
+    EventTerms {
+        title: "t".repeat(MAX_TITLE_BYTES as usize),
+        venue: "v".repeat(MAX_VENUE_BYTES as usize),
+        capacity: MAX_CAPACITY,
+        verifier_id: long("verifier"),
+        ..terms()
+    }
+}
+
+/// The measured constants are the worst case plus 20%, rounded up.
+fn with_margin(bytes: i64) -> u128 {
+    u128::try_from(bytes * 6).expect("positive").div_ceil(5)
+}
+
+/// Measures the most storage one event and one ticket can use (plan, Task C4): 64-character
+/// accounts everywhere, the longest texts, a full ticket history, a pending operation, and every
+/// holder with an owner index of its own. `storage_per_event` and `storage_per_ticket` must be
+/// exactly these numbers plus 20%.
+#[test]
+fn storage_constants_are_the_measured_worst_case_plus_twenty_percent() {
+    let organizer = long("organizer");
+    let verifier = long("verifier");
+    let budget = quote_event_budget(MAX_CAPACITY);
+    call_as(ESCROW, 0, 1_000_000);
+    let mut contract = Contract::new();
+
+    // Nine events first, so the measured ones have two-digit ids ("10-100").
+    for _ in 0..9 {
+        let _ = bytes_added(&mut contract, &organizer, budget, 1_000_000, |c| {
+            c.create_event(largest_terms());
+        });
+    }
+
+    // Event 10: sold out; its last ticket is the one measured.
+    let created = bytes_added(&mut contract, &organizer, budget, 1_000_000, |c| {
+        assert_eq!(c.create_event(largest_terms()), 10);
+    });
+    let hash = contract.get_event(10).expect("event exists").terms_hash;
+    let accepted = bytes_added(&mut contract, &verifier, 1, 1_000_000, |c| {
+        c.accept_verification(10, hash)
+    });
+    assert_eq!(accepted, 0, "accepting adds no bytes");
+    for serial in 1..MAX_CAPACITY {
+        let buyer = long(&format!("buyer-{serial}"));
+        let _ = bytes_added(&mut contract, &buyer, PRICE, 1_500_000, |c| {
+            c.buy_ticket(10);
+        });
+    }
+
+    let mut holder = long("holder-0");
+    let bought = bytes_added(&mut contract, &holder, PRICE, 1_500_000, |c| {
+        assert_eq!(c.buy_ticket(10), "10-100");
+    });
+    let mut ticket = bought;
+    // Twenty transfers, each to a new holder: the history fills up and the previous holder's
+    // owner index is removed.
+    for step in 1..=20 {
+        let next = long(&format!("holder-{step}"));
+        ticket += bytes_added(&mut contract, &holder, 1, 1_600_000, |c| {
+            c.nft_transfer(next.clone(), "10-100".to_string(), None, None)
+        });
+        holder = next;
+    }
+    let history = contract
+        .get_ticket_history("10-100".to_string())
+        .expect("ticket exists");
+    assert_eq!(history.entries.len(), HISTORY_CAP as usize);
+    let _ = bytes_added(&mut contract, &organizer, 1, 1_600_000, |c| {
+        c.cancel_event(10, Some("r".repeat(MAX_REF_BYTES as usize)))
+    });
+    ticket += bytes_added(&mut contract, &holder, 1, 1_700_000, |c| {
+        let _ = c.claim_refund("10-100".to_string());
+    });
+    let ticket_status = contract
+        .get_ticket("10-100".to_string())
+        .expect("ticket exists")
+        .status;
+    assert_eq!(ticket_status, TicketStatus::RefundPending);
+
+    // A ticket id is stored six times: the ticket record's key, the token owner's key, the
+    // token tree node, the holder's owner index (key and element) and the pending refund. The
+    // measured id is 6 bytes; the longest possible is 14 ("4294967295-100").
+    const TOKEN_ID_COPIES: i64 = 6;
+    let longest_id = format!("{}-{MAX_CAPACITY}", u32::MAX).len() as i64;
+    let ticket_worst = ticket + TOKEN_ID_COPIES * (longest_id - "10-100".len() as i64);
+
+    // Event 11: completed with a payout in flight, the larger of the two outcomes.
+    let mut event = created;
+    let hash_11 = {
+        let _ = bytes_added(&mut contract, &organizer, budget, 1_000_000, |c| {
+            assert_eq!(c.create_event(largest_terms()), 11);
+        });
+        contract.get_event(11).expect("event exists").terms_hash
+    };
+    let _ = bytes_added(&mut contract, &verifier, 1, 1_000_000, |c| {
+        c.accept_verification(11, hash_11)
+    });
+    let short_buy = bytes_added(&mut contract, &long("buyer-x"), PRICE, 1_500_000, |c| {
+        assert_eq!(c.buy_ticket(11), "11-1");
+    });
+    // At purchase five of the six copies exist; two more bytes of id cost two bytes each.
+    assert_eq!(bought - short_buy, 5 * 2, "the id copies are as counted");
+    event += bytes_added(&mut contract, &verifier, 1, ENDS, |c| {
+        c.attest_completed(11, Some("e".repeat(MAX_REF_BYTES as usize)))
+    });
+    event += bytes_added(&mut contract, &organizer, 1, ENDS + 1, |c| {
+        let _ = c.claim_payout(11);
+    });
+
+    eprintln!("measured worst case: event {event} bytes, ticket {ticket_worst} bytes");
+    assert_eq!(
+        accounting::STORAGE_BYTES_PER_EVENT,
+        with_margin(event),
+        "storage_per_event: measured {event} bytes"
+    );
+    assert_eq!(
+        accounting::STORAGE_BYTES_PER_TICKET,
+        with_margin(ticket_worst),
+        "storage_per_ticket: measured {ticket_worst} bytes"
+    );
 }
