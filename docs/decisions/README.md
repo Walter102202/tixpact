@@ -50,3 +50,6 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-12 | The agent's signer knows the transaction hash before sending, and judges send errors itself | `2026-11-12-agent-signer-knows-the-hash-before-sending.md` |
 | 2026-11-13 | A purchase the agent signed counts against its cap until a read shows it is no longer exposure | `2026-11-13-agent-purchase-counts-until-a-read-clears-it.md` |
 | 2026-11-13 | The agent signs only through RPC endpoints that confirmed testnet, and checks the chain before every signature | `2026-11-13-agent-signs-only-through-endpoints-confirmed-on-testnet.md` |
+| 2026-11-13 | The refund watcher backs off a failing call, gives it up after five, and stops before the next call | `2026-11-13-agent-watcher-backs-off-and-gives-up.md` |
+| 2026-11-13 | The agent's output hides RPC URLs and quotes organizer text on one line | `2026-11-13-agent-output-hides-rpc-urls-and-quotes-organizer-text.md` |
+| 2026-11-13 | At start the agent accepts only .testnet accounts and checks that the key is a full-access key of AGENT_ACCOUNT_ID | `2026-11-13-agent-start-checks-testnet-accounts-and-the-key.md` |

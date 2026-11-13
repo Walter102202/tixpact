@@ -1,6 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import type { Agent } from './agent.js';
 import { describeError } from './format.js';
+import type { Redact } from './redact.js';
 import { MAX_PAGE, type WriteResult } from './schemas.js';
 
 // The refund watcher: a plain loop, not a service. Every 30 seconds it reads the agent's tickets a
@@ -41,6 +42,8 @@ export interface WatchOnceOptions {
   signal?: AbortSignal;
   /** Failures and back-off carried between rounds; a fresh state when omitted. */
   state?: WatchState;
+  /** Applied to every log line (it removes RPC URLs); none when omitted. */
+  redact?: Redact;
 }
 
 export interface WatchOptions {
@@ -50,6 +53,8 @@ export interface WatchOptions {
   signal: AbortSignal;
   /** Waits between rounds; returns early when `signal` aborts. Tests replace it. */
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
+  /** Applied to every log line (it removes RPC URLs); none when omitted. */
+  redact?: Redact;
 }
 
 export interface WatchRound {
@@ -75,7 +80,9 @@ const costly = (result: WriteResult) =>
 
 /** One round: expire what is past its deadline, then claim everything claimable. */
 export async function watchOnce(options: WatchOnceOptions): Promise<WatchRound> {
-  const { agent, log, signal } = options;
+  const { agent, signal } = options;
+  const redact = options.redact ?? ((text: string) => text);
+  const log = (text: string) => options.log(redact(text));
   const state = options.state ?? createWatchState();
   state.round += 1;
   const round: WatchRound = { expired: [], claimed: [], problems: 0 };
@@ -178,7 +185,9 @@ const abortableSleep = (ms: number, signal: AbortSignal) =>
 
 /** Runs `watchOnce` every `intervalMs` until `signal` aborts. A failed round is logged, not fatal. */
 export async function watch(options: WatchOptions): Promise<void> {
-  const { agent, log, intervalMs, signal } = options;
+  const { agent, intervalMs, signal } = options;
+  const redact = options.redact ?? ((text: string) => text);
+  const log = (text: string) => options.log(redact(text));
   const sleep = options.sleep ?? abortableSleep;
   const state = createWatchState();
   log(

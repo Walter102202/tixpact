@@ -21,20 +21,25 @@ export {
   type Intent,
   type Policy,
 } from './policy.js';
-export { depsFromEnv, type RuntimeOptions } from './runtime.js';
+export { createRedactor, quietConsole, type Redact, redactDeep } from './redact.js';
+export { depsFromEnv, type KeyStanding, type RuntimeOptions } from './runtime.js';
 export { TOOL_NAMES, type ToolName, type WriteResult, type WriteStatus } from './schemas.js';
 export { createServer, SERVER_NAME } from './server.js';
 export {
   type AgentSigner,
   createNearSigner,
   type NearSignerOptions,
+  publicKeyOf,
   SendError,
 } from './signer.js';
 export {
+  createWatchState,
+  MAX_FAILURES,
   WATCH_INTERVAL_MS,
   type WatchOnceOptions,
   type WatchOptions,
   type WatchRound,
+  type WatchState,
   watch,
   watchOnce,
 } from './watch.js';

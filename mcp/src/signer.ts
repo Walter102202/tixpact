@@ -3,6 +3,7 @@ import {
   Account,
   baseEncode,
   FailoverRpcError,
+  KeyPair,
   KeyPairSigner,
   type KeyPairString,
   actions as nearActions,
@@ -101,6 +102,17 @@ function describe(error: unknown): string {
  * locally (so the hash is known before anything is sent) and submits with `waitUntil: 'INCLUDED'`.
  * Before every signature it checks that the provider is on the expected chain.
  */
+/** The public key of a secret key, as `ed25519:<base58>`. Never repeats the secret on failure. */
+export function publicKeyOf(secretKey: string): string {
+  try {
+    return KeyPair.fromString(secretKey as KeyPairString)
+      .getPublicKey()
+      .toString();
+  } catch {
+    throw new Error('AGENT_PRIVATE_KEY is not a valid secret key (the value is not shown).');
+  }
+}
+
 export function createNearSigner(options: NearSignerOptions): AgentSigner {
   const { accountId, provider } = options;
   const chainId = options.chainId ?? 'testnet';

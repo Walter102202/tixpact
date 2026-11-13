@@ -1,7 +1,7 @@
 import { parseNear } from '@ticket-escrow/client';
 import { KeyPair } from 'near-api-js';
 import { describe, expect, it } from 'vitest';
-import { depsFromEnv } from './runtime.js';
+import { depsFromEnv, type KeyStanding } from './runtime.js';
 
 // A key made for this test run; it controls no account.
 const SECRET = KeyPair.fromRandom('ed25519').toString();
@@ -23,13 +23,22 @@ const signing = {
  * Each endpoint answers its chain id, or fails when it is not in the map. An entry set to undefined
  * is an endpoint that answers its status without a chain id.
  */
-function chains(answers: Record<string, string | undefined>) {
+function chains(
+  answers: Record<string, string | undefined>,
+  key: () => Promise<KeyStanding> = async () => 'full_access',
+) {
   const asked: string[] = [];
   const signingUrls: string[][] = [];
+  const keyReads: Array<{ accountId: string; publicKey: string; urls: string[] }> = [];
   return {
     asked,
     signingUrls,
+    keyReads,
     options: {
+      accessKeyOf: async (accountId: string, publicKey: string, urls: readonly string[]) => {
+        keyReads.push({ accountId, publicKey, urls: [...urls] });
+        return key();
+      },
       chainIdOf: async (url: string) => {
         asked.push(url);
         if (!(url in answers)) throw new Error(`${url} did not answer`);
@@ -41,6 +50,53 @@ function chains(answers: Record<string, string | undefined>) {
     },
   };
 }
+
+describe('depsFromEnv and the key', () => {
+  it('reads the access key of the secret on AGENT_ACCOUNT_ID, through the confirmed endpoints', async () => {
+    const check = chains({ [A]: 'testnet', [B]: 'testnet' });
+    const deps = await depsFromEnv(signing, check.options);
+    expect(deps.signer?.accountId).toBe('te-d1-agent.testnet');
+    expect(check.keyReads).toEqual([
+      {
+        accountId: 'te-d1-agent.testnet',
+        publicKey: KeyPair.fromString(SECRET as `ed25519:${string}`)
+          .getPublicKey()
+          .toString(),
+        urls: [A, B],
+      },
+    ]);
+  });
+
+  it('turns signing off when the key is not an access key of AGENT_ACCOUNT_ID', async () => {
+    const check = chains({ [A]: 'testnet', [B]: 'testnet' }, async () => 'missing');
+    const deps = await depsFromEnv(signing, check.options);
+    expect(deps.signer).toBeNull();
+    expect(deps.signingOffReason).toBe(
+      'the key in AGENT_PRIVATE_KEY is not an access key of AGENT_ACCOUNT_ID',
+    );
+    expect(check.signingUrls).toEqual([]);
+  });
+
+  it('turns signing off for a function-call key, which cannot attach the deposits', async () => {
+    const check = chains({ [A]: 'testnet', [B]: 'testnet' }, async () => 'function_call');
+    const deps = await depsFromEnv(signing, check.options);
+    expect(deps.signer).toBeNull();
+    expect(deps.signingOffReason).toBe(
+      'the key in AGENT_PRIVATE_KEY is a function-call key of AGENT_ACCOUNT_ID, which cannot attach the deposits buy_ticket and claim_refund need; use a full-access key',
+    );
+  });
+
+  it('turns signing off when the access key cannot be read', async () => {
+    const check = chains({ [A]: 'testnet', [B]: 'testnet' }, async () => {
+      throw new Error('viewAccessKey on https://a.example timed out after 8000 ms');
+    });
+    const deps = await depsFromEnv(signing, check.options);
+    expect(deps.signer).toBeNull();
+    expect(deps.signingOffReason).toBe(
+      'the access key of AGENT_ACCOUNT_ID could not be read, so the key could not be checked; restart once the RPC answers',
+    );
+  });
+});
 
 describe('depsFromEnv', () => {
   it('without a key builds a read-only agent and asks no endpoint anything', async () => {

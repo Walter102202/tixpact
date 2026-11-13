@@ -10,6 +10,7 @@ import {
   formatWallet,
   formatWrite,
 } from './format.js';
+import { type Redact, redactDeep } from './redact.js';
 import { INPUT, OUTPUT, TOOL_NAMES, type ToolName } from './schemas.js';
 
 export type { AgentDeps as ToolDeps } from './agent.js';
@@ -111,24 +112,29 @@ function meta<N extends ToolName>(name: N) {
   };
 }
 
-const result = <T extends Record<string, unknown>>(text: string, structuredContent: T) => ({
-  content: [{ type: 'text' as const, text }],
-  structuredContent,
-});
-
-/** Turns an unexpected failure (an RPC down, a missing event) into a tool error with one sentence. */
-async function guarded<R>(
-  run: () => Promise<R>,
-): Promise<R | { isError: true; content: Array<{ type: 'text'; text: string }> }> {
-  try {
-    return await run();
-  } catch (error) {
-    return { isError: true, content: [{ type: 'text', text: describeError(error) }] };
-  }
-}
-
 /** Registers the ten tools, in `TOOL_NAMES` order, over one agent. */
-export function registerTools(server: McpServer, agent: Agent): void {
+export function registerTools(
+  server: McpServer,
+  agent: Agent,
+  redact: Redact = (text) => text,
+): void {
+  // The output boundary: everything a tool returns passes through `redact` (no RPC URL leaves).
+  const result = <T extends Record<string, unknown>>(text: string, structuredContent: T) => ({
+    content: [{ type: 'text' as const, text: redact(text) }],
+    structuredContent: redactDeep(structuredContent, redact),
+  });
+
+  /** Turns an unexpected failure (an RPC down, a missing event) into a tool error with one sentence. */
+  async function guarded<R>(
+    run: () => Promise<R>,
+  ): Promise<R | { isError: true; content: Array<{ type: 'text'; text: string }> }> {
+    try {
+      return await run();
+    } catch (error) {
+      return { isError: true, content: [{ type: 'text', text: redact(describeError(error)) }] };
+    }
+  }
+
   server.registerTool('list_events', meta('list_events'), async (input) =>
     guarded(async () => {
       const output = await agent.listEvents(input);

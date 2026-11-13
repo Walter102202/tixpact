@@ -2,6 +2,7 @@ import { createRequire } from 'node:module';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { type AgentDeps, createAgent } from './agent.js';
 import { near } from './format.js';
+import { createRedactor } from './redact.js';
 import { registerTools } from './tools.js';
 
 const { version } = createRequire(import.meta.url)('../package.json') as { version: string };
@@ -29,6 +30,6 @@ export function createServer(deps: AgentDeps): McpServer {
     { name: SERVER_NAME, version },
     { instructions: instructions(deps) },
   );
-  registerTools(server, createAgent(deps));
+  registerTools(server, createAgent(deps), createRedactor(deps.config.rpcUrls));
   return server;
 }
