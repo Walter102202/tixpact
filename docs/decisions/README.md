@@ -75,3 +75,6 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | A purchase is judged by the `ticket_purchased` event of a receipt that succeeded, from the contract when its id is given | `2026-11-13-client-v2-purchase-verdict-from-logged-events.md` |
 | 2026-11-13 | `FIXTURES` stays the NEAR chain; `FIXTURES_WITH_TOKENS` adds three tUSD events, one per outcome | `2026-11-13-client-v2-fixtures-keep-near-set-and-add-a-token-set.md` |
 | 2026-11-13 | The agent buys only in NEAR (its caps are in NEAR) and reads, claims and checks every currency | `2026-11-13-agent-buys-in-near-and-reads-every-currency.md` |
+| 2026-11-13 | The token list given to `new` is checked strictly (`ERR_LIMIT` over 4, `ERR_INVALID_TERMS` otherwise); the currency is stored once, in the event | `2026-11-13-token-list-checks-at-new.md` |
+| 2026-11-13 | The ticket's metadata is derived when read: the web's claim words, a title cut at 26 characters, escaped text, an image under 2 KB | `2026-11-13-the-ticket-draws-its-state.md` |
+| 2026-11-13 | Token payments go through the v1 reserve-first path with `ft_transfer`; `ft_on_transfer` checks its caller first; a token claim needs 60 Tgas; a listed token is trusted | `2026-11-13-token-payments-share-the-settlement-path.md` |

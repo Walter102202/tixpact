@@ -16,10 +16,10 @@ use near_sdk::near;
 use crate::errors::{Code, fail};
 
 /// Bytes of storage an event prepays for its own record and its payout record: the measured worst
-/// case, 1,144 bytes (64-character accounts, longest title, venue and evidence, a payout in
-/// flight), plus 20%. The unit test
+/// case, 1,213 bytes (64-character accounts and currency, longest title, venue and evidence, a
+/// payout in flight), plus 20%. The unit test
 /// `storage_constants_are_the_measured_worst_case_plus_twenty_percent` measures it again.
-pub const STORAGE_BYTES_PER_EVENT: u128 = 1_373;
+pub const STORAGE_BYTES_PER_EVENT: u128 = 1_456;
 /// Bytes of storage an event prepays for each ticket of its capacity: the measured worst case,
 /// 2,129 bytes (the ticket record with a full history of 64-character accounts, its token
 /// entries, an owner index of its own, a pending refund and the longest possible ticket id), plus

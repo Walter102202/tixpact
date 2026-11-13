@@ -1,7 +1,9 @@
-//! NEP-297 events of standard `ticket_escrow`, version `1.0.0` (plan, "Events (NEP-297)").
+//! NEP-297 events of standard `ticket_escrow`, version `2.0.0` (plan v1, "Events (NEP-297)";
+//! v2 adds `currency` to `event_created`, `ticket_purchased` and the settlement events).
 //!
-//! Each log line is `EVENT_JSON:{"standard":"ticket_escrow","version":"1.0.0","event":<name>,
+//! Each log line is `EVENT_JSON:{"standard":"ticket_escrow","version":"2.0.0","event":<name>,
 //! "data":[{...}]}`. Token mint and transfer use the standard `nep171` events instead.
+//! `currency` is `null` for NEAR, otherwise the token account; amounts are in its smallest unit.
 
 use near_sdk::json_types::U128;
 use near_sdk::serde::Serialize;
@@ -12,7 +14,7 @@ use crate::events::{Outcome, OutcomeReason};
 use crate::settlement::Operation;
 
 const STANDARD: &str = "ticket_escrow";
-const VERSION: &str = "1.0.0";
+const VERSION: &str = "2.0.0";
 
 #[derive(Serialize)]
 #[serde(crate = "near_sdk::serde")]
@@ -42,6 +44,7 @@ pub fn event_created(
     terms_hash: &str,
     price: u128,
     capacity: u32,
+    currency: Option<&AccountId>,
 ) {
     emit(
         "event_created",
@@ -52,6 +55,7 @@ pub fn event_created(
             "terms_hash": terms_hash,
             "price": U128(price),
             "capacity": capacity,
+            "currency": currency,
         }),
     );
 }
@@ -63,7 +67,13 @@ pub fn verification_accepted(event_id: u32, verifier_id: &AccountId, terms_hash:
     );
 }
 
-pub fn ticket_purchased(event_id: u32, token_id: &str, owner_id: &AccountId, price: u128) {
+pub fn ticket_purchased(
+    event_id: u32,
+    token_id: &str,
+    owner_id: &AccountId,
+    price: u128,
+    currency: Option<&AccountId>,
+) {
     emit(
         "ticket_purchased",
         json!({
@@ -71,6 +81,7 @@ pub fn ticket_purchased(event_id: u32, token_id: &str, owner_id: &AccountId, pri
             "token_id": token_id,
             "owner_id": owner_id,
             "price": U128(price),
+            "currency": currency,
         }),
     );
 }
@@ -83,8 +94,13 @@ pub fn event_resolved(event_id: u32, outcome: Outcome, reason: OutcomeReason, by
 }
 
 /// `refund_requested`, `refund_settled`, `refund_failed`, `payout_requested`, `payout_settled` and
-/// `payout_failed`: each carries the operation, its recipient and its amount.
-pub fn settlement(event: &str, operation_id: u64, operation: &Operation) {
+/// `payout_failed`: each carries the operation, its recipient, its amount and its currency.
+pub fn settlement(
+    event: &str,
+    operation_id: u64,
+    operation: &Operation,
+    currency: Option<&AccountId>,
+) {
     emit(
         event,
         json!({
@@ -94,6 +110,7 @@ pub fn settlement(event: &str, operation_id: u64, operation: &Operation) {
             "token_id": operation.token_id,
             "recipient_id": operation.recipient_id,
             "amount": U128(operation.amount),
+            "currency": currency,
         }),
     );
 }

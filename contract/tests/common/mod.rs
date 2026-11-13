@@ -100,7 +100,7 @@ impl TestChain {
         let account = self.accounts(&[id], 50).await?.remove(0);
         Contract::deploy(account.0.clone())
             .use_code(wasm)
-            .with_init_call("new", ())?
+            .with_init_call("new", json!({ "tokens": [] }))?
             .with_signer(self.signer.clone())
             .send_to(&self.network)
             .await?

@@ -19,7 +19,7 @@ async fn deploys_and_reports_config() -> testresult::TestResult<()> {
         .await?
         .data;
 
-    assert_eq!(config["version"], "1.0.0");
+    assert_eq!(config["version"], "2.0.0");
     assert_eq!(config["max_capacity"], 100);
     assert_eq!(config["fault_injection"], false);
 

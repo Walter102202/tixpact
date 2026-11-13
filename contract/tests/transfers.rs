@@ -442,15 +442,19 @@ async fn t22_standard_token_surface() -> TestResult {
         description.contains("Jazz night") && description.contains("Teatro Municipal"),
         "{description}"
     );
+    // Interface v2: the ticket shows its state in `media` (with its hash) and `extra`.
+    let media = token_metadata["media"].as_str().unwrap_or_default();
+    assert!(media.starts_with("data:image/svg+xml;base64,"), "{media}");
+    assert!(token_metadata["media_hash"].is_string());
+    let extra: Value =
+        near_sdk::serde_json::from_str(token_metadata["extra"].as_str().unwrap_or("{}"))?;
+    assert_eq!(extra["claim"], "Reserved");
     for field in [
-        "media",
-        "media_hash",
         "copies",
         "issued_at",
         "expires_at",
         "starts_at",
         "updated_at",
-        "extra",
         "reference",
         "reference_hash",
     ] {
