@@ -19,8 +19,8 @@ use crate::{Contract, ContractExt};
 
 /// Static gas of `on_refund_result` and `on_payout_result`. Measured worst case 2.43 Tgas
 /// (`docs/gas.md`); the contract cannot be upgraded, so this keeps five times that or more,
-/// rounded up to 5 Tgas. The `fault-injection` test build lowers it so far that the callback runs
-/// out of gas after its transfer (`t11`, `t18`).
+/// rounded up to the next multiple of 5 Tgas. The `fault-injection` test build lowers it so far
+/// that the callback runs out of gas after its transfer (`t11`, `t18`).
 pub const GAS_FOR_CALLBACK: Gas = if cfg!(feature = "fault-injection") {
     Gas::from_ggas(100)
 } else {
@@ -28,8 +28,9 @@ pub const GAS_FOR_CALLBACK: Gas = if cfg!(feature = "fault-injection") {
 };
 
 /// Least prepaid gas `claim_refund` and `claim_payout` accept: the callback's static gas plus five
-/// times the most the claim itself burns (3.17 Tgas measured, `docs/gas.md`), rounded up to
-/// 10 Tgas. Below it the call fails as a whole (Review Focus 3).
+/// times the most the claim itself burns (3.24 Tgas measured, for a claim that expires its event
+/// first, `docs/gas.md`), rounded up to the next multiple of 10 Tgas. Below it the call fails as a
+/// whole (Review Focus 3).
 pub const GAS_CLAIM_MIN: Gas = Gas::from_tgas(40);
 
 /// What an operation in flight pays.
