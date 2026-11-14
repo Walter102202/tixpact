@@ -1,6 +1,6 @@
 # The product is called TixPact
 
-Date: 2026-11-14. Author: Walter (recorded by the integrator). Status: accepted.
+Date: 2026-11-14. Author: Walter (recorded by the integrator). Status: accepted; the repository name part is replaced by `2026-11-14-the-repository-is-called-tixpact.md`.
 
 ## Context
 
