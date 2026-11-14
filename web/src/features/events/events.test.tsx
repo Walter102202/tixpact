@@ -225,9 +225,10 @@ describe('buying a ticket', () => {
         gas: '50000000000000',
       },
     ]);
-    expect(screen.getByRole('link', { name: 'Open ticket 1-4' }).getAttribute('href')).toBe(
-      '/tickets/1-4',
-    );
+    const open = screen.getByRole('link', { name: 'Open ticket 1-4' });
+    expect(open.getAttribute('href')).toBe('/tickets/1-4');
+    // Its own paragraph: inline, it ran into the explorer link ("Open ticket 1-4View the…").
+    expect(open.parentElement?.tagName).toBe('P');
   });
 
   it('a failed purchase says the payment did not complete, with the step and the reason', async () => {

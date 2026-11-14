@@ -404,7 +404,9 @@ function Bought({ tokenId, holder }: { tokenId: string | null; holder: string })
       <p>
         {holder} holds ticket {tokenId}.
       </p>
-      <Link to={`/tickets/${tokenId}`}>Open ticket {tokenId}</Link>
+      <p>
+        <Link to={`/tickets/${tokenId}`}>Open ticket {tokenId}</Link>
+      </p>
     </>
   );
 }
