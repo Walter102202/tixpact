@@ -14,7 +14,7 @@ Built at NEAR HACKATHON 2026, from the first commit on 2026-11-12. It runs on **
 | Access keys of the contract account | 0: the last one was deleted on 2026-11-14 ([transaction](https://testnet.nearblocks.io/txns/65rg5T8qQXrtDFjmxCSmCMqfohTk46KycWRVSH9bN1kQ)), so nobody can replace the code. The proof page and `scripts/verify-deployment.mjs` count them from the chain. |
 | Dollar token it accepts (testnet) | [`tusd.ticket-escrow-v2.testnet`](https://testnet.nearblocks.io/address/tusd.ticket-escrow-v2.testnet): `tUSD`, a test dollar anyone can mint, worth nothing |
 | Web app (testnet) | [tixpact.vercel.app](https://tixpact.vercel.app), reading the contract above. Two events stay on sale there until 2026-11-26 00:00 UTC, so a ticket can be bought with nothing installed: [Try it](#try-it). To run it locally: step 1 there. |
-| Demo video (2:24) | [The demo post on X](https://x.com/WalterGuzm2202/status/2121736167414518181): a ticket bought with Meteor Wallet on the hosted site, its entry pass at the door, the ticket given away, and the refund claimed by its new holder after nobody confirmed the event |
+| Demo video (2:24) | [The demo post on X](https://x.com/WalterGuzm2202/status/2121738691693482350): a ticket bought with Meteor Wallet on the hosted site, its entry pass at the door, the ticket given away, and the refund claimed by its new holder after nobody confirmed the event |
 | Hackathon tracks | `nfts`, `realworld`, `social` and `agents`: [what fits each](#hackathon-tracks) |
 | Every claim below, with its transaction | [`docs/proof.md`](docs/proof.md) |
 | How it works and why | [`docs/design.md`](docs/design.md) |
