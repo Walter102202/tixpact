@@ -1,6 +1,6 @@
 # Version 2 goes to its own account, `ticket-escrow-v2.testnet`
 
-Date: 2026-11-13. Author: integrator. Status: accepted. The key deletion it prepares is not done yet.
+Date: 2026-11-13. Author: integrator. Status: accepted. The contract's key was deleted on 2026-11-14 with Walter's OK (transaction `65rg5T8qQXrtDFjmxCSmCMqfohTk46KycWRVSH9bN1kQ`); the token account's key is kept.
 
 ## Context
 
