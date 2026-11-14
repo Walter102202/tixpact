@@ -6,14 +6,15 @@ The price of each ticket stays reserved in a NEAR contract until a verifier, agr
 
 Why NEAR: the verifier is an account name a buyer can read before paying, the contract's keys can be deleted so that nobody can change it afterwards, and fees are low enough for each holder to claim their own refund ([more](#what-near-does-here)).
 
-Built at NEAR HACKATHON 2026. It runs on **testnet**, it is **not audited**, and it must not hold real money. The code, the contract and its testnet accounts are named `ticket-escrow`.
+Built at NEAR HACKATHON 2026, from the first commit on 2026-11-12. It runs on **testnet**, it is **not audited**, and it must not hold real money. The code, the contract and its testnet accounts are named `ticket-escrow`.
 
 | | |
 |---|---|
 | Contract (testnet) | [`ticket-escrow-v2.testnet`](https://testnet.nearblocks.io/address/ticket-escrow-v2.testnet) |
 | Access keys of the contract account | 0: the last one was deleted on 2026-11-14 ([transaction](https://testnet.nearblocks.io/txns/65rg5T8qQXrtDFjmxCSmCMqfohTk46KycWRVSH9bN1kQ)), so nobody can replace the code. The proof page and `scripts/verify-deployment.mjs` count them from the chain. |
 | Dollar token it accepts (testnet) | [`tusd.ticket-escrow-v2.testnet`](https://testnet.nearblocks.io/address/tusd.ticket-escrow-v2.testnet): `tUSD`, a test dollar anyone can mint, worth nothing |
-| Web app (testnet) | [tixpact.vercel.app](https://tixpact.vercel.app), reading the contract above. To run it locally: [Try it](#try-it), step 1. |
+| Web app (testnet) | [tixpact.vercel.app](https://tixpact.vercel.app), reading the contract above. Two events stay on sale there until 2026-11-26 00:00 UTC, so a ticket can be bought with nothing installed: [Try it](#try-it). To run it locally: step 1 there. |
+| Hackathon tracks | `nfts`, `realworld`, `social` and `agents`: [what fits each](#hackathon-tracks) |
 | Every claim below, with its transaction | [`docs/proof.md`](docs/proof.md) |
 | How it works and why | [`docs/design.md`](docs/design.md) |
 | Every way to cheat we could think of | [`docs/threat-model.md`](docs/threat-model.md) |
@@ -71,9 +72,32 @@ Each problem, what the contract does about it, and the test that proves it:
 - **Low fees.** Each holder pays the fee of their own claim, which is what makes "no operator, no batch payout" practical. In the testnet proof, buying a 0.5 NEAR ticket cost Ana 0.00043 NEAR in fees ([transaction](https://testnet.nearblocks.io/txns/ETNsctWkqPYnJLDbgt4SyL59HBipadY29Wzn33Xc5UBw)), giving it to Luis cost her 0.00037 NEAR ([transaction](https://testnet.nearblocks.io/txns/2E8ZuzKunYs35AZtKQBWBdRwMfPHY4amzWLsAoUh77TR)), and getting the 0.5 NEAR back cost Luis 0.0006 NEAR ([transaction](https://testnet.nearblocks.io/txns/38exzpdmQovUmE2h5ZqvzdUoNiBQ6RmuYC7qC9V3znhv)). The worst case of every method is in [`docs/gas.md`](docs/gas.md).
 - **A sandbox that controls time and state.** The tests move the clock past deadlines, delete accounts in the middle of a payment and force a balance shortfall.
 
+## Hackathon tracks
+
+The project is entered in four tracks. Each row says what in this repository fits the track, which of the track's hints it uses, and where to check it.
+
+| Track | What fits | Hints used | Where to check |
+|---|---|---|---|
+| `nfts`, NFTs That Do Something | The ticket is an NFT that carries two rights: the refund of the money reserved for it, and entry at the door. Both belong to whoever holds it now. Its title, text and picture are computed from the state of its money at every read, so it is a dynamic NFT. | Dynamic NFTs, NEP-171 | `t07_refund_follows_the_holder`, `t32_metadata_follows_the_state`, `t22_standard_token_surface`; proof rows A6, A8, A9, A13, B9 and C21; [`docs/proof-entry-pass.md`](docs/proof-entry-pass.md) |
+| `realworld`, Real-World Money | A payment to a merchant whose refund the merchant cannot block: ticket sales wait in the contract until the event is confirmed. An event can be priced in a dollar token (NEP-141), the place a stablecoin takes on mainnet; on testnet that token is `tUSD`, a test dollar. | Stablecoins | `t25_token_purchase_reserves_exact_price`, `t27_token_refund_follows_the_holder`, `t30_currencies_do_not_share_money`; proof rows C6 to C19 |
+| `social`, Social Money | The account that decides whether the organizer is paid can be a Sputnik DAO: a group votes, and this contract adds no multisig of its own. Buyers read that account's name, and the DAO's rules, before paying. | Sputnik DAO, named accounts | `scripts/group-verifier.sh`; [`docs/proof-group-verifier.md`](docs/proof-group-verifier.md) |
+| `agents`, Agent Economy | An AI agent with its own account buys tickets priced in NEAR within spending caps, holds them, claims its own refunds and signs its entry pass. | Agent commerce | `mcp/src/policy.test.ts`, `mcp/src/tools.test.ts`; [`docs/mcp.md`](docs/mcp.md#verification) |
+
+Not used: NEAR Intents, Chain Signatures and meta transactions. NEAR Intents runs on mainnet only, and this project runs on testnet.
+
 ## Try it
 
 Each step says what to do and what you should see.
+
+**With nothing installed.** Two events stay on sale on the hosted app until 2026-11-26 00:00 UTC, so the purchase can be tried there:
+
+- Open [tixpact.vercel.app/events/13](https://tixpact.vercel.app/events/13), "Closing night", priced at 0.5 NEAR. You should see `On sale`, the verifier's account, the deadline and how much is reserved in the contract.
+- Press **Sign in to buy**, choose a testnet wallet (Meteor is the one we tried: [Limits](#limits), 10), then press **Buy for 0.5 NEAR**. You should see **Open ticket 13-N**, where N is the number of your ticket, and "Reserved in the contract" 0.5 NEAR higher.
+- [Event 14](https://tixpact.vercel.app/events/14), "Closing night in dollars", costs 10 tUSD: the page first offers to register your account with the token and to take test dollars from its faucet. We have not bought in tUSD from a browser wallet ourselves ([Limits](#limits), 10).
+
+Nobody will confirm these two events. Their deadline is 2026-11-26 02:00 UTC; after it, each holder claims the price back on the ticket's page. To watch a refund within minutes instead, run step 5, or create a short event of your own with [`scripts/demo-event.sh`](scripts/demo-event.sh).
+
+With the repository:
 
 1. **Open the web app.** With Node 22 and pnpm 10 (install lines in [Setup](#setup)):
 
@@ -82,7 +106,7 @@ Each step says what to do and what you should see.
    VITE_CONTRACT_ID=ticket-escrow-v2.testnet VITE_FAUCET_TOKENS=tusd.ticket-escrow-v2.testnet pnpm --filter @ticket-escrow/web dev
    ```
 
-   Open `http://localhost:5173`. You should see the events read from the contract above: at least "Jazz night", "Opening night", "Dollar night" (priced at 10 tUSD), "Direct calls", "Agent night" and "Jury night" (every run of step 5 adds one). Open one: the page shows the verifier's account, the deadline and how much is reserved in the contract. Open `/tickets/4-1`: where the money went, the history with the purchase by Ana, the transfer to Luis and the refund to Luis, and under "As wallets show it" the picture the contract draws for that state. Open `/proof`: the code hash, the access keys, and the balance next to what the contract holds, in NEAR and in tUSD, read from the chain.
+   Open `http://localhost:5173`. You should see the events read from the contract above: at least "Jazz night", "Opening night", "Dollar night" (priced at 10 tUSD), "Direct calls", "Agent night" and "Jury night" (every run of step 5 adds one), and the two still on sale, "Closing night" and "Closing night in dollars". Open one: the page shows the verifier's account, the deadline and how much is reserved in the contract. Open `/tickets/4-1`: where the money went, the history with the purchase by Ana, the transfer to Luis and the refund to Luis, and under "As wallets show it" the picture the contract draws for that state. Open `/proof`: the code hash, the access keys, and the balance next to what the contract holds, in NEAR and in tUSD, read from the chain.
 2. **Read the proof.** Open [`docs/proof.md`](docs/proof.md). Each row is one step of three stories played on testnet (an organizer who disappears; an event that is confirmed; an event priced in dollars), with the transaction link and the observed result. Open any link in the explorer and compare.
 3. **Check the deployment yourself.** With Node 22 and pnpm:
 
@@ -212,7 +236,7 @@ The caps do not bound what the agent spends over time: fund its account only wit
 | The contract, deployed on NEAR testnet, with the rules above enforced on chain. | The money: testnet NEAR from the faucet and `tUSD`, a test token we deployed that anyone can mint. Both are worth nothing. |
 | Every transaction in `docs/proof.md`; each can be opened in the explorer. | The people: organizer, verifier, Ana and Luis are accounts we created and played ourselves. |
 | The tests: a real local node, real deployments, real failed transfers. | The verifiers: accounts we hold. In the three stories the verifier is one account; in the [group proof](docs/proof-group-verifier.md) it is a DAO where two of three must vote, and all three are ours. |
-| The agent and the web app, both reading and writing that contract. The web app's signing was tried with one wallet, Meteor, on 2026-11-14 ([Limits](#limits), 10). | The time scale: demo events last minutes so a deadline can be watched. |
+| The agent and the web app, both reading and writing that contract. The web app's signing was tried with one wallet, Meteor, on 2026-11-14 ([Limits](#limits), 10). | The time scale: demo events last minutes so a deadline can be watched. The two left on sale for the judging days, events 13 and 14, are the exception. |
 
 Nothing in the product is decided by an AI or by a server of ours. There is no backend: the web reads the chain through public RPC endpoints.
 
@@ -313,7 +337,9 @@ near contract call-function as-read-only ticket-escrow-v2.testnet list_events js
 
 ## AI and third-party disclosure
 
+- **Hackathon window.** This is a new project. Its first commit is from 2026-11-12 and every commit falls inside the window (2026-10-19 to 2026-11-14), so there is no earlier code to tell apart.
 - **AI.** The code, tests and documents were written with Claude Code (Anthropic) working as a small team of agents under Walter Guzmán's direction: one integrator session, one session per track, and a separate reviewer session before each merge. Every review finding was checked against the code before it was applied. No AI runs inside the product.
+- **Templates and agent skills.** The sandbox test harness is the one `cargo near new` (cargo-near 0.23.0) generates; the contract crate was written by hand from that template and keeps none of its example code. Claude Code read the NEAR agent skills `near-smart-contracts`, `near-api-js` and `near-dapp` (`near/agent-skills`, pinned in `skills-lock.json`). The lint and TypeScript settings (`biome.json`, `tsconfig.base.json`) started from an earlier project of the same author.
 - **Contract.** `near-sdk` and `near-contract-standards` 5.30.1. Tests: `near-sandbox`, `near-api`, `cargo-near-build`, `tokio`, `testresult`.
 - **Web and client.** React, Vite, `near-api-js`, `@hot-labs/near-connect`, Zod; for the entry pass, `@noble/curves` and `@noble/hashes` (strict Ed25519 and SHA-256) and `uqr` (the QR code). Tests: Vitest, Testing Library, jsdom. Lint and format: Biome.
 - **Agent.** `@modelcontextprotocol/sdk`.
