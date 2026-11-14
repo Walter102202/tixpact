@@ -106,3 +106,6 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-13 | Version 2 goes to its own account, `ticket-escrow-v2.testnet`, with the test token `tUSD` as its only listed token; every proof is played again there | `2026-11-13-version-2-goes-to-its-own-account.md` |
 | 2026-11-13 | The home page lists the newest event first, so an event still on sale is not under the settled ones | `2026-11-13-web-newest-event-first.md` |
 | 2026-11-14 | The product, and the project in the hackathon submission, are called TixPact; identifiers stay `ticket-escrow` | `2026-11-14-the-product-name-is-tixpact.md` |
+| 2026-11-14 | The GitHub repository is `Walter102202/tixpact`; `Cargo.toml` keeps the old URL the deployed contract carries | `2026-11-14-the-repository-is-called-tixpact.md` |
+| 2026-11-14 | The web is hosted on Vercel at tixpact.vercel.app, deployed by hand from an export of `main`; pushes publish nothing | `2026-11-14-the-web-is-hosted-on-vercel.md` |
+| 2026-11-14 | `main` changes only through a pull request whose three CI jobs are green; nobody can bypass it | `2026-11-14-main-merges-only-through-a-green-pull-request.md` |

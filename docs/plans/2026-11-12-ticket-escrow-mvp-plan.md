@@ -610,7 +610,7 @@ Starts when W0 is on `main`. Enters the `agents` track of the hackathon only if 
 - [x] (2026-11-13: not done; Docker on the development machine has no WSL integration, so the README states the build is not reproducible-verified.) `cargo near build reproducible-wasm` and `near contract verify` if Docker cooperates within one hour; otherwise the README states the build is not reproducible-verified.
 - [ ] Final deployment to the account Walter names: deploy the released wasm, `new`, create the demo events, then delete every access key (Walter's explicit OK at that moment, it cannot be undone). `scripts/verify-deployment.mjs` (T23) prints zero keys and the code hash; both go in the README and the proof page.
   - 2026-11-13: the released wasm is on `ticket-escrow.testnet` (name chosen by the integrator, `docs/decisions/2026-11-13-the-release-goes-to-a-clean-account.md`), with the scenario, the direct calls and the agent runs replayed there. Still open: deleting its one access key, with Walter's explicit OK.
-- [ ] Full-history gitleaks pass, then Walter makes the repository public.
+- [x] Full-history gitleaks pass, then Walter makes the repository public (2026-11-14, `Walter102202/tixpact`).
 
 ---
 
