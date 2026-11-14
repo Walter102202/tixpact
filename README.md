@@ -68,7 +68,7 @@ Each problem, what the contract does about it, and the test that proves it:
 - **The token standards (NEP-141, 145).** Buying in dollars is one `ft_transfer_call` on the token: the token moves the price and calls this contract in the same transaction, and returns the money if the contract refuses. Refunds and payouts are transfers of the token, settled by the same private callbacks as NEAR.
 - **Storage staking.** State costs balance, so the organizer prepays a measured budget for the whole event and ticket money is never used for it.
 - **Structured events (NEP-297).** Every step logs an event (`ticket_escrow` 2.0.0).
-- **Low fees.** Each holder pays the fee of their own claim (measured per method in [`docs/gas.md`](docs/gas.md)), which is what makes "no operator, no batch payout" practical.
+- **Low fees.** Each holder pays the fee of their own claim, which is what makes "no operator, no batch payout" practical. In the testnet proof, buying a 0.5 NEAR ticket cost Ana 0.00043 NEAR in fees ([transaction](https://testnet.nearblocks.io/txns/ETNsctWkqPYnJLDbgt4SyL59HBipadY29Wzn33Xc5UBw)), giving it to Luis cost her 0.00037 NEAR ([transaction](https://testnet.nearblocks.io/txns/2E8ZuzKunYs35AZtKQBWBdRwMfPHY4amzWLsAoUh77TR)), and getting the 0.5 NEAR back cost Luis 0.0006 NEAR ([transaction](https://testnet.nearblocks.io/txns/38exzpdmQovUmE2h5ZqvzdUoNiBQ6RmuYC7qC9V3znhv)). The worst case of every method is in [`docs/gas.md`](docs/gas.md).
 - **A sandbox that controls time and state.** The tests move the clock past deadlines, delete accounts in the middle of a payment and force a balance shortfall.
 
 ## Try it
