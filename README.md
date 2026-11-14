@@ -276,6 +276,7 @@ corepack enable && pnpm install --frozen-lockfile
 bash scripts/gate.sh          # everything
 bash scripts/gate.sh web      # TypeScript only: lint, typecheck, tests, build
 bash scripts/gate.sh contract # Rust only: fmt, clippy, wasm build, unit and sandbox tests
+bash scripts/gate.sh contract-part gas # one of the four parts CI runs in parallel: checks, gas, storage, tokens
 ```
 
 The same script runs in CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). Exact versions and the commands used on testnet are in [`docs/toolchain.md`](docs/toolchain.md).

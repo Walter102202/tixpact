@@ -17,10 +17,16 @@ permissions:
   contents: read
 
 jobs:
-  contract:
-    name: contract (fmt, clippy, wasm build, sandbox tests)
+  # The contract gate in four parallel parts (scripts/gate.sh, "contract-part"). The sandbox tests
+  # are most of the time, and one runner runs their files one after another.
+  contract-part:
+    name: contract part (${{ matrix.part }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [checks, gas, storage, tokens]
     steps:
       - uses: actions/checkout@v4
 
@@ -30,7 +36,13 @@ jobs:
           rustup toolchain install || rustup show
           rustc --version
 
+      # One cache for all parts, saved only by `main`'s checks part, which builds every test
+      # binary. Branches and pull requests read it and save nothing: a copy per branch went over
+      # the repository's 10 GB, and GitHub evicted main's cache.
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: contract
+          save-if: ${{ github.ref == 'refs/heads/main' && matrix.part == 'checks' }}
 
       # The prebuilt cargo-near binary, pinned by version and verified against its published checksum.
       - name: Install cargo-near
@@ -48,12 +60,28 @@ jobs:
             cargo-near-x86_64-unknown-linux-gnu/cargo-near
           cargo near --version
 
-      - run: bash scripts/gate.sh contract
+      - run: bash scripts/gate.sh contract-part ${{ matrix.part }}
 
       # A NEAR account's code hash is the SHA-256 of its wasm. Printed so that anyone can compare
       # what this runner built with a deployment (scripts/verify-deployment.mjs prints it in base58).
       - name: Print the hash of the wasm this runner built
+        if: matrix.part == 'checks'
         run: sha256sum target/near/ticket_escrow/ticket_escrow.wasm
+
+  # The check the ruleset on `main` requires, under its old name: green only when every part is.
+  contract:
+    name: contract (fmt, clippy, wasm build, sandbox tests)
+    needs: contract-part
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Every part passed
+        env:
+          RESULT: ${{ needs.contract-part.result }}
+        run: |
+          echo "contract parts: $RESULT"
+          test "$RESULT" = success
 
   web:
     name: web (lint, typecheck, test, build)
