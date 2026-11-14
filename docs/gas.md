@@ -1,4 +1,4 @@
-# Gas and storage of the ticket escrow
+# Gas and storage of the TixPact contract
 
 Measured on 2026-11-13 in the local sandbox (`near-sandbox` 0.4.1), for contract v2 (events in NEAR or in a NEP-141 token). Two tests take the measurements, and each fails if a constant no longer matches them.
 

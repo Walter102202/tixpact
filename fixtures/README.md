@@ -1,6 +1,6 @@
 # Test fixtures
 
-Contracts that exist only to test the ticket escrow in the sandbox. They are never deployed anywhere else.
+Contracts that exist only to test the TixPact contract in the sandbox. They are never deployed anywhere else.
 
 Each fixture is its own crate in a folder here and joins the workspace automatically (`fixtures/*` in the root `Cargo.toml`).
 

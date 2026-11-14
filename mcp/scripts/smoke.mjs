@@ -45,7 +45,7 @@ for (const name of PASSED_ON) {
 }
 const signing = Boolean(env.AGENT_PRIVATE_KEY);
 
-const client = new Client({ name: 'ticket-escrow-smoke', version: '0.1.0' });
+const client = new Client({ name: 'tixpact-smoke', version: '0.1.0' });
 const transport = new StdioClientTransport({
   command: process.execPath,
   args: [entry],

@@ -52,7 +52,7 @@ The server is started by the MCP client, which launches `node <repo>/mcp/dist/bi
 Read-only (form from `claude mcp add --help`, Claude Code 2.1.323: `claude mcp add [options] <name> <commandOrUrl> [args...]`, `-e KEY=value`, scope `local` by default):
 
 ```text
-claude mcp add ticket-escrow -e CONTRACT_ID=<contract>.testnet -- node /absolute/path/to/repo/mcp/dist/bin/serve.js
+claude mcp add tixpact -e CONTRACT_ID=<contract>.testnet -- node /absolute/path/to/repo/mcp/dist/bin/serve.js
 ```
 
 To sign, do not pass the key with `-e`: Claude Code stores those values in its configuration file in plain text. Start the server through a launcher that reads the key from the near-cli keychain (`~/.near-credentials/testnet/<account>.json`) each time:
@@ -67,7 +67,7 @@ exec node /absolute/path/to/repo/mcp/dist/bin/serve.js
 ```
 
 ```text
-claude mcp add ticket-escrow -e CONTRACT_ID=<contract>.testnet -e AGENT_ACCOUNT_ID=<agent>.testnet -e MAX_PRICE_YOCTO=1500000000000000000000000 -e MAX_EXPOSURE_YOCTO=5000000000000000000000000 -- bash /absolute/path/to/agent-server.sh
+claude mcp add tixpact -e CONTRACT_ID=<contract>.testnet -e AGENT_ACCOUNT_ID=<agent>.testnet -e MAX_PRICE_YOCTO=1500000000000000000000000 -e MAX_EXPOSURE_YOCTO=5000000000000000000000000 -- bash /absolute/path/to/agent-server.sh
 ```
 
 Then open a new Claude Code session in the same folder and ask it to list the events.

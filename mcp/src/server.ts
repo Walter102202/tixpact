@@ -7,7 +7,7 @@ import { registerTools } from './tools.js';
 
 const { version } = createRequire(import.meta.url)('../package.json') as { version: string };
 
-export const SERVER_NAME = 'ticket-escrow-agent';
+export const SERVER_NAME = 'tixpact-agent';
 
 function instructions(deps: AgentDeps): string {
   const { config } = deps;

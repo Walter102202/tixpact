@@ -1,4 +1,4 @@
-# Ticket Escrow on NEAR
+# TixPact
 
 **Event tickets whose refund does not depend on the seller.**
 
@@ -6,7 +6,7 @@ The price of each ticket stays reserved in a NEAR contract until a verifier, agr
 
 Why NEAR: the verifier is an account name a buyer can read before paying, the contract's keys can be deleted so that nobody can change it afterwards, and fees are low enough for each holder to claim their own refund ([more](#what-near-does-here)).
 
-Built at NEAR HACKATHON 2026. It runs on **testnet**, it is **not audited**, and it must not hold real money. In the web app the product is called TixPact.
+Built at NEAR HACKATHON 2026. It runs on **testnet**, it is **not audited**, and it must not hold real money. The code, the contract and its testnet accounts are named `ticket-escrow`.
 
 | | |
 |---|---|

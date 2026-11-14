@@ -162,7 +162,7 @@ export function AgentTerminal() {
               <i />
               <i />
             </span>
-            <span>ticket-escrow-agent · te-d1-agent.testnet</span>
+            <span>tixpact-agent · te-d1-agent.testnet</span>
           </div>
           <div
             className="term-body"
