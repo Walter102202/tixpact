@@ -11,7 +11,7 @@ Built at NEAR HACKATHON 2026. It runs on **testnet**, it is **not audited**, and
 | | |
 |---|---|
 | Contract (testnet) | [`ticket-escrow-v2.testnet`](https://testnet.nearblocks.io/address/ticket-escrow-v2.testnet) |
-| Access keys of the contract account | 1. Whoever holds it can replace the code; with zero keys nobody can. The proof page and `scripts/verify-deployment.mjs` count them from the chain. |
+| Access keys of the contract account | 0: the last one was deleted on 2026-11-14 ([transaction](https://testnet.nearblocks.io/txns/65rg5T8qQXrtDFjmxCSmCMqfohTk46KycWRVSH9bN1kQ)), so nobody can replace the code. The proof page and `scripts/verify-deployment.mjs` count them from the chain. |
 | Dollar token it accepts (testnet) | [`tusd.ticket-escrow-v2.testnet`](https://testnet.nearblocks.io/address/tusd.ticket-escrow-v2.testnet): `tUSD`, a test dollar anyone can mint, worth nothing |
 | Web app (testnet) | [tixpact.vercel.app](https://tixpact.vercel.app), reading the contract above. To run it locally: [Try it](#try-it), step 1. |
 | Every claim below, with its transaction | [`docs/proof.md`](docs/proof.md) |
@@ -88,10 +88,10 @@ Each step says what to do and what you should see.
 
    ```bash
    pnpm install --frozen-lockfile && pnpm --filter @ticket-escrow/client build
-   node scripts/verify-deployment.mjs ticket-escrow-v2.testnet --allow-keys --tokens tusd.ticket-escrow-v2.testnet
+   node scripts/verify-deployment.mjs ticket-escrow-v2.testnet --tokens tusd.ticket-escrow-v2.testnet
    ```
 
-   You should see the code hash, `Access keys     1`, the balance next to the principal held, the same for the token (`Registered      yes`, its balance next to the `tUSD` held), and a final line starting with `OK with --allow-keys`. The script signs nothing. Without `--allow-keys` it ends with `NOT VERIFIED` and exits non-zero while the account has any key; it also fails if the contract is a test build or holds less than it owes.
+   You should see the code hash, `Access keys     0`, the balance next to the principal held, the same for the token (`Registered      yes`, its balance next to the `tUSD` held), and the final line `OK: nobody holds a key to this contract and its balance covers what it holds.` The script signs nothing. It ends with `NOT VERIFIED` and exits non-zero if the account has any key, if the contract is a test build, or if it holds less than it owes.
 4. **Run every test.** On Linux, macOS or WSL (see [Setup](#setup)):
 
    ```bash
