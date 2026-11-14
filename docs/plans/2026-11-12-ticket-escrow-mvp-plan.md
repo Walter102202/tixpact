@@ -600,6 +600,7 @@ Starts when W0 is on `main`. Enters the `agents` track of the hackathon only if 
 - [x] `docs/design.md`: the rules, state machines, accounting and decisions in English, derived from the spec without its market and naming sections.
 - [x] `scripts/direct-calls.sh` (T20, run on testnet 2026-11-12 and again on the C4 build on 2026-11-13) and a "If the website is down" section in the README.
 - [ ] Hosted web on Vercel or Cloudflare Pages (Walter's account), kept up until 2026-11-25.
+  - 2026-11-14: hosted on Vercel at https://tixpact.vercel.app (project `tixpact`). Left unticked until it has stayed up through 2026-11-25.
 
 ### Task I3: hardening and the final deployment (Saturday morning)
 

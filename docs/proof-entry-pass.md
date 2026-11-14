@@ -121,6 +121,6 @@ Both were checked while the pass was still fresh; the `fresh` line is left out h
 
 - A pass made with the NEAR CLI alone, with no code of ours touching a key, is admitted by our checker: the format is the standard one.
 - The verdict depends on the chain at the moment of the check, not on what the pass says about itself.
-- It does not show a pass signed by a browser wallet or scanned by a phone's camera: neither has been walked through yet. In the web app's demo mode the pass is signed with a built-in demo key ([README, "Try it", step 7](../README.md#try-it)).
+- It does not show a pass signed by a browser wallet. One was walked through by hand on 2026-11-14 with Meteor Wallet on the hosted site, and the door page answered "Admit" ([README, Limits, 10](../README.md#limits)); it is not recorded here. A pass scanned by a phone's camera has not been tried. In the web app's demo mode the pass is signed with a built-in demo key ([README, "Try it", step 7](../README.md#try-it)).
 - The accounts are ours. The other refusals (a refunded ticket, a ticket given away after signing, a deleted key, a function-call key, a forged signature for a small-order key) are tested in `packages/client/src/pass.test.ts`, not played here.
 - The agent's own pass, signed with its key and checked the same way, is in [`docs/mcp.md`](mcp.md), under "Verification".
