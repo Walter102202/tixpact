@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Typed reader, action builders, schemas and shared strings for the ticket escrow contract.",
+  "description": "Typed reader, action builders, schemas and shared strings for the TixPact contract.",
   "exports": {
     ".": {
       "development": "./src/index.ts",
