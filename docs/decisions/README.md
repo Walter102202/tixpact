@@ -109,3 +109,4 @@ Add one line per record at the end of the table (the file merges by union, so tw
 | 2026-11-14 | The GitHub repository is `Walter102202/tixpact`; `Cargo.toml` keeps the old URL the deployed contract carries | `2026-11-14-the-repository-is-called-tixpact.md` |
 | 2026-11-14 | The web is hosted on Vercel at tixpact.vercel.app, deployed by hand from an export of `main`; pushes publish nothing | `2026-11-14-the-web-is-hosted-on-vercel.md` |
 | 2026-11-14 | `main` changes only through a pull request whose three CI jobs are green; nobody can bypass it | `2026-11-14-main-merges-only-through-a-green-pull-request.md` |
+| 2026-11-14 | CI runs the contract gate in four parallel parts under the same required check; only `main` saves the Rust cache | `2026-11-14-ci-runs-the-contract-gate-in-four-parts.md` |
