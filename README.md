@@ -13,7 +13,7 @@ Built at NEAR HACKATHON 2026. It runs on **testnet**, it is **not audited**, and
 | Contract (testnet) | [`ticket-escrow-v2.testnet`](https://testnet.nearblocks.io/address/ticket-escrow-v2.testnet) |
 | Access keys of the contract account | 1. Whoever holds it can replace the code; with zero keys nobody can. The proof page and `scripts/verify-deployment.mjs` count them from the chain. |
 | Dollar token it accepts (testnet) | [`tusd.ticket-escrow-v2.testnet`](https://testnet.nearblocks.io/address/tusd.ticket-escrow-v2.testnet): `tUSD`, a test dollar anyone can mint, worth nothing |
-| Hosted demo | None. Run it locally: [Try it](#try-it), step 1. |
+| Web app (testnet) | [tixpact.vercel.app](https://tixpact.vercel.app), reading the contract above. To run it locally: [Try it](#try-it), step 1. |
 | Every claim below, with its transaction | [`docs/proof.md`](docs/proof.md) |
 | How it works and why | [`docs/design.md`](docs/design.md) |
 | Every way to cheat we could think of | [`docs/threat-model.md`](docs/threat-model.md) |
