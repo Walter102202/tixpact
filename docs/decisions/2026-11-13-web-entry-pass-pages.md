@@ -26,3 +26,4 @@ Task P2 asks for "Show entry pass" on the ticket page, a pass view with a QR cod
 
 - The browser history holds pass links. Each expires five minutes after signing.
 - Not verified here: a real wallet's `signMessage` (Meteor, Intear). The fixture wallet and a fake near-connect wallet cover the code paths; the near-cli-rs vector covers the signature format. Walter's rehearsal is the first real-wallet run.
+  - 2026-11-14: Meteor Wallet's `signMessage` was tried by hand on the hosted site and the door page answered "Admit" ([README, Limits, 10](../../README.md#limits)). Intear's was not tried.
