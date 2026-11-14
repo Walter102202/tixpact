@@ -148,7 +148,7 @@ On testnet the token is `tUSD`, a test dollar that anyone can mint from its fauc
 - **Signed messages (NEP-413).** A holder proves they hold a ticket by signing a message with their wallet, off chain and for free; anyone can check it against the chain. That is the entry pass.
 - **Storage staking.** State costs balance, so the organizer prepays a measured budget and ticket money is never used for it.
 - **Structured events (NEP-297).** Every step logs an event (`ticket_escrow` v2.0.0), so an indexer could rebuild the whole history; the web does not need one.
-- **Fees low enough to act alone.** Each holder pays the network fee of their own claim (measured per method in `docs/gas.md`), which is what makes "no batch payout, no operator" practical.
+- **Fees low enough to act alone.** Each holder pays the network fee of their own claim, which is what makes "no batch payout, no operator" practical. On testnet a 0.5 NEAR refund cost its holder 0.0006 NEAR (`docs/proof.md`, step A9); the worst case of every method is in `docs/gas.md`.
 - **A sandbox that controls time and state.** The tests move the block time past deadlines, delete accounts mid-flow and force a balance shortfall, so the failure paths above are exercised, not argued.
 
 ## Decisions and what they cost
