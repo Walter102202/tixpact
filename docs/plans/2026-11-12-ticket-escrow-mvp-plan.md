@@ -20,7 +20,7 @@
 - All committed text in English (code, comments, README, UI copy, docs). Walter's chat language is Spanish.
 - Repository: GitHub `Walter102202/<name>` private until Saturday morning, then public with an MIT `LICENSE`. Every commit is pushed to its branch immediately. No force-push, nothing deleted (branches, worktrees, files, accounts, keys) without Walter's written OK in the chat.
 - `.gitignore` from the first commit: `proyecto_entradas_near_diseno_y_fuentes.md`, `docs/hackathon/`, `.claude/settings.local.json`, `.claude/worktrees/`, `.env`, `.env.*` (except `.env.example`), `.playwright-mcp/`, `node_modules/`, `dist/`, `target/`, `coverage/`, `.data/`, `neardev/`. Keys live in the WSL legacy keychain (`~/.near-credentials`) or in `.env`, never in the repository or in a report.
-- Names: the product name is not decided. Code is name-agnostic (crate `ticket-escrow`, packages `@ticket-escrow/*`, NEP-297 standard `ticket_escrow`). The display name comes from one constant, `APP_NAME` in `packages/client/src/brand.ts`, working value `TixPact`.
+- Names: the product is called TixPact (decided 2026-11-14, `docs/decisions/2026-11-14-the-product-name-is-tixpact.md`). Code is name-agnostic (crate `ticket-escrow`, packages `@ticket-escrow/*`, NEP-297 standard `ticket_escrow`). The display name comes from one constant, `APP_NAME` in `packages/client/src/brand.ts`, value `TixPact`.
 - Libraries, templates and AI assistance are listed in the README (hackathon rule Q-005).
 - Limits (spec 11.5): capacity 1–100 per event, pages of at most 50, title and venue at most 120 bytes each, references at most 256 bytes, `memo` 256 and `msg` 1024 bytes, 16 history entries per ticket.
 
